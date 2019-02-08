@@ -329,11 +329,12 @@ class hst123(object):
         if h.data is not None and 'EXTNAME' in h.header:
           if h.header['EXTNAME'] == 'SCI':
             w = WCS(h.header,hdu)
-            pixcrd = w.all_world2pix(np.array([float(self.ra)]),np.array([float(self.dec)]),1)
+            world_coord = np.array([[float(self.ra),float(self.dec)]])
+            pixcrd = w.wcs_world2pix(world_coord,1)
             if (pixcrd[0][0] > 0 and
-                pixcrd[1][0] > 0 and
+                pixcrd[0][1] > 0 and
                 pixcrd[0][0] < h.header['NAXIS1'] and
-                pixcrd[1][0] < h.header['NAXIS2']):
+                pixcrd[0][1] < h.header['NAXIS2']):
                 is_not_hst_image = True
       if not is_not_hst_image:
         return False
