@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# CDK v1.00: 2019-02-07
+#
+# hst123.py: An all-in-one pipeline for downloading,
+# registering, drizzling, and preparing HST data for
+# dolphot reductions
+#
 # Python 2/3 compatibility
 from __future__ import print_function # to use print() as a function in Python 2
 
@@ -15,8 +21,11 @@ from drizzlepac import tweakreg,astrodrizzle
 from contextlib import contextmanager
 from astroscrappy import detect_cosmics
 import numpy as np
+
+# Suppresses warnings
 warnings.filterwarnings('ignore')
 
+# Suppresses output when loading iraf
 @contextlib.contextmanager
 def nostdout():
     save_stdout = sys.stdout
@@ -71,21 +80,30 @@ global_defaults = {'template_image': None,
                                'InterpPSFlib': 1,
                                'AlignOnly': 1}}
 
-instrument_defaults = {'wfc3': {'env_ref': 'iref', 'group': '',
-                                'driz_bits': 0, 'pixel_scale': 0.04,
-                                'input_files': '*_flt.fits',
-                                'crpars': {'rdnoise': 6.5, 'gain': 1.0, 'saturation': 70000.0,
-                                           'sig_clip': 4.0, 'sig_frac': 0.2, 'obj_lim': 6.0}},
-                       'acs': {'env_ref': 'jref', 'group': '', 'driz_bits': 0,
-                                'pixel_scale': 0.05,
+instrument_defaults = {'wfc3': {'env_ref': 'iref',
+                                'ftp_server': 'ftp://ftp.stsci.edu/cdbs/iref/',
+                                'driz_bits': 0,
+                                'pixel_scale': 0.04,
+                                'crpars': {'rdnoise': 6.5,
+                                           'gain': 1.0,
+                                           'saturation': 70000.0,
+                                           'sig_clip': 4.0,
+                                           'sig_frac': 0.2,
+                                           'obj_lim': 6.0}},
+                       'acs': {'env_ref': 'jref',
+                               'ftp_server': 'ftp://ftp.stsci.edu/cdbs/jref/',
+                               'driz_bits': 0,
+                               'pixel_scale': 0.05,
                                'crpars': {'rdnoise': 6.5,
                                           'gain': 1.0,
                                           'saturation': 70000.0,
                                           'sig_clip': 3.0,
                                           'sig_frac': 0.1,
                                           'obj_lim': 5.0}},
-                       'wfpc2': {'env_ref': 'uref', 'group':'', 'driz_bits':0,
-                                 'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
+                       'wfpc2': {'env_ref': 'uref',
+                                 'ftp_server': 'ftp://ftp.stsci.edu/cdbs/uref/',
+                                 'driz_bits': 0,
+                                 'pixel_scale': 0.046,
                                  'crpars': {'rdnoise': 10.0,
                                             'gain': 7.0,
                                             'saturation': 27000.0,
@@ -101,7 +119,7 @@ detector_defaults = {'wfc3_uvis': {'nx': 5200, 'ny': 5200, 'input_files': '*_flc
                                    'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
                                                'RPSF': 10, 'RSky': '15 35',
                                                'RSky2': '3 6'}},
-                     'wfc3_ir': {'driz_bits': 512, 'nx': 5200,
+                     'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'input_files': '*_flt.fits',
                                   'ny': 5200, 'pixel_scale': 0.09,
                                  'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                                  'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -120,7 +138,7 @@ detector_defaults = {'wfc3_uvis': {'nx': 5200, 'ny': 5200, 'input_files': '*_flc
                                  'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
                                              'RPSF': 10, 'RSky': '15 35',
                                              'RSky2': '3 6'}},
-                     'wfpc2_wfpc2': {'nx': 5200, 'ny': 5200,
+                     'wfpc2_wfpc2': {'nx': 5200, 'ny': 5200, 'input_files': '*_c0m.fits',
                                      'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                                      'sigma_low': 2.25, 'sigma_high': 2.00},
                                      'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
@@ -180,7 +198,6 @@ class hst123(object):
       self.cen_coord = None
       self.ref_coord = None
 
-      self.pattern = ['*c1m.fits','*c0m.fits','*flc.fits','*flt.fits']
       self.good_detector = ['WFPC2/WFC','PC/WFC',
                             'ACS/WFC','ACS/HRC',
                             'ACS/SBC','WFC3/UVIS',
@@ -223,8 +240,6 @@ class hst123(object):
     for f in self.input_images:
       if not os.path.isfile(self.raw_dir+f):
         shutil.copy(f, self.raw_dir)
-      #else:
-        #shutil.copy(self.raw_dir+f,f)
 
   # Sanitizes template header, gets rid of
   # multiple extensions and only preserves
@@ -296,15 +311,37 @@ class hst123(object):
 
   def needs_to_be_reduced(self,image):
     hdu = fits.open(image, mode='readonly')
+    is_not_hst_image = False
+    detector = ''
     instrument = hdu[0].header['INSTRUME'].lower()
-    # Short exposure images usually aren't worth analyzing
+    if ('DETECTOR' in hdu[0].header.keys()):
+      detector = hdu[0].header['DETECTOR'].lower()
+
+    # Get rid of exposures with exptime < 20s
     exptime = hdu[0].header['EXPTIME']
     if (exptime < 20):
       return False
-    try:
-      detector = hdu[0].header['DETECTOR']
-    except:
-      detector = ''
+
+    # Get rid of data where the input coordinates do
+    # not land in any of the sub-images
+    if (self.ra is not None and self.dec is not None):
+      for h in hdu:
+        if h.data is not None and 'EXTNAME' in h.header:
+          if h.header['EXTNAME'] == 'SCI':
+            w = WCS(h.header,hdu)
+            pixcrd = w.all_world2pix(np.array([float(self.ra)]),np.array([float(self.dec)]),1)
+            if (pixcrd[0][0] > 0 and
+                pixcrd[1][0] > 0 and
+                pixcrd[0][0] < h.header['NAXIS1'] and
+                pixcrd[1][0] < h.header['NAXIS2']):
+                is_not_hst_image = True
+      if not is_not_hst_image:
+        return False
+
+    # Get rid of images that don't match one of the
+    # allowed instrument/detector types and images
+    # whose extensions don't match the allowed type
+    # for those instrument/detector types
     is_not_hst_image = False
     if (instrument.upper() == 'WFPC2' and 'c0m.fits' in image):
         is_not_hst_image = True
