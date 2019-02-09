@@ -189,6 +189,14 @@ class hst123(object):
                       'instrument_defaults': instrument_defaults,
                       'subarray_defaults': subarray_defaults}
 
+      # Complete list of pipeline products in case
+      # they need to be cleaned at start
+      self.pipeline_products = ['*chip?.fits','*chip?.sky.fits',
+                                '*rawtmp.fits','*drz.fits','*drz.sky.fits',
+                                '*idc.fits','*dxy.fits','*off.fits',
+                                '*d2im.fits','*d2i.fits','*npl.fits',
+                                'dp*','*.log','*.output']
+
       self.ra = None
       self.dec = None
 
@@ -201,7 +209,7 @@ class hst123(object):
       self.good_detector = ['WFPC2/WFC','PC/WFC',
                             'ACS/WFC','ACS/HRC',
                             'ACS/SBC','WFC3/UVIS',
-                            'WFC3/IR']
+                            'WFC3/IR','WFPC2/PC']
 
       self.download_uri = 'https://mast.stsci.edu/api/v0/download/file?uri='
 
@@ -234,12 +242,49 @@ class hst123(object):
                           help='Overwrite files when using download mode.')
         return(parser)
 
-  def copy_raw_data(self):
-    if not os.path.exists(self.raw_dir):
-      os.mkdir(self.raw_dir)
-    for f in self.input_images:
-      if not os.path.isfile(self.raw_dir+f):
-        shutil.copy(f, self.raw_dir)
+  # Make sure all standard output is
+  # formatted in the same way with banner
+  # messages for each module
+  def make_banner(self, message):
+    n = 80
+    print('')
+    print('')
+    print(message)
+    # Print part below the message in the banner
+    print('#' * n)
+    print('#' * n)
+    print('')
+    print('')
+
+
+  def copy_raw_data(self, reverse = False):
+    # reverse = False will simply backup data
+    # in the working directory to the raw dir
+    if not reverse:
+      if not os.path.exists(self.raw_dir):
+        os.mkdir(self.raw_dir)
+      for f in self.input_images:
+        if not os.path.isfile(self.raw_dir+f):
+          shutil.copy(f, self.raw_dir)
+    # reverse = True will copy files from the
+    # raw dir to the working directory if the
+    # working files are different from the raw
+    # dir.  This is necessary for the pipeline
+    # to work properly, as some procedures
+    # (esp. WCS checking, tweakreg, astrodrizzle)
+    # require un-edited files.
+    else:
+      for file in glob.glob(hst.raw_dir+'*.fits'):
+        path, base = os.path.split(file)
+        if filecmp.cmp(file,base):
+          message = '{file} and {base} are identical'
+          print(message.format(file=file,base=base))
+          continue
+        else:
+          message = '{file} and {base} are identical'
+          print(message.format(file=file,base=base))
+          shutil.copy(file, base)
+        os.chmod(base,0775)
 
   # Sanitizes template header, gets rid of
   # multiple extensions and only preserves
@@ -299,8 +344,9 @@ class hst123(object):
 
   def parse_center_coord(self):
     if (not self.ra or not self.dec):
-      print('No input RA or DEC!')
-      sys.exit()
+      error = 'ERROR: Cannot parse coordinates.  No input ra or dec'
+      print(error)
+      sys.exit(2)
 
     if (':' in self.ra and ':' in self.dec):
       # Input RA/DEC are sexagesimal
@@ -381,8 +427,8 @@ class hst123(object):
     cmd = 'sky2xy {image} {ra} {dec}'.format(image=image,ra=ra,dec=dec)
     result = subprocess.check_output(cmd, shell=True)
     if ('off image' in result):
-        print('{image} does not contain RA={ra}, DEC={dec}!'.format(image=image,
-                                                                    ra=ra,dec=dec))
+        message = '{image} does not contain ra={ra}, dec={dec}'
+        print(message.format(image=image,ra=ra,dec=dec))
         return False
     else:
         return True
@@ -468,7 +514,8 @@ class hst123(object):
   def get_calcsky_parameters(self,image, options):
     instrument_string = self.get_instrument(image)
     detector_string = '_'.join(instrument_string.split('_')[:2])
-    print('Getting calcsky parameters for:',detector_string)
+    message = 'Getting calcsky parameters for: {detector}'
+    print(message.format(detector = detector_string))
     return options[detector_string]['dolphot_sky']
 
   def generate_base_param_file(self,param_file,options):
@@ -505,7 +552,8 @@ class hst123(object):
     # If we haven't defined input images yet,
     # we want to return something to signify
     if not self.input_images:
-        print('No input images!!!')
+        warning = 'WARNING: No input images.'
+        print(warning)
         return None
     else:
         # List of best filters roughly in the order I would
@@ -588,7 +636,8 @@ class hst123(object):
             reference_images.append(im)
         best_filt,best_inst = best_filt_inst.split('_')
         output_name = best_inst+'_'+best_filt+'_drz.fits'
-        print('Reference file will be: ',output_name)
+        message = 'Reference image name will be: {template}'
+        print(message.format(template=output_name))
         self.reference_image_name = output_name
 
         self.run_tweakreg(reference_images,'',self.options['global_defaults'])
@@ -653,7 +702,8 @@ class hst123(object):
           new_val = val.split('$')[1]
           if not os.path.exists(new_val):
             url = options['ftp_'+ref+'_server'] + new_val
-            print('Downloading file: ',url)
+            message = 'Downloading file: {url}'
+            print(message.format(url=url))
             urllib.urlretrieve(url,new_val)
             urllib.urlcleanup()
           exts = [0,1]
@@ -685,7 +735,8 @@ class hst123(object):
 
   # Run cosmic ray clean
   def run_cosmic(self,image,options,output=None):
-    print('Cleaning cosmic rays in image: ',image)
+    message = 'Cleaning cosmic rays in image: {image}'
+    print(message.format(image=image))
     hdulist = fits.open(image,mode='readonly')
 
     for hdu in hdulist:
@@ -712,26 +763,11 @@ class hst123(object):
   def run_tweakreg(self,images,template,options):
 
     run_images = images[:]
-    # Check if images have already been run through
-    # tweakreg.  Could already have tweaked WCS param
-    #remove_images = []
-    #for image in images:
-    #  try:
-    #    hdr = fits.open(image)['SCI'].header
-    #    keys = hdr.keys()
-    #    if ('WCSNAME' in keys):
-    #      if (hdr['WCSNAME'] == 'TWEAK'):
-    #        # tweakreg has already been run, remove image
-    #        remove_images.append(image)
-    #  except:
-    #    print('Something went wrong checking ',image)
-
-    #for image in remove_images:
-    #  run_images.remove(image)
 
     # Check if we just removed all of the images
     if (len(run_images) == 0):
-      print('All images have been run through tweakreg!')
+      warning = 'WARNING: All images have been run through tweakreg'
+      print(warning)
       return(1)
 
     for image in run_images:
@@ -754,9 +790,10 @@ class hst123(object):
       shutil.copy(images[0],'dummy.fits')
       template = 'dummy.fits'
 
-    print('Executing tweakreg with images: ',run_images)
-    print('Template image: ',template)
-    print('Tweakreg is executing...')
+    message = 'Executing tweakreg with images: {images} \n'
+    message += 'Template image: {template} \n'
+    message += 'Tweakreg is executing...'
+    print(message.format(images = run_images, template = template))
     start_tweak = time.time()
     tweakreg.TweakReg(files = run_images, refimage = template, verbose=False,
             interactive=False, clean=True, writecat = False, updatehdr=True,
@@ -767,7 +804,8 @@ class hst123(object):
             refimagefindcfg = {'threshold': options['tweakshifts_threshold'],
                 'use_sharp_round': True})
 
-    print('Tweakreg took',time.time()-start_tweak,'seconds to execute.')
+    message = 'Tweakreg took {time} seconds to execute'
+    print(message.format(time = time.time()-start_tweak))
 
     for image in run_images:
         if (image == template or 'wfc3_ir' in self.get_instrument(image)):
@@ -799,13 +837,17 @@ class hst123(object):
     detmask = [any(l) for l in list(map(list,zip(*detmask)))]
     rightmask = obsTable['dataRights'] == 'PUBLIC'
 
-    good = [a and b and c and d for a,b,c,d in zip(colmask,immask,detmask,rightmask)]
+    good = [all(l) for l in zip(colmask,immask,detmask,rightmask)]
     obsTable = obsTable[good]
 
     for obs in obsTable:
       productList = Observations.get_product_list(obs)
       for prod in productList:
         filename = prod['productFilename']
+        if (os.path.isfile(filename) and not self.clobber):
+          message = '{file} already exists and clobber = False. Skipping...'
+          print(message.format(file = filename))
+          continue
         if ('c0m.fits' in filename or
             'c1m.fits' in filename or
             'flt.fits' in filename or
@@ -813,11 +855,8 @@ class hst123(object):
             obsid = prod['obsID']
             uri = prod['dataURI']
 
-            if (os.path.isfile(filename) and not self.clobber):
-              print(filename,'already exists and clobber is False')
-              continue
-
-            print('Trying to download: ',filename)
+            message = 'Trying to download {file}'
+            print(message.format(file = filename))
 
             url = self.download_uri + uri
             utils.data.clear_download_cache()
@@ -826,21 +865,19 @@ class hst123(object):
                   cache=False,show_progress=False,timeout=120)
               shutil.move(dat,filename)
             except:
-              print('Timed out when downloading',filename)
+              warning = 'WARNING: timed out when downloading {file}'
+              print(warning.format(file = filename))
 
 
 if __name__ == '__main__':
 
     start = time.time()
-    print('Starting hst123...')
-    print('###################################')
-    print('###################################')
-    print('')
-    print('')
     time.sleep(1)
 
     usagestring='USAGE: hst123.py'
     hst = hst123()
+    banner = 'Starting hst123.py'
+    hst.make_banner(banner)
     parser = hst.add_options(usage=usagestring)
     options, args = parser.parse_args()
 
@@ -852,56 +889,37 @@ if __name__ == '__main__':
 
     if (options.download):
       if (not hst.ra or not hst.dec):
-        print('hst123.py needs input ra and dec for the download option!')
+        error = 'ERROR: hst123.py needs input ra and dec for the download option.'
+        print(error)
         sys.exit(2)
       else:
-        print('Downloading HST data from MAST for ra=',hst.ra,'dec=',hst.dec)
-        print('###################################')
-        print('###################################')
-        print('')
-        print('')
+        banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}'
+        hst.make_banner(banner.format(ra = hst.ra, dec = hst.dec))
         hst.download_files()
 
     if (options.makeclean):
-      print('Cleaning output from previous runs of hst123')
-      print('###################################')
-      print('###################################')
-      print('')
-      print('')
-      os.system('rm -rf '+hst.dolphot_param_file)
-      os.system('rm -rf *chip?.fits *chip?.sky.fits')
-      os.system('rm -rf *rawtmp.fits')
-      os.system('rm -rf *drz.fits *drz.sky.fits')
-      os.system('rm -rf *idc.fits *dxy.fits *off.fits *d2im.fits')
-      os.system('rm -rf *d2i.fits *npl.fits')
-      os.system('rm -rf dp*')
-      os.system('rm -rf *.log *.output')
-      for file in glob.glob(hst.raw_dir+'*.fits'):
-        path, base = os.path.split(file)
-        if filecmp.cmp(file,base):
-          print('{file} and {base} are identical'.format(file=file,base=base))
-          continue
-        else:
-          print('Copying {file} to {base}'.format(file=file,base=base))
-          shutil.copy(file, base)
-        os.chmod(base,0775)
-      sys.exit(0)
+      banner = 'Cleaning output from previous runs of hst123'
+      hst.make_banner(banner)
+      for pattern in hst.pipeline_products:
+        for file in glob.glob(pattern):
+          os.remove(file)
+      hst.copy_raw_data(reverse = True)
 
-    # Unzip input_images
+    # Unzip any .fits.gz images
     if (len(glob.glob(hst.input_root_dir+'*.fits.gz')) != 0):
       os.system('gunzip '+hst.input_root_dir+'*.fits.gz')
 
     # Get input images
     hst.input_images = hst.get_input_images()
 
-    print('Copying raw data into raw data folder: ',hst.raw_dir)
-    print('###################################')
-    print('###################################')
-    print('')
-    print('')
-
     # Make raw/ in current dir and copy files into raw/
+    # then copy un-edited versions of files back into
+    # working dir
+    banner = 'Copying raw data to and re-copying from raw data folder: {dir}'
+    hst.make_banner(banner.format(dir = hst.raw_dir))
     hst.copy_raw_data()
+    hst.copy_raw_data(reverse = True)
+
 
     # Check which are HST images that need to be reduced
     remove_list = []
@@ -915,42 +933,41 @@ if __name__ == '__main__':
     for file in remove_list:
       hst.input_images.remove(file)
 
+    if len(hst.input_images) == 0:
+      error = 'ERROR: No input images.  Exiting...'
+      print(error)
+      sys.exit(1)
+
+    # If not reference image was provided then make one
     if not hst.reference_image_name:
-      print('No reference image was provided.')
-      print('Generating reference image from input files.')
-      print('###################################')
-      print('###################################')
-      print('')
-      print('')
+      banner = 'No reference image was provided. Generating reference image from input files.'
+      hst.make_banner(banner)
       hst.pick_reference()
 
-    print('Sanitizing reference image:',hst.reference_image_name)
-    print('###################################')
-    print('###################################')
-    print('')
-    print('')
+    # Sanitize extensions and header variables in reference
+    banner = 'Sanitizing reference image: {image}'
+    hst.make_banner(banner.format(image = hst.reference_image_name))
     hst.sanitize_template(hst.reference_image_name)
 
-    print('Running main tweakreg')
-    print('###################################')
-    print('###################################')
-    print('')
-    print('')
+    # Run main tweakreg to register to the reference
+    banner = 'Running main tweakreg'
+    hst.make_banner(banner)
     hst.run_tweakreg(hst.input_images,
                      hst.reference_image_name,
                      hst.options['global_defaults'])
 
-    print('Sanitizing WFPC2 images:')
-    print('###################################')
-    print('###################################')
-    print('')
-    print('')
+    # Sanitize any WFPC2 images
+    banner = 'Sanitizing WFPC2 images'
+    hst.make_banner(banner)
     for file in hst.input_images:
       if 'wfpc2' in hst.get_instrument(file):
         hst.sanitize_wfpc2(file)
 
-    f = open(hst.dolphot_param_file,'w')
-    hst.generate_base_param_file(f,hst.options['global_defaults'])
+    # Start all of the dolphot preparation.
+    # Write out a parameter file and do all
+    # the mask, splitgroups, calcsky stuff
+    dolphot_file = open(hst.dolphot_param_file,'w')
+    hst.generate_base_param_file(dolphot_file,hst.options['global_defaults'])
 
     for file in hst.input_images:
       hst.filt_list.append(hst.get_filter(file))
@@ -971,34 +988,31 @@ if __name__ == '__main__':
     if (hst.needs_to_calc_sky(hst.reference_image_name)):
       hst.calc_sky(hst.reference_image_name,hst.options['detector_defaults'])
 
-    print('')
-    print('')
-    print('###################################')
-    print('###################################')
-    print('Complete list of input images: ')
-    line_format = '{0: <18} {1: <14} {2: <8} {3: <10} {4: <10} {5: <10}'
-    line = line_format.format('FILE','INSTRUMENT','FILTER',
-                              'EXPTIME','DATE-OBS','TIME-OBS')
-    print(line)
-    for file,inst,filt in zip(hst.input_images,hst.inst_list,hst.filt_list):
-        exptime = fits.getval(file,'EXPTIME')
-        dateobs = fits.getval(file,'DATE-OBS')
-        timeobs = fits.getval(file,'TIME-OBS')
-        line=line_format.format(file,inst.upper(),filt.upper(),exptime,dateobs,timeobs)
+    # Write out a complete list of the input
+    # images with metadata for easy reference
+    banner = 'Complete list of input images'
+    hst.make_banner(banner)
+    line_format = '{file: <18} {inst: <14} {filt: <8} '
+    line_format += '{exp: <10} {date: <10} {time: <10}'
+    header = line_format.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
+                              exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
+    print(header)
+    for image in hst.input_images:
+        exptime = fits.getval(image,'EXPTIME')
+        dateobs = fits.getval(image,'DATE-OBS')
+        timeobs = fits.getval(image,'TIME-OBS')
+        inst = hst.get_instrument(image)
+        filt = hst.get_filter(image)
+
+        line = line_format.format(file=file,inst=inst.upper(),filt=filt.upper(),
+                                  exp=exptime,date=dateobs,time=timeobs)
         print(line)
 
-    print('###################################')
-    print('###################################')
-    print('')
-    print('')
-
+    # Get rid of any sub-images that do not contain
+    # the input ra and dec
     if (hst.ra != None and hst.dec != None):
-      print('Getting rid of images that do'+\
-            ' not contain RA={ra}, DEC={dec}'.format(ra=hst.ra,dec=hst.dec))
-      print('###################################')
-      print('###################################')
-      print('')
-      print('')
+      banner = 'Getting rid of images that do not contain ra={ra}, dec={dec}'
+      hst.make_banner(banner.format(ra = hst.ra, dec = hst.dec))
 
       remove_list = []
       for image in hst.split_images:
@@ -1008,17 +1022,16 @@ if __name__ == '__main__':
       for image in remove_list:
         hst.split_images.remove(image)
 
-    print('Adding images to dolphot parameter file: ',hst.dolphot_param_file)
-    print('###################################')
-    print('###################################')
-    print('')
-    print('')
+    # Start adding the sub-image info to dolphot param file
+    banner = 'Adding images to dolphot parameter file: {file}'
+    hst.make_banner(banner.format(file = hst.dolphot_param_file))
+    dolphot_file.write('Nimg = {n}\n'.format(n=len(hst.split_images)))
+    hst.generate_template_param_file(dolphot_file,
+                                     hst.reference_image_name,
+                                     hst.options['detector_defaults'])
+    for i,image in enumerate(hst.split_images):
+      hst.generate_image_param_file(dolphot_file, image, i, hst.options['detector_defaults'])
+    dolphot_file.close()
 
-    f.write('Nimg = {n}\n'.format(n=len(hst.split_images)))
-    hst.generate_template_param_file(f, hst.reference_image_name,
-                                        hst.options['detector_defaults'])
-    for i,file in enumerate(hst.split_images):
-      hst.generate_image_param_file(f, file, i, hst.options['detector_defaults'])
-    f.close()
-
-    print('Total time elapsed to complete this script: ',time.time()-start,'seconds')
+    message = 'It took {time} seconds to complete this script'
+    print(message.format(time = time.time()-start))
