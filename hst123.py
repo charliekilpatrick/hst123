@@ -859,7 +859,16 @@ class hst123(object):
             print(message.format(file = filename))
 
             url = self.download_uri + uri
-            utils.data.clear_download_cache()
+            try:
+              # utils.data.download_file can get buggy
+              # if the cache is full.  Clear the cache
+              # even though we aren't using caching to
+              # prevent this method from choking
+              utils.data.clear_download_cache()
+            except RuntimeError:
+              error = 'There is a lock on the cache right now.'
+              error += '  Wait to clear download cache.'
+              print(error)
             try:
               dat = utils.data.download_file(url,
                   cache=False,show_progress=False,timeout=120)
