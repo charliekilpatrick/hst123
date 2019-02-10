@@ -913,6 +913,7 @@ if __name__ == '__main__':
         for file in glob.glob(pattern):
           os.remove(file)
       hst.copy_raw_data(reverse = True)
+      sys.exit(0)
 
     # Unzip any .fits.gz images
     if (len(glob.glob(hst.input_root_dir+'*.fits.gz')) != 0):
