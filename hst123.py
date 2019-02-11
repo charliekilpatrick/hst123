@@ -6,10 +6,11 @@
 # dolphot reductions
 #
 # Python 2/3 compatibility
-from __future__ import print_function # to use print() as a function in Python 2
+from __future__ import print_function
 
 # Dependencies and settings
-import glob, sys, os, shutil, time, io, urllib, subprocess, contextlib, warnings, filecmp
+import glob, sys, os, shutil, time, urllib, subprocess, warnings, filecmp
+import numpy as np
 from astropy.io import fits
 from stwcs import updatewcs
 from astropy.coordinates import SkyCoord
@@ -18,229 +19,176 @@ from astropy import units as u
 from astroquery.mast import Observations
 from astropy import utils
 from drizzlepac import tweakreg,astrodrizzle
-from contextlib import contextmanager
 from astroscrappy import detect_cosmics
-import numpy as np
-
-# Suppresses warnings
 warnings.filterwarnings('ignore')
 
-# Suppresses output when loading iraf
-@contextlib.contextmanager
-def nostdout():
-    save_stdout = sys.stdout
-    sys.stdout = io.BytesIO()
-    yield
-    sys.stdout = save_stdout
+green = '\033[1;32;40m'
+red = '\033[1;31;40m'
+end = '\033[0;0m'
 
-global_defaults = {'template_image': None,
-                   'ra': None,
-                   'dec': None,
-                   'rotation': 0.0,
-                   'pixel_fraction': 1.0,
-                   'clean': True,
-                   'num_cores': 8,
-                   'sky_subtract': True,
-                   'use_tweakshifts': True,
-                   'tweakshifts_threshold': 5,
-                   'ftp_uref_server': 'ftp://ftp.stsci.edu/cdbs/uref/',
-                   'ftp_iref_server': 'ftp://ftp.stsci.edu/cdbs/iref/',
-                   'ftp_jref_server': 'ftp://ftp.stsci.edu/cdbs/jref/',
-                   'dolphot': {'FitSky': 2,
-                               'SkipSky': 2,
-                               'RCombine': 1.5,
-                               'SkySig': 2.25,
-                               'SecondPass': 5,
-                               'SigFindMult': 0.85,
-                               'MaxIT': 25,
-                               'NoiseMult': 0.10,
-                               'FSat': 0.999,
-                               'ApCor': 1,
-                               'RCentroid': 2,
-                               'PosStep': 0.25,
-                               'dPosMax': 2.5,
-                               'SigPSF': 10.0,
-                               'PSFres': 1,
-                               'Align': 4,
-                               'Rotate': 1,
-                               'ACSuseCTE': 0,
-                               'WFC3useCTE': 0,
-                               'WFPC2useCTE': 1,
-                               'FlagMask': 7,
-                               'SigFind': 2.5,
-                               'SigFinal': 3.5,
-                               'UseWCS': 1,
-                               'AlignIter': 3,
-                               'AlignTol': 0.5,
-                               'AlignStep': 0.2,
-                               'VerboseData': 1,
-                               'NegSky': 0,
-                               'Force1': 0,
-                               'DiagPlotType': 'PNG',
-                               'InterpPSFlib': 1,
-                               'AlignOnly': 1}}
+global_defaults = {
+    'change_keys': ['IDCTAB','DGEOFILE','NPOLEXT','NPOLFILE','D2IMFILE',
+                    'D2IMEXT','OFFTAB'],
+    'cdbs_ftp': 'ftp://ftp.stsci.edu/cdbs/',
+    'mast_radius': 6*u.arcmin,
+    'mast_uri': 'https://mast.stsci.edu/api/v0/download/file?uri=',
+    'dolphot': {'FitSky': 2,
+                'SkipSky': 2,
+                'RCombine': 1.5,
+                'SkySig': 2.25,
+                'SecondPass': 5,
+                'SigFindMult': 0.85,
+                'MaxIT': 25,
+                'NoiseMult': 0.10,
+                'FSat': 0.999,
+                'ApCor': 1,
+                'RCentroid': 2,
+                'PosStep': 0.25,
+                'dPosMax': 2.5,
+                'SigPSF': 10.0,
+                'PSFres': 1,
+                'Align': 4,
+                'Rotate': 1,
+                'ACSuseCTE': 0,
+                'WFC3useCTE': 0,
+                'WFPC2useCTE': 1,
+                'FlagMask': 7,
+                'SigFind': 2.5,
+                'SigFinal': 3.5,
+                'UseWCS': 1,
+                'AlignOnly': 0,
+                'AlignIter': 3,
+                'AlignTol': 0.5,
+                'AlignStep': 0.2,
+                'VerboseData': 1,
+                'NegSky': 0,
+                'Force1': 0,
+                'DiagPlotType': 'PNG',
+                'InterpPSFlib': 1}}
 
-instrument_defaults = {'wfc3': {'env_ref': 'iref',
-                                'ftp_server': 'ftp://ftp.stsci.edu/cdbs/iref/',
-                                'driz_bits': 0,
-                                'pixel_scale': 0.04,
-                                'crpars': {'rdnoise': 6.5,
-                                           'gain': 1.0,
-                                           'saturation': 70000.0,
-                                           'sig_clip': 4.0,
-                                           'sig_frac': 0.2,
-                                           'obj_lim': 6.0}},
-                       'acs': {'env_ref': 'jref',
-                               'ftp_server': 'ftp://ftp.stsci.edu/cdbs/jref/',
-                               'driz_bits': 0,
-                               'pixel_scale': 0.05,
-                               'crpars': {'rdnoise': 6.5,
-                                          'gain': 1.0,
-                                          'saturation': 70000.0,
-                                          'sig_clip': 3.0,
-                                          'sig_frac': 0.1,
-                                          'obj_lim': 5.0}},
-                       'wfpc2': {'env_ref': 'uref',
-                                 'ftp_server': 'ftp://ftp.stsci.edu/cdbs/uref/',
-                                 'driz_bits': 0,
-                                 'pixel_scale': 0.046,
-                                 'crpars': {'rdnoise': 10.0,
-                                            'gain': 7.0,
-                                            'saturation': 27000.0,
-                                            'sig_clip': 4.0,
-                                            'sig_frac': 0.3,
-                                            'obj_lim': 6.0}
-                                 }}
+instrument_defaults = {
+    'wfc3': {'env_ref': 'iref',
+             'crpars': {'rdnoise': 6.5,
+                        'gain': 1.0,
+                        'saturation': 70000.0,
+                        'sig_clip': 4.0,
+                        'sig_frac': 0.2,
+                        'obj_lim': 6.0}},
+    'acs': {'env_ref': 'jref',
+            'crpars': {'rdnoise': 6.5,
+                       'gain': 1.0,
+                       'saturation': 70000.0,
+                       'sig_clip': 3.0,
+                       'sig_frac': 0.1,
+                       'obj_lim': 5.0}},
+    'wfpc2': {'env_ref': 'uref',
+              'crpars': {'rdnoise': 10.0,
+                         'gain': 7.0,
+                         'saturation': 27000.0,
+                         'sig_clip': 4.0,
+                         'sig_frac': 0.3,
+                         'obj_lim': 6.0}}}
 
+detector_defaults = {
+    'wfc3_uvis': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+                  'input_files': '*_flc.fits', 'pixel_scale': 0.04,
+                  'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
+                                  'sigma_low': 2.25, 'sigma_high': 2.00},
+                  'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                              'RPSF': 10, 'RSky': '15 35',
+                              'RSky2': '3 6'}},
+    'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'ny': 5200,
+                'input_files': '*_flt.fits', 'pixel_scale': 0.09,
+                'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
+                                'sigma_low': 2.25, 'sigma_high': 2.00},
+                'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                            'RPSF': 10, 'RSky': '8 20',
+                            'RSky2': '3 6'}},
+    'acs_wfc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+                'input_files': '*_flc.fits', 'pixel_scale': 0.05,
+                'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
+                                'sigma_low': 2.25, 'sigma_high': 2.00},
+                'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                            'RPSF': 10, 'RSky': '15 35',
+                            'RSky2': '3 6'}},
+    'acs_hrc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+                'input_files': '*_flt.fits', 'pixel_scale': 0.05,
+                'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
+                                'sigma_low': 2.25, 'sigma_high': 2.00},
+                'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                            'RPSF': 10, 'RSky': '15 35',
+                            'RSky2': '3 6'}},
+    'wfpc2_wfpc2': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+                    'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
+                    'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
+                                    'sigma_low': 2.25, 'sigma_high': 2.00},
+                    'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                                'RPSF': 10, 'RSky': '15 35',
+                                'RSky2': '3 6'}}}
 
-detector_defaults = {'wfc3_uvis': {'nx': 5200, 'ny': 5200, 'input_files': '*_flc.fits',
-                                   'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
-                                                   'sigma_low': 2.25, 'sigma_high': 2.00},
-                                   'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
-                                               'RPSF': 10, 'RSky': '15 35',
-                                               'RSky2': '3 6'}},
-                     'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'input_files': '*_flt.fits',
-                                  'ny': 5200, 'pixel_scale': 0.09,
-                                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
-                                                 'sigma_low': 2.25, 'sigma_high': 2.00},
-                                 'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
-                                             'RPSF': 10, 'RSky': '8 20',
-                                             'RSky2': '3 6'}},
-                     'acs_wfc': {'nx': 5200, 'ny': 5200, 'input_files': '*_flc.fits',
-                                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
-                                                 'sigma_low': 2.25, 'sigma_high': 2.00},
-                                 'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
-                                             'RPSF': 10, 'RSky': '15 35',
-                                             'RSky2': '3 6'}},
-                    'acs_hrc': {'nx': 5200, 'ny': 5200, 'input_files': '*_flt.fits',
-                                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
-                                                 'sigma_low': 2.25, 'sigma_high': 2.00},
-                                 'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
-                                             'RPSF': 10, 'RSky': '15 35',
-                                             'RSky2': '3 6'}},
-                     'wfpc2_wfpc2': {'nx': 5200, 'ny': 5200, 'input_files': '*_c0m.fits',
-                                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
-                                                     'sigma_low': 2.25, 'sigma_high': 2.00},
-                                     'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
-                                                 'RPSF': 10, 'RSky': '15 35',
-                                                 'RSky2': '3 6'}}}
-
-subarray_defaults = {'wfc3_uvis_full': {},
-                     'wfc3_uvis_sub': {'nx': 1400, 'ny': 1400},
-                     # Note that wfc3_ir does not ever do cosmic ray removal
-                     # because it automatically flags cosmic rays using up the ramp sampling
-                     'wfc3_ir_full': {},
-
-                     'acs_wfc_full': {},
-                     'acs_wfc_sub': {'nx': 1400, 'ny': 1400, 'input_files': '*_flt.fits'},
-
-                     'wfpc2_wfpc2_full': {}}
-
-acceptable_filters = {'F220W','F250W','F330W','F344N','F435W','F475W','F502N',
-                      'F550M','F555W','F606W','F625W','F658N','F660N','F660N',
-                      'F775W','F814W','F850LP','F892N','F098M','F105W','F110W',
-                      'F125W','F126N','F127M','F128N','F130N','F132N','F139M',
-                      'F140W','F153M','F160W','F164N','F167N','F200LP','F218W',
-                      'F225W','F275W','F280N','F300X','F336W','F343N','F350LP',
-                      'F373N','F390M','F390W','F395N','F410M','F438W','F467M',
-                      'F469N','F475X','F487N','F502N','F547M','F600LP','F621M',
-                      'F625W','F631N','F645N','F656N','F657N','F658N','F665N',
-                      'F673N','F680N','F689M','F763M','F845M','F953N','F122M',
-                      'F160BW','F185W','F218W','F255W','F300W','F375N','F380W',
-                      'F390N','F437N','F439W','F450W','F569W','F588N','F622W',
-                      'F631N','F673N','F675W','F702W','F785LP','F791W','F953N',
-                      'F1042M'}
+acceptable_filters = {
+    'F220W','F250W','F330W','F344N','F435W','F475W','F502N','F550M','F555W',
+    'F606W','F625W','F658N','F660N','F660N','F775W','F814W','F850LP','F892N',
+    'F098M','F105W','F110W','F125W','F126N','F127M','F128N','F130N','F132N',
+    'F139M','F140W','F153M','F160W','F164N','F167N','F200LP','F218W','F225W',
+    'F275W','F280N','F300X','F336W','F343N','F350LP','F373N','F390M','F390W',
+    'F395N','F410M','F438W','F467M','F469N','F475X','F487N','F502N','F547M',
+    'F600LP','F621M','F625W','F631N','F645N','F656N','F657N','F658N','F665N',
+    'F673N','F680N','F689M','F763M','F845M','F953N','F122M','F160BW','F185W',
+    'F218W','F255W','F300W','F375N','F380W','F390N','F437N','F439W','F450W',
+    'F569W','F588N','F622W','F631N','F673N','F675W','F702W','F785LP','F791W',
+    'F953N','F1042M'}
 
 class hst123(object):
 
   def __init__(self):
 
-      # Basic parameters
-      self.total_images = 0
-      self.total_split_images = 0
-      self.input_images = []
-      self.split_images = []
-      self.filt_list = []
-      self.inst_list = []
+    # Basic parameters
+    self.input_images = []
+    self.split_images = []
+    self.template = ''
+    self.coord = None
+    self.download = False
+    self.clobber = False
+    self.dolphot = {}
+    self.root_dir = '.'
+    self.raw_dir = 'raw/'
 
-      self.options = {'global_defaults': global_defaults,
-                      'detector_defaults': detector_defaults,
-                      'acceptable_filters': acceptable_filters,
-                      'instrument_defaults': instrument_defaults,
-                      'subarray_defaults': subarray_defaults}
+    self.options = {'global_defaults': global_defaults,
+                    'detector_defaults': detector_defaults,
+                    'instrument_defaults': instrument_defaults,
+                    'acceptable_filters': acceptable_filters}
 
-      # Complete list of pipeline products in case
-      # they need to be cleaned at start
-      self.pipeline_products = ['*chip?.fits','*chip?.sky.fits',
-                                '*rawtmp.fits','*drz.fits','*drz.sky.fits',
-                                '*idc.fits','*dxy.fits','*off.fits',
-                                '*d2im.fits','*d2i.fits','*npl.fits',
-                                'dp*','*.log','*.output']
-
-      self.ra = None
-      self.dec = None
-
-      self.download = False
-      self.clobber = False
-
-      self.cen_coord = None
-      self.ref_coord = None
-
-      self.good_detector = ['WFPC2/WFC','PC/WFC',
-                            'ACS/WFC','ACS/HRC',
-                            'ACS/SBC','WFC3/UVIS',
-                            'WFC3/IR','WFPC2/PC']
-
-      self.download_uri = 'https://mast.stsci.edu/api/v0/download/file?uri='
-
-      self.reference_image_name = ''
-      self.global_object_name = ''
-
-      self.dolphot_param_file = 'dp.param'
-      self.raw_dir = 'raw/'
-      self.input_root_dir = ''
-
-      self.is_reference_hst = True
+    # Complete list of pipeline products in case
+    # they need to be cleaned at start
+    self.pipeline_products = ['*chip?.fits','*chip?.sky.fits',
+                              '*rawtmp.fits','*drz.fits','*drz.sky.fits',
+                              '*idc.fits','*dxy.fits','*off.fits',
+                              '*d2im.fits','*d2i.fits','*npl.fits',
+                              'dp*','*.log','*.output']
 
   def add_options(self, parser=None, usage=None):
-        import optparse
-        if parser == None:
-            parser = optparse.OptionParser(usage=usage, conflict_handler='resolve')
-        parser.add_option('--ra', default=None, type='string', help='RA of interest')
-        parser.add_option('--dec', default=None, type='string', help='DEC of interest')
-        parser.add_option('--objname','--obj', default='test', type='string',
-                          help='Object name to use for dolphot/output files.  Default=test.')
-        parser.add_option('--reference','--ref', default='', type='string',
-                          help='Name of the reference image.')
-        parser.add_option('--inputrootdir','--input', default=None, type='string',
-                          help='Pathway to input HST files.')
-        parser.add_option('--makeclean', default=False, action='store_true',
-                          help='Clean up all output files from previous runs then exit.')
-        parser.add_option('--download', default=False, action='store_true',
-                          help='Download the raw data files given input ra and dec.')
-        parser.add_option('--clobber', default=False, action='store_true',
-                          help='Overwrite files when using download mode.')
-        return(parser)
+    import optparse
+    if parser == None:
+        parser = optparse.OptionParser(usage=usage,
+            conflict_handler='resolve')
+    parser.add_option('--ra', default=None,
+        type='string', help='RA of interest')
+    parser.add_option('--dec', default=None,
+        type='string', help='DEC of interest')
+    parser.add_option('--reference','--ref', default='',
+        type='string', help='Name of the reference image.')
+    parser.add_option('--inputrootdir','--input', default=None,
+        type='string', help='Pathway to input HST files.')
+    parser.add_option('--makeclean', default=False, action='store_true',
+        help='Clean up all output files from previous runs then exit.')
+    parser.add_option('--download', default=False, action='store_true',
+        help='Download the raw data files given input ra and dec.')
+    parser.add_option('--clobber', default=False, action='store_true',
+        help='Overwrite files when using download mode.')
+    parser.add_option('--dolphot','--dp', default='dp', type='string',
+        help='Base name for dolphot parameter file and output.')
+    return(parser)
 
   # Make sure all standard output is
   # formatted in the same way with banner
@@ -256,16 +204,26 @@ class hst123(object):
     print('')
     print('')
 
+  # Check if num is a number
+  def is_number(self, num):
+    try:
+        num = float(num)
+    except ValueError:
+        return(False)
+    return(True)
+
+  def make_dolphot_dict(self, dolphot):
+    return({ 'base': dolphot, 'param': dolphot+'.param' })
 
   def copy_raw_data(self, reverse = False):
     # reverse = False will simply backup data
     # in the working directory to the raw dir
     if not reverse:
-      if not os.path.exists(self.raw_dir):
-        os.mkdir(self.raw_dir)
-      for f in self.input_images:
-        if not os.path.isfile(self.raw_dir+f):
-          shutil.copy(f, self.raw_dir)
+        if not os.path.exists(self.raw_dir):
+            os.mkdir(self.raw_dir)
+        for f in self.input_images:
+            if not os.path.isfile(self.raw_dir+f):
+                shutil.copy(f, self.raw_dir)
     # reverse = True will copy files from the
     # raw dir to the working directory if the
     # working files are different from the raw
@@ -274,23 +232,24 @@ class hst123(object):
     # (esp. WCS checking, tweakreg, astrodrizzle)
     # require un-edited files.
     else:
-      for file in glob.glob(hst.raw_dir+'*.fits'):
-        path, base = os.path.split(file)
-        if filecmp.cmp(file,base):
-          message = '{file} and {base} are identical'
-          print(message.format(file=file,base=base))
-          continue
-        else:
-          message = '{file} and {base} are identical'
-          print(message.format(file=file,base=base))
-          shutil.copy(file, base)
-        os.chmod(base,0775)
+        for file in glob.glob(self.raw_dir+'*.fits'):
+            path, base = os.path.split(file)
+            if filecmp.cmp(file,base):
+                message = '{file} == {base}'
+                print(message.format(file=file,base=base))
+                continue
+            else:
+                message = '{file} != {base}'
+                print(message.format(file=file,base=base))
+                shutil.copy(file, base)
+            os.chmod(base,0775)
 
   # Sanitizes template header, gets rid of
   # multiple extensions and only preserves
   # science data.
   def sanitize_template(self, template):
-    hdu = fits.open(template)
+    hdu = fits.open(template, mode='readonly')
+    wght = hdu['WHT'].data
 
     # Going to write out newhdu
     # Only want science extension from orig template
@@ -300,10 +259,8 @@ class hst123(object):
     # Want to preserve header info, so combine
     # SCI+PRIMARY headers (except COMMENT/HISTORY keys)
     for key in hdu['PRIMARY'].header.keys():
-      if (key not in newhdu[0].header.keys()
-        and key != 'COMMENT'
-        and key != 'HISTORY'):
-          newhdu[0].header[key] = hdu['PRIMARY'].header[key]
+        if (key not in newhdu[0].header.keys()+['COMMENT','HISTORY']):
+            newhdu[0].header[key] = hdu['PRIMARY'].header[key]
 
     # Make sure that template header reflects one extension
     newhdu[0].header['EXTEND']=False
@@ -311,18 +268,20 @@ class hst123(object):
     # Add header variables that dolphot needs:
     # GAIN, RDNOISE, SATURATE
     inst = newhdu[0].header['INSTRUME'].lower()
-    inst_options = self.options['instrument_defaults'][inst]['crpars']
-    newhdu[0].header['SATURATE'] = inst_options['saturation']
-    newhdu[0].header['RDNOISE'] = inst_options['rdnoise']
-    newhdu[0].header['GAIN'] = inst_options['gain']
+    opt  = self.options['instrument_defaults'][inst]['crpars']
+    newhdu[0].header['SATURATE'] = opt['saturation']
+    newhdu[0].header['RDNOISE']  = opt['rdnoise']
+    newhdu[0].header['GAIN']     = opt['gain']
+
+    newhdu['SCI'].data[np.where(wght == 0)] = float('NaN')
 
     # Write out to same file w/ overwrite
     newhdu.writeto(template, output_verify='silentfix', overwrite=True)
 
   # Sanitizes wfpc2 data by getting rid of
-  # excess extensions and changing header.
+  # extra extensions and changing variables.
   def sanitize_wfpc2(self, image):
-    hdu = fits.open(image)
+    hdu = fits.open(image, mode='readonly')
 
     # Going to write out newhdu
     # Only want science extension from orig template
@@ -336,24 +295,24 @@ class hst123(object):
 
     # Now append science extensions to newhdu
     for h in hdu:
-      if h.name == 'SCI':
-        newhdu.append(h)
+        if h.name == 'SCI':
+            newhdu.append(h)
 
     # Write out to same file w/ overwrite
     newhdu.writeto(image, output_verify='silentfix', overwrite=True)
 
-  def parse_center_coord(self):
-    if (not self.ra or not self.dec):
-      error = 'ERROR: Cannot parse coordinates.  No input ra or dec'
-      print(error)
-      sys.exit(2)
-
-    if (':' in self.ra and ':' in self.dec):
-      # Input RA/DEC are sexagesimal
-      self.cen_coord = SkyCoord(self.ra,self.dec,frame='ircs')
+  def parse_coord(self, ra, dec):
+    if (':' in ra and ':' in dec):
+        # Input RA/DEC are sexagesimal
+        return(SkyCoord(ra,dec,frame='fk5'))
+    elif (self.is_number(ra) and self.is_number(dec)):
+        # Assume input coordiantes are decimal degrees
+        return(SkyCoord(ra,dec,frame='fk5',unit='deg'))
     else:
-      # Assume input coordiantes are decimal degrees
-      self.cen_coord = SkyCoord(self.ra,self.dec,frame='ircs',unit='deg')
+        # Throw an error and exit
+        error = 'ERROR: Cannot parse coordinates ra={ra}, dec={dec}'
+        print(error.format(ra=ra,dec=dec))
+        return(None)
 
   def needs_to_be_reduced(self,image):
     hdu = fits.open(image, mode='readonly')
@@ -361,29 +320,31 @@ class hst123(object):
     detector = ''
     instrument = hdu[0].header['INSTRUME'].lower()
     if ('DETECTOR' in hdu[0].header.keys()):
-      detector = hdu[0].header['DETECTOR'].lower()
+        detector = hdu[0].header['DETECTOR'].lower()
 
     # Get rid of exposures with exptime < 20s
     exptime = hdu[0].header['EXPTIME']
     if (exptime < 20):
-      return False
+        return(False)
 
     # Get rid of data where the input coordinates do
     # not land in any of the sub-images
-    if (self.ra is not None and self.dec is not None):
-      for h in hdu:
-        if h.data is not None and 'EXTNAME' in h.header:
-          if h.header['EXTNAME'] == 'SCI':
-            w = WCS(h.header,hdu)
-            world_coord = np.array([[float(self.ra),float(self.dec)]])
-            pixcrd = w.wcs_world2pix(world_coord,1)
-            if (pixcrd[0][0] > 0 and
-                pixcrd[0][1] > 0 and
-                pixcrd[0][0] < h.header['NAXIS1'] and
-                pixcrd[0][1] < h.header['NAXIS2']):
-                is_not_hst_image = True
-      if not is_not_hst_image:
-        return False
+    if self.coord:
+        ra = self.coord.ra.degree
+        dec = self.coord.dec.degree
+        for h in hdu:
+            if h.data is not None and 'EXTNAME' in h.header:
+                if h.header['EXTNAME'] == 'SCI':
+                    w = WCS(h.header,hdu)
+                    world_coord = np.array([[ra,dec]])
+                    pixcrd = w.wcs_world2pix(world_coord,1)
+                    if (pixcrd[0][0] > 0 and
+                        pixcrd[0][1] > 0 and
+                        pixcrd[0][0] < h.header['NAXIS1'] and
+                        pixcrd[0][1] < h.header['NAXIS2']):
+                        is_not_hst_image = True
+    if not is_not_hst_image:
+        return(False)
 
     # Get rid of images that don't match one of the
     # allowed instrument/detector types and images
@@ -392,46 +353,48 @@ class hst123(object):
     is_not_hst_image = False
     if (instrument.upper() == 'WFPC2' and 'c0m.fits' in image):
         is_not_hst_image = True
-    if (instrument.upper() == 'ACS' and detector.upper() == 'WFC' and 'flc.fits' in image):
+    if (instrument.upper() == 'ACS' and
+        detector.upper() == 'WFC' and 'flc.fits' in image):
         is_not_hst_image = True
-    if (instrument.upper() == 'ACS' and detector.upper() == 'HRC' and 'flt.fits' in image):
+    if (instrument.upper() == 'ACS' and
+        detector.upper() == 'HRC' and 'flt.fits' in image):
         is_not_hst_image = True
-    if (instrument.upper() == 'WFC3' and detector.upper() == 'UVIS' and 'flc.fits' in image):
+    if (instrument.upper() == 'WFC3' and
+        detector.upper() == 'UVIS' and 'flc.fits' in image):
         is_not_hst_image = True
-    if (instrument.upper() == 'WFC3' and detector.upper() == 'IR' and 'flt.fits' in image):
+    if (instrument.upper() == 'WFC3' and
+        detector.upper() == 'IR' and 'flt.fits' in image):
         is_not_hst_image = True
-    return is_not_hst_image
+    return(is_not_hst_image)
 
   def needs_to_split_groups(self,image):
-    return len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0
+    return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
 
   def needs_to_calc_sky(self,image):
     files = glob.glob(image.replace('.fits','.sky.fits'))
     if (len(files) == 0):
-      return True
-    else:
-      hdu1 = fits.open(image)
-      hdu2 = fits.open(files[0])
-      if (hdu1[0].header == hdu2[0].header):
-        return False
-      else:
-        return True
+        if self.coord:
+            return(self.image_contains(image, self.coord))
+        else:
+            return(True)
 
 
-  def image_contains(self, image, ra, dec):
+  def image_contains(self, image, coord):
     # sky2xy is way better/faster than astropy.wcs
     # Also, astropy.wcs has a problem with chip?
     # files generated by splitgroups because the WCSDVARR
     # gets split off from the data, which is required
     # by WCS (see fobj).
-    cmd = 'sky2xy {image} {ra} {dec}'.format(image=image,ra=ra,dec=dec)
+    ra = coord.ra.degree
+    dec = coord.dec.degree
+    cmd = 'sky2xy {image} {ra} {dec}'.format(image=image, ra=ra, dec=dec)
     result = subprocess.check_output(cmd, shell=True)
     if ('off image' in result):
         message = '{image} does not contain ra={ra}, dec={dec}'
-        print(message.format(image=image,ra=ra,dec=dec))
-        return False
+        print(message.format(image=image, ra=ra, dec=dec))
+        return(False)
     else:
-        return True
+        return(True)
 
 
   def needs_to_be_masked(self,image):
@@ -445,9 +408,9 @@ class hst123(object):
         if hdu.data is not None and 'EXTNAME' in hdu.header:
             if hdu.header['EXTNAME'].upper() != 'SCI':
                 needs_masked = True
-    return needs_masked
+    return(needs_masked)
 
-  def get_filter(self,image):
+  def get_filter(self, image):
     if 'c0m.fits' in image:
         f = fits.getval(image, 'FILTNAM1')
         if len(f) == 0:
@@ -459,102 +422,89 @@ class hst123(object):
             f = fits.getval(image, 'FILTER1')
             if 'clear' in f.lower():
                 f = fits.getval(image, 'FILTER2')
-    return f.lower()
+    return(f.lower())
 
   def get_instrument(self,image):
     hdu = fits.open(image, mode='readonly')
-    instrument = hdu[0].header['INSTRUME'].lower()
-    if instrument.upper() == 'WFPC2':
-        detector = 'wfpc2'
-        subarray = 'full'
+    inst = hdu[0].header['INSTRUME'].lower()
+    if inst.upper() == 'WFPC2':
+        det = 'wfpc2'
+        sub = 'full'
     else:
-        detector = hdu[0].header['DETECTOR'].lower()
+        det = hdu[0].header['DETECTOR'].lower()
         if hdu[0].header['SUBARRAY'] == 'T':
-            subarray = 'sub'
+            sub = 'sub'
         else:
-            subarray = 'full'
-    return '{instrument}_{detector}_{subarray}'.format(instrument=instrument,
-                                                       detector=detector,
-                                                       subarray=subarray)
+            sub = 'full'
+    out = '{inst}_{det}_{sub}'
+    return(out.format(inst=inst, det=det, sub=sub))
 
   def get_input_images(self,pattern=None):
     if pattern == None:
-      pattern = ['*c1m.fits','*c0m.fits','*flc.fits','*flt.fits']
-    pattern = [self.input_root_dir+s for s in pattern]
-    images = []
-    for files in pattern:
-      images.extend(glob.glob(files))
-    return(images)
+        pattern = ['*c1m.fits','*c0m.fits','*flc.fits','*flt.fits']
+    return([s for p in pattern for s in glob.glob(p)])
 
   def get_dq_image(self,image):
-    instrument = self.get_instrument(image).split('_')[0]
-    maskimage = ''
-    if instrument.upper() == 'WFPC2':
-      maskimage = image.replace('c0m.fits','c1m.fits')
-    return maskimage
+    if self.get_instrument(image).split('_')[0].upper() == 'WFPC2':
+        return(image.replace('c0m.fits','c1m.fits'))
+    else:
+        return('')
 
   def split_groups(self,image):
+    print('Running split groups for {image}'.format(image=image))
     os.system('splitgroups {filename}'.format(filename=image))
 
-  def mask_image(self,instrument, image):
+  def mask_image(self, image, instrument):
     maskimage = self.get_dq_image(image)
-    cmd = '{instrument}mask {image} {maskimage}'.format(instrument=instrument,
-                                                        image=image, maskimage=maskimage)
-    os.system(cmd)
+    cmd = '{instrument}mask {image} {maskimage}'
+    mask = cmd.format(instrument=instrument, image=image, maskimage=maskimage)
+    print(mask)
+    os.system(mask)
 
-  def calc_sky(self,image, options):
-    calcsky_opts = self.get_calcsky_parameters(image, options)
-    cmd = 'calcsky {image} {rin} {rout} {step} {sigma_low} {sigma_high}'.format(
-                        image=image.replace('.fits',''),
-                        rin=calcsky_opts['r_in'], rout=calcsky_opts['r_out'],
-                        step=calcsky_opts['step'], sigma_low=calcsky_opts['sigma_low'],
-                        sigma_high=calcsky_opts['sigma_high'])
-    os.system(cmd)
-
-  def get_calcsky_parameters(self,image, options):
-    instrument_string = self.get_instrument(image)
-    detector_string = '_'.join(instrument_string.split('_')[:2])
-    message = 'Getting calcsky parameters for: {detector}'
-    print(message.format(detector = detector_string))
-    return options[detector_string]['dolphot_sky']
+  def calc_sky(self, image, options):
+    det = '_'.join(self.get_instrument(image).split('_')[:2])
+    opt = options[det]['dolphot_sky']
+    cmd = 'calcsky {image} {rin} {rout} {step} {sigma_low} {sigma_high}'
+    calc_sky = cmd.format(image=image.replace('.fits',''), rin=opt['r_in'],
+                            rout=opt['r_out'], step=opt['step'],
+                            sigma_low=opt['sigma_low'],
+                            sigma_high=opt['sigma_high'])
+    os.system(calc_sky)
 
   def generate_base_param_file(self,param_file,options):
-    for par, value in options['dolphot'].items():
-        param_file.write('{par} = {value}\n'.format(par=par, value=value))
+      for par, value in options['dolphot'].items():
+          param_file.write('{par} = {value}\n'.format(par=par, value=value))
 
   def get_dolphot_instrument_parameters(self,image, options):
     instrument_string = self.get_instrument(image)
     detector_string = '_'.join(instrument_string.split('_')[:2])
-    return options[detector_string]['dolphot']
+    return(options[detector_string]['dolphot'])
 
-  def generate_image_param_file(self,param_file, image, i, options):
-    number = str(i+1).zfill(4)
-    param_file.write('img{i}_file = {file}\n'.format(i=number,
-                                                     file=os.path.splitext(image)[0]))
-    for par, value in self.get_dolphot_instrument_parameters(image, options).items():
-      param_file.write('img{i}_{option} = {value}\n'.format(i=number,
-                                                            option=par, value=value))
+  def add_image_param_file(self,param_file, image, i, options):
+    # Add image name to param file
+    image_name = 'img{i}_file = {file}\n'
+    param_file.write(image_name.format(i=str(i).zfill(4),
+        file=os.path.splitext(image)[0]))
 
-  def generate_template_param_file(self, param_file, template, options):
-    number = str(0).zfill(4)
-    param_file.write('img{i}_file = {file}\n'.format(i=number,
-                                                     file=os.path.splitext(template)[0]))
-    for par, value in self.get_dolphot_instrument_parameters(template, options).items():
-      param_file.write('img{i}_{option} = {value}\n'.format(i=number,
-                                                            option=par, value=value))
+    # Now add all image-specific params to param file
+    params = self.get_dolphot_instrument_parameters(image, options)
+    for par, val in params.items():
+        image_par_value = 'img{i}_{par} = {val}\n'
+        param_file.write(image_par_value.format(i=str(i).zfill(4),
+            par=par, val=val))
 
   # Pick the best reference out of input images
   # Returns the filter of the reference image.
   # Also generates a drizzled image corresponding
   # to the reference and assigns that drizzled image
-  # to self.reference_image_name
+  # to hst.template
   def pick_reference(self):
     # If we haven't defined input images yet,
     # we want to return something to signify
     if not self.input_images:
         warning = 'WARNING: No input images.'
         print(warning)
-        return None
+        sys.exit(1)
     else:
         # List of best filters roughly in the order I would
         # want for a decent reference image
@@ -562,14 +512,12 @@ class hst123(object):
                         'f450w','f439w','f110w','f160w','f550m']
 
         # First group images together by filter/instrument
-        if not self.filt_list:
-            self.filt_list = [self.get_filter(im) for im in self.input_images]
-        if not self.inst_list:
-            self.inst_list = [self.get_instrument(im).split('_')[0]
-                                for im in self.input_images]
+        filts = [self.get_filter(im) for im in self.input_images]
+        insts = [self.get_instrument(im).split('_')[0]
+                 for im in self.input_images]
 
         unique_filter_inst = list(set(['{}_{}'.format(a_, b_)
-            for a_, b_ in zip(self.filt_list, self.inst_list)]))
+                                       for a_, b_ in zip(filts, insts)]))
         total_exposure = []
         for val in unique_filter_inst:
             exposure = 0
@@ -631,22 +579,17 @@ class hst123(object):
         # Now get list of images with best_filt_inst
         reference_images = []
         for im in self.input_images:
-          if (self.get_filter(im)+'_'+
-              self.get_instrument(im).split('_')[0] == best_filt_inst):
-            reference_images.append(im)
+            if (self.get_filter(im)+'_'+
+                self.get_instrument(im).split('_')[0] == best_filt_inst):
+                reference_images.append(im)
         best_filt,best_inst = best_filt_inst.split('_')
         output_name = best_inst+'_'+best_filt+'_drz.fits'
         message = 'Reference image name will be: {template}'
         print(message.format(template=output_name))
-        self.reference_image_name = output_name
+        self.template = output_name
 
         self.run_tweakreg(reference_images,'',self.options['global_defaults'])
         self.run_astrodrizzle(reference_images, output_name = output_name)
-        # Astrodrizzle sets saturated/other masked pixels to a weird negative
-        # value.  Reset these pixels to nan
-        with fits.open(output_name, mode='update') as hdu:
-          hdu[1].data[np.where(hdu[1].data == np.min(hdu[1].data))] = float('NaN')
-          hdu.flush()
 
   def run_astrodrizzle(self, images, output_name = None):
     if output_name is None:
@@ -660,78 +603,63 @@ class hst123(object):
 
     wcskey = 'TWEAK'
 
-    options = self.options['global_defaults']
-    inst_list = self.get_instrument(images[0]).split('_')
-    inst = inst_list[0]
-    inst_det = inst_list[0]+'_'+inst_list[1]
-    inst_options = self.options['instrument_defaults'][inst]
-    det_options = self.options['detector_defaults'][inst_det]
-    if ('wfc3_ir' in inst_det):
-      driz_bits = 576
-    else:
-      driz_bits = 0
+    inst = list(set([self.get_instrument(im).split('_')[0] for im in images]))
+    det = '_'.join(self.get_instrument(images[0]).split('_')[:2])
+    if len(inst) > 1:
+        error = 'ERROR: Cannot drizzle together images from detectors: {det}'
+        print(error.format(det=','.join(map(str,inst))))
+        sys.exit(1)
 
+    options = self.options['detector_defaults'][det]
+    change_keys = self.options['global_defaults']['change_keys']
     for image in images:
-      ref = ''
-      change_keys = []
-      if 'wfpc2' in self.get_instrument(image):
-        ref = 'uref'
-        change_keys = ['DGEOFILE','IDCTAB','OFFTAB']
-      if 'wfc3_uvis' in self.get_instrument(image):
-        ref = 'iref'
-        change_keys = ['IDCTAB','NPOLFILE','NPOLEXT','D2IMFILE','D2IMEXT']
-      if 'wfc3_ir' in self.get_instrument(image):
-        ref = 'iref'
-        change_keys = ['IDCTAB']
-      if 'acs_wfc' in self.get_instrument(image):
-        ref = 'jref'
-        change_keys = ['IDCTAB','DGEOFILE','NPOLEXT','NPOLFILE','D2IMFILE','D2IMEXT']
-      if 'acs_hrc' in self.get_instrument(image):
-        ref = 'jref'
-        change_keys = ['IDCTAB','DGEOFILE','NPOLEXT','NPOLFILE']
-      for key in change_keys:
-        try:
-          val = fits.getval(image,key,ext=0)
-        except:
-          try:
-            val = fits.getval(image,key,ext=1)
-          except:
-            print(key,' is not part of header...')
-            continue
-        if (ref+'$' in val):
-          new_val = val.split('$')[1]
-          if not os.path.exists(new_val):
-            url = options['ftp_'+ref+'_server'] + new_val
-            message = 'Downloading file: {url}'
-            print(message.format(url=url))
-            urllib.urlretrieve(url,new_val)
-            urllib.urlcleanup()
-          exts = [0,1]
-          for ext in exts:
-            fits.setval(image,key,ext=ext,value=new_val)
-      updatewcs.updatewcs(image)
+        inst = self.get_instrument(image).split('_')[0]
+        ref = self.options['instrument_defaults'][inst]['env_ref']
+        for key in change_keys:
+            try:
+                val = fits.getval(image, key, extname='PRIMARY')
+            except KeyError:
+                try:
+                    val = fits.getval(image, key, extname='SCI')
+                except KeyError:
+                    error = 'WARNING: {key} is not part of {image} header.'
+                    print(error.format(key=key,image=image))
+                    continue
+            if (ref+'$' in val):
+                ref_file = val.split('$')[1]
+                if not os.path.exists(ref_file):
+                    url = self.options['global_defaults']['cdbs_ftp']
+                    url += ref+'/'+ref_file
+                    message = 'Downloading file: {url}'
+                    print(message.format(url=url))
+                    urllib.urlretrieve(url,ref_file)
+                    urllib.urlcleanup()
+            fits.setval(image, key, extname='PRIMARY', value=ref_file)
+            fits.setval(image, key, extname='SCI', value=ref_file)
+        updatewcs.updatewcs(image)
 
-    astrodrizzle.AstroDrizzle(images, output=output_name, runfile='astrodrizzle.log',
+    ra = self.coord.ra.degree if self.coord else None
+    dec = self.coord.dec.degree if self.coord else None
+
+    astrodrizzle.AstroDrizzle(images, output=output_name, runfile='',
                 wcskey=wcskey, context=True, group='', build=True,
-                num_cores=options['num_cores'], preserve=False,
-                clean=options['clean'], skysub=options['sky_subtract'],
-                skystat='mode', skylower=0.0, skyupper=None, driz_sep_fillval=-100000,
-                driz_sep_bits=0, driz_sep_wcs=True, updatewcs=True,
-                driz_sep_rot=options['rotation'],
-                driz_sep_scale=inst_options['pixel_scale'],
-                driz_sep_outnx=det_options['nx'], driz_sep_outny=det_options['ny'],
-                driz_sep_ra=self.ra, driz_sep_dec=self.dec,
-                combine_maskpt=0.2, combine_type=combine_type, combine_nsigma='4 3',
+                num_cores=8, preserve=False, clean=True, skysub=True,
+                skystat='mode', skylower=0.0, skyupper=None, updatewcs=True,
+                driz_sep_fillval=-100000, driz_sep_bits=0, driz_sep_wcs=True,
+                driz_sep_rot=0.0, driz_sep_scale=options['pixel_scale'],
+                driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
+                driz_sep_ra=ra, driz_sep_dec=dec,
+                combine_maskpt=0.2, combine_type=combine_type,
                 combine_nlow=0, combine_nhigh=0, combine_lthresh=-10000,
-                combine_hthresh=None, driz_cr=True, driz_cr_snr='3.5 3.0',
-                driz_cr_grow=1, driz_cr_ctegrow=0, driz_cr_scale='1.2 0.7',
-                final_pixfrac=options['pixel_fraction'], final_fillval=-50000,
-                final_bits=driz_bits, final_units='counts',
+                combine_hthresh=None, combine_nsigma='4 3',
+                driz_cr=True, driz_cr_snr='3.5 3.0', driz_cr_grow=1,
+                driz_cr_ctegrow=0, driz_cr_scale='1.2 0.7',
+                final_pixfrac=1.0, final_fillval=-50000,
+                final_bits=options['driz_bits'], final_units='counts',
                 final_wcs=True, final_refimage=None,
-                final_rot=options['rotation'],
-                final_scale=inst_options['pixel_scale'],
-                final_outnx=det_options['nx'], final_outny=det_options['ny'],
-                final_ra=self.ra, final_dec=self.dec)
+                final_rot=0.0, final_scale=options['pixel_scale'],
+                final_outnx=options['nx'], final_outny=options['ny'],
+                final_ra=ra, final_dec=dec)
 
   # Run cosmic ray clean
   def run_cosmic(self,image,options,output=None):
@@ -739,11 +667,15 @@ class hst123(object):
     print(message.format(image=image))
     hdulist = fits.open(image,mode='readonly')
 
+    if output is None:
+        output = image
+
     for hdu in hdulist:
         if ('EXTNAME' in hdu.header and hdu.header['EXTNAME'].upper() == 'SCI'):
             mask = np.zeros(hdu.data.shape, dtype=np.bool)
 
-            _crmask, crclean = detect_cosmics(hdu.data.copy().astype('<f4'), inmask=mask,
+            _crmask, crclean = detect_cosmics(hdu.data.copy().astype('<f4'),
+                                              inmask=mask,
                                               readnoise=options['rdnoise'],
                                               gain=options['gain'],
                                               satlevel=options['saturation'],
@@ -752,28 +684,25 @@ class hst123(object):
                                               objlim=options['obj_lim'])
             hdu.data[:,:] = crclean[:,:]
 
-        if output is None:
-            output = image
-
     # This writes in place
-    hdulist.writeto(output,overwrite=True,output_verify='silentfix')
+    hdulist.writeto(output, overwrite=True, output_verify='silentfix')
     hdulist.close()
 
   # Run tweakreg on all input images
-  def run_tweakreg(self,images,template,options):
+  def run_tweakreg(self, images, template, options):
 
     run_images = images[:]
 
     # Check if we just removed all of the images
     if (len(run_images) == 0):
-      warning = 'WARNING: All images have been run through tweakreg'
-      print(warning)
-      return(1)
+        warning = 'WARNING: All images have been run through tweakreg'
+        print(warning)
+        return(1)
 
     for image in run_images:
         # wfc3_ir doesn't need cosmic clean and assume template is cleaned
         if (image == template or 'wfc3_ir' in self.get_instrument(image)):
-          continue
+            continue
         rawtmp = image.replace('.fits','rawtmp.fits')
 
         # Copy the raw data into a temporary file
@@ -787,35 +716,35 @@ class hst123(object):
         self.run_cosmic(image,crpars)
 
     if (template == '' or template == None):
-      shutil.copy(images[0],'dummy.fits')
-      template = 'dummy.fits'
+        shutil.copy(images[0],'dummy.fits')
+        template = 'dummy.fits'
 
     message = 'Executing tweakreg with images: {images} \n'
     message += 'Template image: {template} \n'
     message += 'Tweakreg is executing...'
-    print(message.format(images = run_images, template = template))
+    print(message.format(images = ','.join(map(str,run_images)),
+                         template = template))
     start_tweak = time.time()
     tweakreg.TweakReg(files = run_images, refimage = template, verbose=False,
             interactive=False, clean=True, writecat = False, updatehdr=True,
-            wcsname='TWEAK', reusename=True, rfluxunits='counts', see2dplot=False,
-            separation=0.5, residplot='No plot', runfile='',
-            imagefindcfg = {'threshold': options['tweakshifts_threshold'],
-                'use_sharp_round': True},
-            refimagefindcfg = {'threshold': options['tweakshifts_threshold'],
-                'use_sharp_round': True})
+            wcsname='TWEAK', reusename=True, rfluxunits='counts',
+            see2dplot=False, separation=0.5, residplot='No plot', runfile='',
+            imagefindcfg = {'threshold': 5, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 5, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute'
     print(message.format(time = time.time()-start_tweak))
 
     for image in run_images:
         if (image == template or 'wfc3_ir' in self.get_instrument(image)):
-          continue
+            continue
         rawtmp = image.replace('.fits','rawtmp.fits')
         hdu_from = fits.open(rawtmp)
         hdu_to = fits.open(image)
 
         for i, hdu in enumerate(hdu_from):
-            if ('EXTNAME' in hdu.header and hdu.header['EXTNAME'].upper() == 'SCI'):
+            if ('EXTNAME' in hdu.header and
+                hdu.header['EXTNAME'].upper() == 'SCI'):
                 hdu_to[i].data[:,:] = hdu.data[:,:]
 
         hdu_from.close()
@@ -828,55 +757,62 @@ class hst123(object):
 
   # download files for input ra and dec
   def download_files(self):
-    coord = SkyCoord(self.ra,self.dec,unit='deg')
+    search_radius = self.options['global_defaults']['mast_radius']
+    obsTable = Observations.query_region(self.coord, radius=search_radius)
+    telmask = [tel.upper() == 'HST' for tel in obsTable['obs_collection']]
+    promask = [pro.upper() == 'IMAGE' for pro in obsTable['dataproduct_type']]
+    detmask = [any(l) for l in list(map(list,zip(*[[det in inst.upper()
+                for inst in obsTable['instrument_name']]
+                for det in ['ACS','WFC','WFPC2']])))]
+    ritmask = [rit.upper() == 'PUBLIC' for rit in obsTable['dataRights']]
 
-    obsTable = Observations.query_region(coord,radius=5*u.arcmin)
-    colmask = obsTable['obs_collection'] == 'HST'
-    immask = obsTable['dataproduct_type'] == 'image'
-    detmask = [obsTable['instrument_name'] == good for good in self.good_detector]
-    detmask = [any(l) for l in list(map(list,zip(*detmask)))]
-    rightmask = obsTable['dataRights'] == 'PUBLIC'
-
-    good = [all(l) for l in zip(colmask,immask,detmask,rightmask)]
-    obsTable = obsTable[good]
+    mask = [all(l) for l in zip(telmask,promask,detmask,ritmask)]
+    obsTable = obsTable[mask]
 
     for obs in obsTable:
-      productList = Observations.get_product_list(obs)
-      for prod in productList:
-        filename = prod['productFilename']
-        if (os.path.isfile(filename) and not self.clobber):
-          message = '{file} already exists and clobber = False. Skipping...'
-          print(message.format(file = filename))
-          continue
-        if ('c0m.fits' in filename or
-            'c1m.fits' in filename or
-            'flt.fits' in filename or
-            'flc.fits' in filename):
-            obsid = prod['obsID']
-            uri = prod['dataURI']
+        productList = Observations.get_product_list(obs)
+        instrument = obs['instrument_name']
+        for prod in productList:
+            filename = prod['productFilename']
+            if (os.path.isfile(filename) and not self.clobber):
+                message = '{file} exists and clobber = False. Skipping...'
+                print(message.format(file = filename))
+                continue
+            if (('c0m.fits' in filename and 'WFPC2' in instrument) or
+                ('c1m.fits' in filename and 'WFPC2' in instrument) or
+                ('c0m.fits' in filename and 'PC/WFC' in instrument) or
+                ('c1m.fits' in filename and 'PC/WFC' in instrument) or
+                ('flc.fits' in filename and 'ACS/WFC' in instrument) or
+                ('flt.fits' in filename and 'ACS/HRC' in instrument) or
+                ('flc.fits' in filename and 'WFC3/UVIS' in instrument) or
+                ('flt.fits' in filename and 'WFC3/IR' in instrument)):
+                obsid = prod['obsID']
+                uri = prod['dataURI']
 
-            message = 'Trying to download {file}'
-            print(message.format(file = filename))
+                message = 'Trying to download {image}'
+                sys.stdout.write(message.format(image=filename))
+                sys.stdout.flush()
 
-            url = self.download_uri + uri
-            try:
-              # utils.data.download_file can get buggy
-              # if the cache is full.  Clear the cache
-              # even though we aren't using caching to
-              # prevent this method from choking
-              utils.data.clear_download_cache()
-            except RuntimeError:
-              error = 'There is a lock on the cache right now.'
-              error += '  Wait to clear download cache.'
-              print(error)
-            try:
-              dat = utils.data.download_file(url,
-                  cache=False,show_progress=False,timeout=120)
-              shutil.move(dat,filename)
-            except:
-              warning = 'WARNING: timed out when downloading {file}'
-              print(warning.format(file = filename))
-
+                url = self.options['global_defaults']['mast_uri'] + uri
+                try:
+                    # utils.data.download_file can get buggy
+                    # if the cache is full.  Clear the cache
+                    # even though we aren't using caching to
+                    # prevent this method from choking
+                    utils.data.clear_download_cache()
+                except RuntimeError:
+                    pass
+                try:
+                    dat = utils.data.download_file(url, cache=False,
+                        show_progress=False, timeout=120)
+                    shutil.move(dat,filename)
+                    message = '\r' + message
+                    message += green+' [SUCCESS]'+end+'\n'
+                    sys.stdout.write(message.format(image=filename))
+                except:
+                    message = '\r' + message
+                    message += red+' [FAILURE]'+end+'\n'
+                    sys.stdout.write(message.format(image=filename))
 
 if __name__ == '__main__':
 
@@ -890,34 +826,32 @@ if __name__ == '__main__':
     parser = hst.add_options(usage=usagestring)
     options, args = parser.parse_args()
 
-    hst.reference_image_name = options.reference
-    hst.ra = options.ra
-    hst.dec = options.dec
+    hst.template = options.reference
     hst.download = options.download
     hst.clobber = options.clobber
+    hst.dolphot = hst.make_dolphot_dict(options.dolphot)
+    if (options.ra is not None and options.dec is not None):
+        hst.coord = hst.parse_coord(options.ra, options.dec)
 
     if (options.download):
-      if (not hst.ra or not hst.dec):
-        error = 'ERROR: hst123.py needs input ra and dec for the download option.'
-        print(error)
-        sys.exit(2)
-      else:
-        banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}'
-        hst.make_banner(banner.format(ra = hst.ra, dec = hst.dec))
-        hst.download_files()
+        if not hst.coord:
+            error = 'ERROR: hst123.py --download requires input ra and dec'
+            print(error)
+            sys.exit(2)
+        else:
+            banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}'
+            hst.make_banner(banner.format(ra=hst.coord.ra.degree,
+                                          dec=hst.coord.dec.degree))
+            hst.download_files()
 
     if (options.makeclean):
-      banner = 'Cleaning output from previous runs of hst123'
-      hst.make_banner(banner)
-      for pattern in hst.pipeline_products:
-        for file in glob.glob(pattern):
-          os.remove(file)
-      hst.copy_raw_data(reverse = True)
-      sys.exit(0)
-
-    # Unzip any .fits.gz images
-    if (len(glob.glob(hst.input_root_dir+'*.fits.gz')) != 0):
-      os.system('gunzip '+hst.input_root_dir+'*.fits.gz')
+        banner = 'Cleaning output from previous runs of hst123'
+        hst.make_banner(banner)
+        for pattern in hst.pipeline_products:
+            for file in glob.glob(pattern):
+                os.remove(file)
+        hst.copy_raw_data(reverse = True)
+        sys.exit(0)
 
     # Get input images
     hst.input_images = hst.get_input_images()
@@ -926,83 +860,90 @@ if __name__ == '__main__':
     # then copy un-edited versions of files back into
     # working dir
     banner = 'Copying raw data to and re-copying from raw data folder: {dir}'
-    hst.make_banner(banner.format(dir = hst.raw_dir))
+    hst.make_banner(banner.format(dir=hst.raw_dir))
     hst.copy_raw_data()
-    hst.copy_raw_data(reverse = True)
-
+    hst.copy_raw_data(reverse=True)
 
     # Check which are HST images that need to be reduced
     remove_list = []
     for file in hst.input_images:
-      if (not hst.needs_to_be_reduced(file)):
-        remove_list.append(file)
-        continue
-      if (hst.get_filter(file).upper() not in hst.options['acceptable_filters']):
-        remove_list.append(file)
+        if not (hst.needs_to_be_reduced(file) and
+            hst.get_filter(file).upper() in hst.options['acceptable_filters']):
+            remove_list.append(file)
 
     for file in remove_list:
-      hst.input_images.remove(file)
+        hst.input_images.remove(file)
 
     if len(hst.input_images) == 0:
-      error = 'ERROR: No input images.  Exiting...'
-      print(error)
-      sys.exit(1)
+        error = 'ERROR: No input images.  Exiting...'
+        print(error)
+        sys.exit(1)
 
     # If not reference image was provided then make one
-    if not hst.reference_image_name:
-      banner = 'No reference image was provided. Generating reference image from input files.'
-      hst.make_banner(banner)
-      hst.pick_reference()
+    if not hst.template:
+        banner = 'Generating reference image from input files.'
+        hst.make_banner(banner)
+        hst.pick_reference()
 
     # Sanitize extensions and header variables in reference
     banner = 'Sanitizing reference image: {image}'
-    hst.make_banner(banner.format(image = hst.reference_image_name))
-    hst.sanitize_template(hst.reference_image_name)
+    hst.make_banner(banner.format(image = hst.template))
+    hst.sanitize_template(hst.template)
 
     # Run main tweakreg to register to the reference
     banner = 'Running main tweakreg'
     hst.make_banner(banner)
-    hst.run_tweakreg(hst.input_images,
-                     hst.reference_image_name,
+    hst.run_tweakreg(hst.input_images,hst.template,
                      hst.options['global_defaults'])
 
     # Sanitize any WFPC2 images
     banner = 'Sanitizing WFPC2 images'
     hst.make_banner(banner)
     for file in hst.input_images:
-      if 'wfpc2' in hst.get_instrument(file):
-        hst.sanitize_wfpc2(file)
+        if 'wfpc2' in hst.get_instrument(file):
+            hst.sanitize_wfpc2(file)
 
     # Start all of the dolphot preparation.
     # Write out a parameter file and do all
     # the mask, splitgroups, calcsky stuff
-    dolphot_file = open(hst.dolphot_param_file,'w')
+    dolphot_file = open(hst.dolphot['param'],'w')
     hst.generate_base_param_file(dolphot_file,hst.options['global_defaults'])
 
-    for file in hst.input_images:
-      hst.filt_list.append(hst.get_filter(file))
-      hst.inst_list.append(hst.get_instrument(file))
-      if (hst.needs_to_be_masked(file)):
-        instrument = hst.get_instrument(file).split('_')[0]
-        hst.mask_image(instrument,file)
-      if (hst.needs_to_split_groups(file)):
-        hst.split_groups(file)
-      split_images = glob.glob(file.replace('.fits', '.chip?.fits'))
-      hst.split_images.extend(split_images)
-      for split in split_images:
-        if hst.needs_to_calc_sky(split):
-          hst.calc_sky(split,hst.options['detector_defaults'])
-      hst.total_images += 1
+    # dolphot file preparation
+    message = 'Preparing dolphot data for files={files}'
+    print(message.format(files=','.join(map(str,hst.input_images))))
+    for image in hst.input_images:
+        # Mask if needs to be masked
+        if hst.needs_to_be_masked(image):
+            hst.mask_image(image, hst.get_instrument(image).split('_')[0])
+
+        # Split groups if needs split groups
+        if hst.needs_to_split_groups(image):
+            hst.split_groups(image)
+
+        # Add split images to the list of split images
+        split_images = glob.glob(image.replace('.fits','.chip?.fits'))
+        if hst.coord:
+            for im in list(split_images):
+                if not hst.image_contains(im, hst.coord):
+                    split_images.remove(im)
+
+        hst.split_images.extend(split_images)
+
+        for split in split_images:
+            if hst.needs_to_calc_sky(split):
+                # run calc sky with calc_sky parameters
+                hst.calc_sky(split, hst.options['detector_defaults'])
 
     # Generate template image sky file
-    if (hst.needs_to_calc_sky(hst.reference_image_name)):
-      hst.calc_sky(hst.reference_image_name,hst.options['detector_defaults'])
+    if (hst.needs_to_calc_sky(hst.template)):
+        hst.calc_sky(hst.template,hst.options['detector_defaults'])
 
     # Write out a complete list of the input
     # images with metadata for easy reference
     banner = 'Complete list of input images'
     hst.make_banner(banner)
-    line_format = '{file: <18} {inst: <14} {filt: <8} '
+    line_format = '{file: <19} {inst: <18} {filt: <10} '
     line_format += '{exp: <10} {date: <10} {time: <10}'
     header = line_format.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
                               exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
@@ -1014,33 +955,41 @@ if __name__ == '__main__':
         inst = hst.get_instrument(image)
         filt = hst.get_filter(image)
 
-        line = line_format.format(file=file,inst=inst.upper(),filt=filt.upper(),
-                                  exp=exptime,date=dateobs,time=timeobs)
+        line = line_format.format(file=image,inst=inst.upper(),
+                                  filt=filt.upper(),exp=exptime,
+                                  date=dateobs,time=timeobs)
         print(line)
 
     # Get rid of any sub-images that do not contain
     # the input ra and dec
-    if (hst.ra != None and hst.dec != None):
-      banner = 'Getting rid of images that do not contain ra={ra}, dec={dec}'
-      hst.make_banner(banner.format(ra = hst.ra, dec = hst.dec))
+    if hst.coord:
+        banner = 'Getting rid of images that do not contain ra={ra}, dec={dec}'
+        hst.make_banner(banner.format(ra=hst.coord.ra.degree,
+                                      dec=hst.coord.dec.degree))
 
-      remove_list = []
-      for image in hst.split_images:
-        if not hst.image_contains(image, hst.ra, hst.dec):
-          remove_list.append(image)
+        remove_list = []
+        for image in hst.split_images:
+            if not hst.image_contains(image, hst.coord):
+                remove_list.append(image)
 
-      for image in remove_list:
-        hst.split_images.remove(image)
+        for image in remove_list:
+            hst.split_images.remove(image)
 
     # Start adding the sub-image info to dolphot param file
     banner = 'Adding images to dolphot parameter file: {file}'
-    hst.make_banner(banner.format(file = hst.dolphot_param_file))
+    hst.make_banner(banner.format(file = hst.dolphot['param']))
+
+    # Add the number of images to reduce
     dolphot_file.write('Nimg = {n}\n'.format(n=len(hst.split_images)))
-    hst.generate_template_param_file(dolphot_file,
-                                     hst.reference_image_name,
-                                     hst.options['detector_defaults'])
+
+    # Write template image to param file
+    hst.add_image_param_file(dolphot_file, hst.template, 0,
+                             hst.options['detector_defaults'])
+
+    # Write out image-specific params to dolphot file
     for i,image in enumerate(hst.split_images):
-      hst.generate_image_param_file(dolphot_file, image, i, hst.options['detector_defaults'])
+        hst.add_image_param_file(dolphot_file, image, i+1,
+                                 hst.options['detector_defaults'])
     dolphot_file.close()
 
     message = 'It took {time} seconds to complete this script'
