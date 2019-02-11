@@ -11,13 +11,16 @@ from __future__ import print_function
 # Dependencies and settings
 import glob, sys, os, shutil, time, urllib, subprocess, warnings, filecmp
 import numpy as np
-from astropy.io import fits
+from datetime import datetime
 from stwcs import updatewcs
+from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from astropy import units as u
-from astroquery.mast import Observations
 from astropy import utils
+from astropy.table import Table
+from astropy.time import Time
+from astroquery.mast import Observations
 from drizzlepac import tweakreg,astrodrizzle
 from astroscrappy import detect_cosmics
 warnings.filterwarnings('ignore')
@@ -204,6 +207,33 @@ class hst123(object):
     print('')
     print('')
 
+  def show_input_list(self):
+    form = '{file: <19} {inst: <18} {filt: <10} '
+    form += '{exp: <10} {date: <10} {time: <10}'
+    header = form.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
+                              exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
+    print(header)
+
+    # Make a table with all of the metadata for each image.
+    # In future, it might be good to make this at start so
+    # other functions can reference the metadata.
+    exptime = [fits.getval(image,'EXPTIME') for image in self.input_images]
+    datetim = [fits.getval(image,'DATE-OBS') + 'T' +
+               fits.getval(image,'TIME-OBS') for image in self.input_images]
+    filters = [self.get_filter(image) for image in self.input_images]
+    instrum = [self.get_instrument(image) for image in self.input_images]
+
+    table = Table([self.input_images,exptime,datetim,filters,instrum],
+                   names=('image','exptime','datetime','filter','instrument'))
+    table.sort('datetime')
+
+    for row in table:
+        line = form.format(file=row['image'], inst=row['instrument'].upper(),
+                    filt=row['filter'].upper(), exp=row['exptime'],
+                    date=Time(row['datetime']).datetime.strftime('%Y-%m-%d'),
+                    time=Time(row['datetime']).datetime.strftime('%H:%M:%S'))
+        print(line)
+
   # Check if num is a number
   def is_number(self, num):
     try:
@@ -249,7 +279,6 @@ class hst123(object):
   # science data.
   def sanitize_template(self, template):
     hdu = fits.open(template, mode='readonly')
-    wght = hdu['WHT'].data
 
     # Going to write out newhdu
     # Only want science extension from orig template
@@ -273,7 +302,9 @@ class hst123(object):
     newhdu[0].header['RDNOISE']  = opt['rdnoise']
     newhdu[0].header['GAIN']     = opt['gain']
 
-    newhdu['SCI'].data[np.where(wght == 0)] = float('NaN')
+    if 'WHT' in [h.name for h in hdu]:
+        wght = hdu['WHT'].data
+        newhdu['SCI'].data[np.where(wght == 0)] = float('NaN')
 
     # Write out to same file w/ overwrite
     newhdu.writeto(template, output_verify='silentfix', overwrite=True)
@@ -496,8 +527,7 @@ class hst123(object):
   # Pick the best reference out of input images
   # Returns the filter of the reference image.
   # Also generates a drizzled image corresponding
-  # to the reference and assigns that drizzled image
-  # to hst.template
+  # to the reference
   def pick_reference(self):
     # If we haven't defined input images yet,
     # we want to return something to signify
@@ -943,37 +973,7 @@ if __name__ == '__main__':
     # images with metadata for easy reference
     banner = 'Complete list of input images'
     hst.make_banner(banner)
-    line_format = '{file: <19} {inst: <18} {filt: <10} '
-    line_format += '{exp: <10} {date: <10} {time: <10}'
-    header = line_format.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
-                              exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
-    print(header)
-    for image in hst.input_images:
-        exptime = fits.getval(image,'EXPTIME')
-        dateobs = fits.getval(image,'DATE-OBS')
-        timeobs = fits.getval(image,'TIME-OBS')
-        inst = hst.get_instrument(image)
-        filt = hst.get_filter(image)
-
-        line = line_format.format(file=image,inst=inst.upper(),
-                                  filt=filt.upper(),exp=exptime,
-                                  date=dateobs,time=timeobs)
-        print(line)
-
-    # Get rid of any sub-images that do not contain
-    # the input ra and dec
-    if hst.coord:
-        banner = 'Getting rid of images that do not contain ra={ra}, dec={dec}'
-        hst.make_banner(banner.format(ra=hst.coord.ra.degree,
-                                      dec=hst.coord.dec.degree))
-
-        remove_list = []
-        for image in hst.split_images:
-            if not hst.image_contains(image, hst.coord):
-                remove_list.append(image)
-
-        for image in remove_list:
-            hst.split_images.remove(image)
+    hst.show_input_list()
 
     # Start adding the sub-image info to dolphot param file
     banner = 'Adding images to dolphot parameter file: {file}'
