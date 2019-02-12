@@ -33,7 +33,7 @@ global_defaults = {
     'change_keys': ['IDCTAB','DGEOFILE','NPOLEXT','NPOLFILE','D2IMFILE',
                     'D2IMEXT','OFFTAB'],
     'cdbs_ftp': 'ftp://ftp.stsci.edu/cdbs/',
-    'mast_radius': 6*u.arcmin,
+    'mast_radius': 6 * u.arcmin,
     'mast_uri': 'https://mast.stsci.edu/api/v0/download/file?uri=',
     'dolphot': {'FitSky': 2,
                 'SkipSky': 2,
@@ -164,11 +164,11 @@ class hst123(object):
 
     # Complete list of pipeline products in case
     # they need to be cleaned at start
-    self.pipeline_products = ['*chip?.fits','*chip?.sky.fits',
-                              '*rawtmp.fits','*drz.fits','*drz.sky.fits',
-                              '*idc.fits','*dxy.fits','*off.fits',
-                              '*d2im.fits','*d2i.fits','*npl.fits',
-                              'dp*','*.log','*.output']
+    self.pipeline_products = ['*chip?.fits', '*chip?.sky.fits',
+                              '*rawtmp.fits', '*drz.fits', '*drz.sky.fits',
+                              '*idc.fits', '*dxy.fits', '*off.fits',
+                              '*d2im.fits', '*d2i.fits', '*npl.fits',
+                              'dp*', '*.log', '*.output']
 
   def add_options(self, parser=None, usage=None):
     import optparse
@@ -489,7 +489,6 @@ class hst123(object):
     maskimage = self.get_dq_image(image)
     cmd = '{instrument}mask {image} {maskimage}'
     mask = cmd.format(instrument=instrument, image=image, maskimage=maskimage)
-    print(mask)
     os.system(mask)
 
   def calc_sky(self, image, options):
@@ -502,16 +501,18 @@ class hst123(object):
                             sigma_high=opt['sigma_high'])
     os.system(calc_sky)
 
-  def generate_base_param_file(self,param_file,options):
-      for par, value in options['dolphot'].items():
+  def generate_base_param_file(self, param_file, options, n):
+    param_file.write('Nimg = {n}\n'.format(n=n))
+    for par, value in options['dolphot'].items():
           param_file.write('{par} = {value}\n'.format(par=par, value=value))
+
 
   def get_dolphot_instrument_parameters(self,image, options):
     instrument_string = self.get_instrument(image)
     detector_string = '_'.join(instrument_string.split('_')[:2])
     return(options[detector_string]['dolphot'])
 
-  def add_image_param_file(self,param_file, image, i, options):
+  def add_image_to_param_file(self,param_file, image, i, options):
     # Add image name to param file
     image_name = 'img{i}_file = {file}\n'
     param_file.write(image_name.format(i=str(i).zfill(4),
@@ -847,8 +848,6 @@ class hst123(object):
 if __name__ == '__main__':
 
     start = time.time()
-    time.sleep(1)
-
     usagestring='USAGE: hst123.py'
     hst = hst123()
     banner = 'Starting hst123.py'
@@ -856,6 +855,17 @@ if __name__ == '__main__':
     parser = hst.add_options(usage=usagestring)
     options, args = parser.parse_args()
 
+    # If we're cleaning up a previous run, execute that here
+    if (options.makeclean):
+        banner = 'Cleaning output from previous runs of hst123'
+        hst.make_banner(banner)
+        for pattern in hst.pipeline_products:
+            for file in glob.glob(pattern):
+                os.remove(file)
+        hst.copy_raw_data(reverse = True)
+        sys.exit(0)
+
+    # Handle options
     hst.template = options.reference
     hst.download = options.download
     hst.clobber = options.clobber
@@ -863,6 +873,7 @@ if __name__ == '__main__':
     if (options.ra is not None and options.dec is not None):
         hst.coord = hst.parse_coord(options.ra, options.dec)
 
+    # If we need to download images, handle that here
     if (options.download):
         if not hst.coord:
             error = 'ERROR: hst123.py --download requires input ra and dec'
@@ -874,42 +885,29 @@ if __name__ == '__main__':
                                           dec=hst.coord.dec.degree))
             hst.download_files()
 
-    if (options.makeclean):
-        banner = 'Cleaning output from previous runs of hst123'
-        hst.make_banner(banner)
-        for pattern in hst.pipeline_products:
-            for file in glob.glob(pattern):
-                os.remove(file)
-        hst.copy_raw_data(reverse = True)
-        sys.exit(0)
-
     # Get input images
     hst.input_images = hst.get_input_images()
 
-    # Make raw/ in current dir and copy files into raw/
-    # then copy un-edited versions of files back into
-    # working dir
+    # Make raw/ in current dir and copy files into raw/ then copy un-edited
+    # versions of files back into working dir
     banner = 'Copying raw data to and re-copying from raw data folder: {dir}'
     hst.make_banner(banner.format(dir=hst.raw_dir))
     hst.copy_raw_data()
     hst.copy_raw_data(reverse=True)
 
     # Check which are HST images that need to be reduced
-    remove_list = []
-    for file in hst.input_images:
+    for file in list(hst.input_images):
         if not (hst.needs_to_be_reduced(file) and
             hst.get_filter(file).upper() in hst.options['acceptable_filters']):
-            remove_list.append(file)
+            hst.input_images.remove(file)
 
-    for file in remove_list:
-        hst.input_images.remove(file)
-
+    # Check there are still images that need to be reduced
     if len(hst.input_images) == 0:
         error = 'ERROR: No input images.  Exiting...'
         print(error)
         sys.exit(1)
 
-    # If not reference image was provided then make one
+    # If reference/template image was not provided then make one
     if not hst.template:
         banner = 'Generating reference image from input files.'
         hst.make_banner(banner)
@@ -933,13 +931,7 @@ if __name__ == '__main__':
         if 'wfpc2' in hst.get_instrument(file):
             hst.sanitize_wfpc2(file)
 
-    # Start all of the dolphot preparation.
-    # Write out a parameter file and do all
-    # the mask, splitgroups, calcsky stuff
-    dolphot_file = open(hst.dolphot['param'],'w')
-    hst.generate_base_param_file(dolphot_file,hst.options['global_defaults'])
-
-    # dolphot file preparation
+    # dolphot image preparation: mask_image, split_groups, calc_sky
     message = 'Preparing dolphot data for files={files}'
     print(message.format(files=','.join(map(str,hst.input_images))))
     for image in hst.input_images:
@@ -957,38 +949,36 @@ if __name__ == '__main__':
             for im in list(split_images):
                 if not hst.image_contains(im, hst.coord):
                     split_images.remove(im)
-
         hst.split_images.extend(split_images)
 
+        # Run calc sky on split images if they need calc sky
         for split in split_images:
             if hst.needs_to_calc_sky(split):
-                # run calc sky with calc_sky parameters
                 hst.calc_sky(split, hst.options['detector_defaults'])
 
     # Generate template image sky file
     if (hst.needs_to_calc_sky(hst.template)):
         hst.calc_sky(hst.template,hst.options['detector_defaults'])
 
-    # Write out a complete list of the input
-    # images with metadata for easy reference
+    # Write out a list of the input images with metadata for easy reference
     banner = 'Complete list of input images'
     hst.make_banner(banner)
     hst.show_input_list()
 
-    # Start adding the sub-image info to dolphot param file
+    # Start constructing dolphot param file from split images and reference
     banner = 'Adding images to dolphot parameter file: {file}'
     hst.make_banner(banner.format(file = hst.dolphot['param']))
-
-    # Add the number of images to reduce
-    dolphot_file.write('Nimg = {n}\n'.format(n=len(hst.split_images)))
+    dolphot_file = open(hst.dolphot['param'],'w')
+    hst.generate_base_param_file(dolphot_file, hst.options['global_defaults'],
+                                 len(hst.split_images))
 
     # Write template image to param file
-    hst.add_image_param_file(dolphot_file, hst.template, 0,
+    hst.add_image_to_param_file(dolphot_file, hst.template, 0,
                              hst.options['detector_defaults'])
 
     # Write out image-specific params to dolphot file
     for i,image in enumerate(hst.split_images):
-        hst.add_image_param_file(dolphot_file, image, i+1,
+        hst.add_image_to_param_file(dolphot_file, image, i+1,
                                  hst.options['detector_defaults'])
     dolphot_file.close()
 
