@@ -1,21 +1,27 @@
 #!/usr/bin/env python
-# CDK v1.00: 2019-02-07
+# CDK v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
+# CDK v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
 #
-# hst123.py: An all-in-one pipeline for downloading,
-# registering, drizzling, and preparing HST data for
-# dolphot reductions
+# hst123.py: An all-in-one script for downloading, registering, drizzling,
+# running dolphot, and scraping data from dolphot catalogs.
 #
 # Python 2/3 compatibility
 from __future__ import print_function
+
+try:
+    input = raw_input # use 'input' function in both Python 2 and 3
+except NameError:
+    pass
 
 # Dependencies and settings
 import glob, sys, os, shutil, time, urllib, subprocess, warnings, filecmp
 import numpy as np
 from datetime import datetime
+from dateutil.parser import parse
+import astropy.wcs as wcs
 from stwcs import updatewcs
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
-from astropy.wcs import WCS
 from astropy import units as u
 from astropy import utils
 from astropy.table import Table
@@ -25,15 +31,17 @@ from drizzlepac import tweakreg,astrodrizzle
 from astroscrappy import detect_cosmics
 warnings.filterwarnings('ignore')
 
+# Color strings for download messages
 green = '\033[1;32;40m'
 red = '\033[1;31;40m'
 end = '\033[0;0m'
 
+# Dictionaries with all options for instruments, detectors, and filters
 global_defaults = {
     'change_keys': ['IDCTAB','DGEOFILE','NPOLEXT','NPOLFILE','D2IMFILE',
                     'D2IMEXT','OFFTAB'],
     'cdbs_ftp': 'ftp://ftp.stsci.edu/cdbs/',
-    'mast_radius': 6 * u.arcmin,
+    'mast_radius': 5 * u.arcmin,
     'mast_uri': 'https://mast.stsci.edu/api/v0/download/file?uri=',
     'dolphot': {'FitSky': 2,
                 'SkipSky': 2,
@@ -149,21 +157,32 @@ class hst123(object):
     # Basic parameters
     self.input_images = []
     self.split_images = []
-    self.template = ''
-    self.coord = None
-    self.download = False
-    self.clobber = False
-    self.dolphot = {}
+
+    self.reference = ''
     self.root_dir = '.'
     self.raw_dir = 'raw/'
 
+    self.before = None
+    self.after = None
+
+    self.coord = None
+    self.redo = False
+    self.download = False
+    self.clobber = False
+
+    self.max_dolphot_images = 9999999999
+    self.run_dolphot = False
+    self.scrape_dolphot = False
+    self.nocuts = False
+    self.dolphot = {}
+
+    # List of options
     self.options = {'global_defaults': global_defaults,
                     'detector_defaults': detector_defaults,
                     'instrument_defaults': instrument_defaults,
                     'acceptable_filters': acceptable_filters}
 
-    # Complete list of pipeline products in case
-    # they need to be cleaned at start
+    # List of pipeline products in case they need to be cleaned at start
     self.pipeline_products = ['*chip?.fits', '*chip?.sky.fits',
                               '*rawtmp.fits', '*drz.fits', '*drz.sky.fits',
                               '*idc.fits', '*dxy.fits', '*off.fits',
@@ -175,26 +194,50 @@ class hst123(object):
     if parser == None:
         parser = optparse.OptionParser(usage=usage,
             conflict_handler='resolve')
-    parser.add_option('--ra', default=None,
-        type='string', help='RA of interest')
-    parser.add_option('--dec', default=None,
-        type='string', help='DEC of interest')
-    parser.add_option('--reference','--ref', default='',
-        type='string', help='Name of the reference image.')
-    parser.add_option('--inputrootdir','--input', default=None,
-        type='string', help='Pathway to input HST files.')
-    parser.add_option('--makeclean', default=False, action='store_true',
+    parser.add_option('--redo', default=False, action='store_true',
+        help='Redo the hst123 reduction by re-copying files from the raw dir.')
+    parser.add_option('--makeclean','--mc', default=False, action='store_true',
         help='Clean up all output files from previous runs then exit.')
     parser.add_option('--download', default=False, action='store_true',
         help='Download the raw data files given input ra and dec.')
+    parser.add_option('--before', default=None, type='string',
+        metavar='YYYY-MM-DD', help='Date after which we should reject all '+\
+        'HST observations for reduction.')
+    parser.add_option('--after', default=None, type='string',
+        metavar='YYYY-MM-DD', help='Date before which we should reject all '+\
+        'HST observations for reduction.')
     parser.add_option('--clobber', default=False, action='store_true',
         help='Overwrite files when using download mode.')
+    parser.add_option('--ra', default=None, metavar='degrees/HH:MM:SS',
+        type='string', help='RA of interest.')
+    parser.add_option('--dec', default=None, metavar='degrees/DD:MM:SS',
+        type='string', help='DEC of interest.')
+    parser.add_option('--reference','--ref', default='', metavar='ref.fits',
+        type='string', help='Name of the reference image.')
+    # WARNING: --rootdir is not yet implemented.  hst123 will always run in the
+    # current directory
+    #parser.add_option('--root','--rootdir', default=None,
+    #    type='string', help='Directory where hst123.py should run/pathway '+\
+    #    'to input files.')
+    parser.add_option('--rundolphot','--rd', default=False, action='store_true',
+        help='Run dolphot as part of this hst123 run.')
+    parser.add_option('--maxdolphot','--mdp','--maxdp', default=9999999,
+        type='int', metavar=9999999,
+        help='Maximum number of images per dolphot run.')
+    parser.add_option('--alignonly','--ao', default=False, action='store_true',
+        help='When running dolphot, set AlignOnly=1 so dolphot stops after '+\
+        'image alignment.')
     parser.add_option('--dolphot','--dp', default='dp', type='string',
-        help='Base name for dolphot parameter file and output.')
+        metavar='dp', help='Name of the dolphot output file.')
+    parser.add_option('--nocuts','--nc', default=False, action='store_true',
+        help='Do not mask bad sources from the dolphot output catalog before '+\
+        'scraping data.')
+    parser.add_option('--scrapedolphot','--sd', default=False,
+        action='store_true', help='Scrape photometry from the dolphot '+\
+        'catalog from the input RA/Dec.')
     return(parser)
 
-  # Make sure all standard output is
-  # formatted in the same way with banner
+  # Make sure all standard output is formatted in the same way with banner
   # messages for each module
   def make_banner(self, message):
     n = 80
@@ -214,9 +257,9 @@ class hst123(object):
                               exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
     print(header)
 
-    # Make a table with all of the metadata for each image.
-    # In future, it might be good to make this at start so
-    # other functions can reference the metadata.
+    # Make a table with all of the metadata for each image. In future, it might
+    # be good to make this at start so other functions can reference the
+    # metadata.
     exptime = [fits.getval(image,'EXPTIME') for image in self.input_images]
     datetim = [fits.getval(image,'DATE-OBS') + 'T' +
                fits.getval(image,'TIME-OBS') for image in self.input_images]
@@ -242,25 +285,26 @@ class hst123(object):
         return(False)
     return(True)
 
+  # Make dictionary with dolphot information
   def make_dolphot_dict(self, dolphot):
-    return({ 'base': dolphot, 'param': dolphot+'.param' })
+    return({ 'base': dolphot, 'param': dolphot+'.param',
+             'log': dolphot+'.output', 'total_objs': 0,
+             'colnames': [] })
 
+  # Copy raw data into raw data dir
   def copy_raw_data(self, reverse = False):
-    # reverse = False will simply backup data
-    # in the working directory to the raw dir
+    # reverse = False will simply backup data in the working directory to the
+    # raw dir
     if not reverse:
         if not os.path.exists(self.raw_dir):
             os.mkdir(self.raw_dir)
         for f in self.input_images:
             if not os.path.isfile(self.raw_dir+f):
                 shutil.copy(f, self.raw_dir)
-    # reverse = True will copy files from the
-    # raw dir to the working directory if the
-    # working files are different from the raw
-    # dir.  This is necessary for the pipeline
-    # to work properly, as some procedures
-    # (esp. WCS checking, tweakreg, astrodrizzle)
-    # require un-edited files.
+    # reverse = True will copy files from the raw dir to the working directory
+    # if the working files are different from the raw dir.  This is necessary
+    # for the pipeline to work properly, as some procedures (esp. WCS checking,
+    # tweakreg, astrodrizzle) require un-edited files.
     else:
         for file in glob.glob(self.raw_dir+'*.fits'):
             path, base = os.path.split(file)
@@ -274,28 +318,25 @@ class hst123(object):
                 shutil.copy(file, base)
             os.chmod(base,0775)
 
-  # Sanitizes template header, gets rid of
-  # multiple extensions and only preserves
-  # science data.
-  def sanitize_template(self, template):
-    hdu = fits.open(template, mode='readonly')
+  # Sanitizes reference header, gets rid of multiple extensions and only
+  # preserves science data.
+  def sanitize_reference(self, reference):
+    hdu = fits.open(reference, mode='readonly')
 
     # Going to write out newhdu
-    # Only want science extension from orig template
+    # Only want science extension from orig reference
     newhdu = fits.HDUList()
     newhdu.append(hdu['SCI'])
 
-    # Want to preserve header info, so combine
-    # SCI+PRIMARY headers (except COMMENT/HISTORY keys)
+    # Want to preserve header info, so combine SCI+PRIMARY headers
     for key in hdu['PRIMARY'].header.keys():
         if (key not in newhdu[0].header.keys()+['COMMENT','HISTORY']):
             newhdu[0].header[key] = hdu['PRIMARY'].header[key]
 
-    # Make sure that template header reflects one extension
+    # Make sure that reference header reflects one extension
     newhdu[0].header['EXTEND']=False
 
-    # Add header variables that dolphot needs:
-    # GAIN, RDNOISE, SATURATE
+    # Add header variables that dolphot needs: GAIN, RDNOISE, SATURATE
     inst = newhdu[0].header['INSTRUME'].lower()
     opt  = self.options['instrument_defaults'][inst]['crpars']
     newhdu[0].header['SATURATE'] = opt['saturation']
@@ -307,20 +348,17 @@ class hst123(object):
         newhdu['SCI'].data[np.where(wght == 0)] = float('NaN')
 
     # Write out to same file w/ overwrite
-    newhdu.writeto(template, output_verify='silentfix', overwrite=True)
+    newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
 
-  # Sanitizes wfpc2 data by getting rid of
-  # extra extensions and changing variables.
+  # Sanitizes wfpc2 data by getting rid of extensions and changing variables.
   def sanitize_wfpc2(self, image):
     hdu = fits.open(image, mode='readonly')
 
-    # Going to write out newhdu
-    # Only want science extension from orig template
+    # Going to write out newhdu Only want science extension from orig reference
     newhdu = fits.HDUList()
     newhdu.append(hdu['PRIMARY'])
 
-    # change number of extensions to number
-    # of science extensions in wfpc2 image
+    # Change number of extensions to number of science extensions in wfpc2 image
     n = len([h.name for h in hdu if h.name == 'SCI'])
     newhdu['PRIMARY'].header['NEXTEND'] = n
 
@@ -335,10 +373,10 @@ class hst123(object):
   def parse_coord(self, ra, dec):
     if (':' in ra and ':' in dec):
         # Input RA/DEC are sexagesimal
-        return(SkyCoord(ra,dec,frame='fk5'))
+        return(SkyCoord(ra, dec, frame='fk5'))
     elif (self.is_number(ra) and self.is_number(dec)):
         # Assume input coordiantes are decimal degrees
-        return(SkyCoord(ra,dec,frame='fk5',unit='deg'))
+        return(SkyCoord(ra, dec, frame='fk5',unit='deg'))
     else:
         # Throw an error and exit
         error = 'ERROR: Cannot parse coordinates ra={ra}, dec={dec}'
@@ -348,6 +386,7 @@ class hst123(object):
   def needs_to_be_reduced(self,image):
     hdu = fits.open(image, mode='readonly')
     is_not_hst_image = False
+    warning = ''
     detector = ''
     instrument = hdu[0].header['INSTRUME'].lower()
     if ('DETECTOR' in hdu[0].header.keys()):
@@ -356,32 +395,61 @@ class hst123(object):
     # Get rid of exposures with exptime < 20s
     exptime = hdu[0].header['EXPTIME']
     if (exptime < 20):
-        return(False)
+        warning = 'WARNING: {img} EXPTIME is {exp} < 20.'
+        return(warning.format(img=image, exp=exptime), False)
+
+    # Now check date and compare to self.before
+    mjd_obs = Time(hdu[0].header['DATE-OBS']+'T'+hdu[0].header['TIME-OBS']).mjd
+    if self.before is not None:
+        mjd_before = Time(self.before).mjd
+        if mjd_obs > mjd_before:
+            warning = 'WARNING: {img} is after the input before date {date}.'
+            return(warning.format(img=image,
+                                  date=self.before.strftime('%Y-%m-%d')), False)
+    # Same with self.after
+    if self.after is not None:
+        mjd_after = Time(self.after).mjd
+        if mjd_obs < mjd_after:
+            warning = 'WARNING: {img} is before the input after date {date}.'
+            return(warning.format(img=image,
+                                  date=self.after.strftime('%Y-%m-%d')), False)
 
     # Get rid of data where the input coordinates do
     # not land in any of the sub-images
     if self.coord:
-        ra = self.coord.ra.degree
-        dec = self.coord.dec.degree
         for h in hdu:
             if h.data is not None and 'EXTNAME' in h.header:
                 if h.header['EXTNAME'] == 'SCI':
-                    w = WCS(h.header,hdu)
-                    world_coord = np.array([[ra,dec]])
-                    pixcrd = w.wcs_world2pix(world_coord,1)
-                    if (pixcrd[0][0] > 0 and
-                        pixcrd[0][1] > 0 and
-                        pixcrd[0][0] < h.header['NAXIS1'] and
-                        pixcrd[0][1] < h.header['NAXIS2']):
+                    # This method doesn't need to be very precise and fails if
+                    # certain variables (e.g., distortion terms) are missing, so
+                    # construct a very basic dummy header with base terms
+                    dummy_header = {'CTYPE1': 'RA---TAN', 'CTYPE2': 'DEC--TAN',
+                        'CRPIX1': h.header['CRPIX1'],
+                        'CRPIX2': h.header['CRPIX2'],
+                        'CRVAL1': h.header['CRVAL1'],
+                        'CRVAL2': h.header['CRVAL2'],
+                        'CD1_1': h.header['CD1_1'], 'CD1_2': h.header['CD1_2'],
+                        'CD2_1': h.header['CD2_1'], 'CD2_2': h.header['CD2_2']}
+                    w = wcs.WCS(dummy_header)
+                    # This can be rough and sometimes WCS will choke on images
+                    # if mode='all', so using mode='wcs' (only core WCS)
+                    x,y = wcs.utils.skycoord_to_pixel(self.coord, w,
+                                                      origin=1, mode='wcs')
+                    if (x > 0 and y > 0 and
+                        x < h.header['NAXIS1'] and y < h.header['NAXIS2']):
                         is_not_hst_image = True
     if not is_not_hst_image:
-        return(False)
+        warning = 'WARNING: {img} does not contain ra={ra}, dec={dec}.'
+        ra = self.coord.ra.degree
+        dec = self.coord.dec.degree
+        return(warning.format(img=image, ra=ra, dec=dec), False)
 
-    # Get rid of images that don't match one of the
-    # allowed instrument/detector types and images
-    # whose extensions don't match the allowed type
-    # for those instrument/detector types
+    # Get rid of images that don't match one of the allowed instrument/detector
+    # types and images whose extensions don't match the allowed type for those
+    # instrument/detector types
     is_not_hst_image = False
+    warning = 'WARNING: {img} with INSTRUME={inst}, DETECTOR={det} is not an '
+    warning += 'acceptable input file.'
     if (instrument.upper() == 'WFPC2' and 'c0m.fits' in image):
         is_not_hst_image = True
     if (instrument.upper() == 'ACS' and
@@ -396,7 +464,8 @@ class hst123(object):
     if (instrument.upper() == 'WFC3' and
         detector.upper() == 'IR' and 'flt.fits' in image):
         is_not_hst_image = True
-    return(is_not_hst_image)
+    return(warning.format(img=image, inst=instrument, det=detector),
+        is_not_hst_image)
 
   def needs_to_split_groups(self,image):
     return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
@@ -409,13 +478,12 @@ class hst123(object):
         else:
             return(True)
 
-
+  # Quick script to determine if the input image contains input coordinate.
+  # This routine should only be run on chip?.fits files.
   def image_contains(self, image, coord):
-    # sky2xy is way better/faster than astropy.wcs
-    # Also, astropy.wcs has a problem with chip?
-    # files generated by splitgroups because the WCSDVARR
-    # gets split off from the data, which is required
-    # by WCS (see fobj).
+    # sky2xy is way better/faster than astropy.wcs. Also, astropy.wcs has a
+    # problem with chip? files generated by splitgroups because the WCSDVARR
+    # gets split off from the data, which is required by WCS (see fobj).
     ra = coord.ra.degree
     dec = coord.dec.degree
     cmd = 'sky2xy {image} {ra} {dec}'.format(image=image, ra=ra, dec=dec)
@@ -427,11 +495,10 @@ class hst123(object):
     else:
         return(True)
 
-
+  # Determine if we need to run the dolphot mask routine
   def needs_to_be_masked(self,image):
-    # Masking should remove all of the DQ arrays etc,
-    # so make sure that any extensions with data in
-    # in them are only SCI extensions. This might not be
+    # Masking should remove all of the DQ arrays etc, so make sure that any
+    # extensions with data in in them are only SCI extensions. This might not be
     # 100% robust, but should be good enough.
     hdulist = fits.open(image)
     needs_masked = False
@@ -441,6 +508,7 @@ class hst123(object):
                 needs_masked = True
     return(needs_masked)
 
+  # Get a string representing the filter for the input image
   def get_filter(self, image):
     if 'c0m.fits' in image:
         f = fits.getval(image, 'FILTNAM1')
@@ -455,6 +523,8 @@ class hst123(object):
                 f = fits.getval(image, 'FILTER2')
     return(f.lower())
 
+  # Get string representing instrument, detectory, and subarray for the input
+  # image
   def get_instrument(self,image):
     hdu = fits.open(image, mode='readonly')
     inst = hdu[0].header['INSTRUME'].lower()
@@ -470,27 +540,33 @@ class hst123(object):
     out = '{inst}_{det}_{sub}'
     return(out.format(inst=inst, det=det, sub=sub))
 
-  def get_input_images(self,pattern=None):
+  # Glob all of the input images from working directory
+  def get_input_images(self, pattern=None):
     if pattern == None:
         pattern = ['*c1m.fits','*c0m.fits','*flc.fits','*flt.fits']
     return([s for p in pattern for s in glob.glob(p)])
 
+  # Get the data quality image for dolphot mask routine.  This is entirely for
+  # WFPC2 since mask routine requires additional input for this instrument
   def get_dq_image(self,image):
     if self.get_instrument(image).split('_')[0].upper() == 'WFPC2':
         return(image.replace('c0m.fits','c1m.fits'))
     else:
         return('')
 
+  # Run the dolphot splitgroups routine
   def split_groups(self,image):
     print('Running split groups for {image}'.format(image=image))
     os.system('splitgroups {filename}'.format(filename=image))
 
+  # Run the dolphot mask routine for the input image
   def mask_image(self, image, instrument):
     maskimage = self.get_dq_image(image)
     cmd = '{instrument}mask {image} {maskimage}'
     mask = cmd.format(instrument=instrument, image=image, maskimage=maskimage)
     os.system(mask)
 
+  # Run the dolphot calcsky routine
   def calc_sky(self, image, options):
     det = '_'.join(self.get_instrument(image).split('_')[:2])
     opt = options[det]['dolphot_sky']
@@ -501,17 +577,19 @@ class hst123(object):
                             sigma_high=opt['sigma_high'])
     os.system(calc_sky)
 
+  # Write the global dolphot parameters to the dolphot parameter file
   def generate_base_param_file(self, param_file, options, n):
     param_file.write('Nimg = {n}\n'.format(n=n))
     for par, value in options['dolphot'].items():
           param_file.write('{par} = {value}\n'.format(par=par, value=value))
 
-
-  def get_dolphot_instrument_parameters(self,image, options):
+  # Get instrument/detector specific params for input image
+  def get_dolphot_instrument_parameters(self, image, options):
     instrument_string = self.get_instrument(image)
     detector_string = '_'.join(instrument_string.split('_')[:2])
     return(options[detector_string]['dolphot'])
 
+  # Write image and image-specific parameters to dolphot parameter file
   def add_image_to_param_file(self,param_file, image, i, options):
     # Add image name to param file
     image_name = 'img{i}_file = {file}\n'
@@ -525,28 +603,32 @@ class hst123(object):
         param_file.write(image_par_value.format(i=str(i).zfill(4),
             par=par, val=val))
 
-  # Pick the best reference out of input images
-  # Returns the filter of the reference image.
-  # Also generates a drizzled image corresponding
-  # to the reference
+  # Pick the best reference out of input images.  Returns the filter of the
+  # reference image. Also generates a drizzled image corresponding reference
   def pick_reference(self):
-    # If we haven't defined input images yet,
-    # we want to return something to signify
+    # If we haven't defined input images, catch error
     if not self.input_images:
-        warning = 'WARNING: No input images.'
+        warning = 'ERROR: No input images. Exiting...'
         print(warning)
         sys.exit(1)
     else:
-        # List of best filters roughly in the order I would
-        # want for a decent reference image
+        # Best possible filter for a dolphot reference image in the approximate
+        # order I would want to use for a reference image.  You can also use
+        # to force the script to pick a reference image from a specific filter.
         best_filters = ['f606w','f555w','f814w','f350lp',
                         'f450w','f439w','f110w','f160w','f550m']
+
+        # Best filter suffixes in the approximate order we would want to use to
+        # generate a templatea.
+        best_types = ['lp', 'w', 'x', 'm', 'n']
 
         # First group images together by filter/instrument
         filts = [self.get_filter(im) for im in self.input_images]
         insts = [self.get_instrument(im).split('_')[0]
                  for im in self.input_images]
 
+        # Group images together by unique instrument/filter pairs and then
+        # calculate the total exposure time for all pairs.
         unique_filter_inst = list(set(['{}_{}'.format(a_, b_)
                                        for a_, b_ in zip(filts, insts)]))
         total_exposure = []
@@ -560,6 +642,8 @@ class hst123(object):
 
         best_filt_inst = ''
         best_exposure = 0
+
+        # First type to generate a reference image from the 'best' filters.
         for filt in best_filters:
             if any(filt in s for s in unique_filter_inst):
                 vals = filter(lambda x: filt in x, unique_filter_inst)
@@ -569,45 +653,18 @@ class hst123(object):
                         best_filt_inst = v
                         best_exposure = exposure
 
-        # Now check for any long-pass filter
-        if not best_filt_inst:
-            if any('lp' in s for s in unique_filter_inst):
-                vals = filter(lambda x: 'lp' in x, unique_filter_inst)
-                for v in vals:
-                    exposure = total_exposure[unique_filter_inst.index(v)]
-                    if exposure > best_exposure:
-                        best_filt_inst = v
-                        best_exposure = exposure
+        # Now try to generate a reference image for types in best_types.
+        for filt_type in best_types:
+            if not best_filt_inst:
+                if any(filt_type in s for s in unique_filter_inst):
+                    vals = filter(lambda x: filt_type in x, unique_filter_inst)
+                    for v in vals:
+                        exposure = total_exposure[unique_filter_inst.index(v)]
+                        if exposure > best_exposure:
+                            best_filt_inst = v
+                            best_exposure = exposure
 
-        # Now check for any wide-band filter
-        if not best_filt_inst:
-            if any('w' in s for s in unique_filter_inst):
-                vals = filter(lambda x: 'w' in x, unique_filter_inst)
-                for v in vals:
-                    exposure = total_exposure[unique_filter_inst.index(v)]
-                    if exposure > best_exposure:
-                        best_filt_inst = v
-                        best_exposure = exposure
-
-        # Now check for medium filters
-        if not best_filt_inst:
-            if any('m' in s for s in unique_filter_inst):
-                vals = filter(lambda x: 'm' in x, unique_filter_inst)
-                for v in vals:
-                    exposure = total_exposure[unique_filter_inst.index(v)]
-                    if exposure > best_exposure:
-                        best_filt_inst = v
-                        best_exposure = exposure
-
-        # Now check for all remaining filters
-        if not best_filt_inst:
-            for v in unique_filter_inst:
-                exposure = total_exposure[unique_filter_inst.index(v)]
-                if exposure > best_exposure:
-                    best_filt_inst = v
-                    best_exposure = exposure
-
-        # Now get list of images with best_filt_inst
+        # Now get list of images with best_filt_inst.
         reference_images = []
         for im in self.input_images:
             if (self.get_filter(im)+'_'+
@@ -615,13 +672,15 @@ class hst123(object):
                 reference_images.append(im)
         best_filt,best_inst = best_filt_inst.split('_')
         output_name = best_inst+'_'+best_filt+'_drz.fits'
-        message = 'Reference image name will be: {template}'
-        print(message.format(template=output_name))
-        self.template = output_name
+        message = 'Reference image name will be: {reference}. '
+        message += 'Generating from input files {files}.'
+        print(message.format(reference=output_name, files=reference_images))
+        self.reference = output_name
 
         self.run_tweakreg(reference_images,'',self.options['global_defaults'])
         self.run_astrodrizzle(reference_images, output_name = output_name)
 
+  # Run the drizzlepac astrodrizzle routine using detector parameters.
   def run_astrodrizzle(self, images, output_name = None):
     if output_name is None:
         output_name = 'drizzled.fits'
@@ -637,7 +696,8 @@ class hst123(object):
     inst = list(set([self.get_instrument(im).split('_')[0] for im in images]))
     det = '_'.join(self.get_instrument(images[0]).split('_')[:2])
     if len(inst) > 1:
-        error = 'ERROR: Cannot drizzle together images from detectors: {det}'
+        error = 'ERROR: Cannot drizzle together images from detectors: {det}.'
+        error += 'Exiting...'
         print(error.format(det=','.join(map(str,inst))))
         sys.exit(1)
 
@@ -720,54 +780,70 @@ class hst123(object):
     hdulist.close()
 
   # Run tweakreg on all input images
-  def run_tweakreg(self, images, template, options):
+  def run_tweakreg(self, images, reference, options):
 
-    run_images = images[:]
+    # Make a copy of the input image list
+    run_images = list(images)
+
+    # Check if tweakreg has already been run on each image and if it has then
+    # assume images are aligned
+    for file in list(run_images):
+        hdu = fits.open(file, mode='readonly')
+        remove_image = False
+        for h in hdu:
+            if h.name == 'SCI':
+                header = h.header
+                for key in header.keys():
+                    if 'WCSNAME' in key:
+                        if header[key] == 'TWEAK':
+                                remove_image = True
+        if remove_image:
+            run_images.remove(file)
+
 
     # Check if we just removed all of the images
     if (len(run_images) == 0):
-        warning = 'WARNING: All images have been run through tweakreg'
+        warning = 'WARNING: All images have been run through tweakreg.'
         print(warning)
         return(1)
 
     for image in run_images:
-        # wfc3_ir doesn't need cosmic clean and assume template is cleaned
-        if (image == template or 'wfc3_ir' in self.get_instrument(image)):
+        # wfc3_ir doesn't need cosmic clean and assume reference is cleaned
+        if (image == reference or 'wfc3_ir' in self.get_instrument(image)):
             continue
         rawtmp = image.replace('.fits','rawtmp.fits')
 
         # Copy the raw data into a temporary file
         shutil.copy(image, rawtmp)
 
-        # Clean cosmic rays on the image in place.
-        # We do this so we don't accidentally pick
-        # cosmic rays for alignment
+        # Clean cosmic rays on the image in place. We do this so we don't
+        # accidentally pick cosmic rays for alignment
         inst = self.get_instrument(image).split('_')[0]
         crpars = self.options['instrument_defaults'][inst]['crpars']
         self.run_cosmic(image,crpars)
 
-    if (template == '' or template == None):
+    if (reference == '' or reference == None):
         shutil.copy(images[0],'dummy.fits')
-        template = 'dummy.fits'
+        reference = 'dummy.fits'
 
     message = 'Executing tweakreg with images: {images} \n'
-    message += 'Template image: {template} \n'
+    message += 'Reference image: {reference} \n'
     message += 'Tweakreg is executing...'
     print(message.format(images = ','.join(map(str,run_images)),
-                         template = template))
+                         reference = reference))
     start_tweak = time.time()
-    tweakreg.TweakReg(files = run_images, refimage = template, verbose=False,
+    tweakreg.TweakReg(files = run_images, refimage = reference, verbose=False,
             interactive=False, clean=True, writecat = False, updatehdr=True,
             wcsname='TWEAK', reusename=True, rfluxunits='counts',
             see2dplot=False, separation=0.5, residplot='No plot', runfile='',
             imagefindcfg = {'threshold': 5, 'use_sharp_round': True},
             refimagefindcfg = {'threshold': 5, 'use_sharp_round': True})
 
-    message = 'Tweakreg took {time} seconds to execute'
+    message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
 
     for image in run_images:
-        if (image == template or 'wfc3_ir' in self.get_instrument(image)):
+        if (image == reference or 'wfc3_ir' in self.get_instrument(image)):
             continue
         rawtmp = image.replace('.fits','rawtmp.fits')
         hdu_from = fits.open(rawtmp)
@@ -786,20 +862,32 @@ class hst123(object):
     if os.path.isfile('dummy.fits'):
       os.remove('dummy.fits')
 
-  # download files for input ra and dec
+    return(0)
+
+  # download files for input self.coord
   def download_files(self):
+    # Define the search coord/radius and grab all files from MAST that
+    # correspond to this region
     search_radius = self.options['global_defaults']['mast_radius']
     obsTable = Observations.query_region(self.coord, radius=search_radius)
+
+    # Get rid of all masked rows as (pretty sure) they aren't HST data anyway
+    obsTable = obsTable.filled()
+
+    # Construct masks for telescope, data type, detector, and data rights
     telmask = [tel.upper() == 'HST' for tel in obsTable['obs_collection']]
     promask = [pro.upper() == 'IMAGE' for pro in obsTable['dataproduct_type']]
     detmask = [any(l) for l in list(map(list,zip(*[[det in inst.upper()
                 for inst in obsTable['instrument_name']]
                 for det in ['ACS','WFC','WFPC2']])))]
-    ritmask = [rit.upper() == 'PUBLIC' for rit in obsTable['dataRights']]
+    ritmask = [str(rit).upper() == 'PUBLIC' for rit in obsTable['dataRights']]
 
+    # Apply the masks to the observation table
     mask = [all(l) for l in zip(telmask,promask,detmask,ritmask)]
     obsTable = obsTable[mask]
 
+    # Iterate through each observation and download the correct product
+    # depending on the filename and instrument/detector of the observation
     for obs in obsTable:
         productList = Observations.get_product_list(obs)
         instrument = obs['instrument_name']
@@ -826,10 +914,9 @@ class hst123(object):
 
                 url = self.options['global_defaults']['mast_uri'] + uri
                 try:
-                    # utils.data.download_file can get buggy
-                    # if the cache is full.  Clear the cache
-                    # even though we aren't using caching to
-                    # prevent this method from choking
+                    # utils.data.download_file can get buggy if the cache is
+                    # full.  Clear the cache even though we aren't using caching
+                    # to prevent download method from choking
                     utils.data.clear_download_cache()
                 except RuntimeError:
                     pass
@@ -846,18 +933,27 @@ class hst123(object):
                     sys.stdout.write(message.format(image=filename))
 
 if __name__ == '__main__':
-
+    # Start timer, create hst123 class obj, parse args
     start = time.time()
     usagestring='USAGE: hst123.py'
     hst = hst123()
-    banner = 'Starting hst123.py'
-    hst.make_banner(banner)
     parser = hst.add_options(usage=usagestring)
     options, args = parser.parse_args()
 
+    # Starting banner
+    banner = 'Starting hst123.py'
+    hst.make_banner(banner)
+
     # If we're cleaning up a previous run, execute that here
     if (options.makeclean):
-        banner = 'Cleaning output from previous runs of hst123'
+        question = 'Are you sure you want to delete output from previous hst123'
+        question += ' runs? [y/n] '
+        var = input(question)
+        if var != 'y' and var != 'yes':
+            warning = 'WARNING: input={inp}. Exiting...'
+            print(warning)
+            sys.exit(3)
+        banner = 'Cleaning output from previous runs of hst123.'
         hst.make_banner(banner)
         for pattern in hst.pipeline_products:
             for file in glob.glob(pattern):
@@ -865,22 +961,34 @@ if __name__ == '__main__':
         hst.copy_raw_data(reverse = True)
         sys.exit(0)
 
-    # Handle options
-    hst.template = options.reference
+    # Handle all other options
+    hst.reference = options.reference
     hst.download = options.download
     hst.clobber = options.clobber
+    hst.redo = options.redo
+    hst.max_dolphot_images = options.maxdolphot
+    hst.run_dolphot = options.rundolphot
+    hst.scrape_dolphot = options.scrapedolphot
+    hst.nocuts = options.nocuts
     hst.dolphot = hst.make_dolphot_dict(options.dolphot)
+    if options.alignonly:
+        hst.options['global_defaults']['dolphot']['AlignOnly']=1
     if (options.ra is not None and options.dec is not None):
         hst.coord = hst.parse_coord(options.ra, options.dec)
+    if options.before is not None:
+        hst.before = parse(options.before)
+    if options.after is not None:
+        hst.after = parse(options.after)
 
     # If we need to download images, handle that here
     if (options.download):
         if not hst.coord:
-            error = 'ERROR: hst123.py --download requires input ra and dec'
+            error = 'ERROR: hst123.py --download requires input ra and dec.'
+            error += 'Exiting...'
             print(error)
             sys.exit(2)
         else:
-            banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}'
+            banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}.'
             hst.make_banner(banner.format(ra=hst.coord.ra.degree,
                                           dec=hst.coord.dec.degree))
             hst.download_files()
@@ -890,15 +998,26 @@ if __name__ == '__main__':
 
     # Make raw/ in current dir and copy files into raw/ then copy un-edited
     # versions of files back into working dir
-    banner = 'Copying raw data to and re-copying from raw data folder: {dir}'
+    banner = 'Copying raw data to and re-copying from raw data folder: {dir}.'
     hst.make_banner(banner.format(dir=hst.raw_dir))
     hst.copy_raw_data()
-    hst.copy_raw_data(reverse=True)
+    if hst.redo:
+        hst.copy_raw_data(reverse=True)
 
     # Check which are HST images that need to be reduced
+    banner = 'Checking which images need to be reduced by hst123.'
+    hst.make_banner(banner)
     for file in list(hst.input_images):
-        if not (hst.needs_to_be_reduced(file) and
-            hst.get_filter(file).upper() in hst.options['acceptable_filters']):
+        warning, needs_reduce = hst.needs_to_be_reduced(file)
+        if not (needs_reduce):
+            print(warning)
+            hst.input_images.remove(file)
+            continue
+        filt = hst.get_filter(file).upper()
+        if not (filt in hst.options['acceptable_filters']):
+            warning = 'WARNING: {img} with FILTER={filt} '
+            warning += 'does not have an acceptable filter.'
+            print(warning.format(img=file, filt=filt))
             hst.input_images.remove(file)
 
     # Check there are still images that need to be reduced
@@ -907,32 +1026,42 @@ if __name__ == '__main__':
         print(error)
         sys.exit(1)
 
-    # If reference/template image was not provided then make one
-    if not hst.template:
-        banner = 'Generating reference image from input files.'
+    # If reference image was not provided then make one
+    banner = 'Handling reference image: '
+    if not hst.reference:
+        banner += 'generating from input files.'
         hst.make_banner(banner)
         hst.pick_reference()
+    else:
+        banner += '{ref}.'
+        hst.make_banner(banner.format(ref=hst.reference))
+        # Check to make sure reference image file actually exists
+        if not os.path.isfile(hst.reference):
+            error = 'ERROR: input reference image {ref} does not exist. '
+            error += 'Exiting...'
+            print(error.format(ref=hst.reference))
+            sys.exit(1)
 
     # Sanitize extensions and header variables in reference
-    banner = 'Sanitizing reference image: {image}'
-    hst.make_banner(banner.format(image = hst.template))
-    hst.sanitize_template(hst.template)
+    banner = 'Sanitizing reference image: {ref}.'
+    hst.make_banner(banner.format(ref=hst.reference))
+    hst.sanitize_reference(hst.reference)
 
     # Run main tweakreg to register to the reference
-    banner = 'Running main tweakreg'
+    banner = 'Running main tweakreg.'
     hst.make_banner(banner)
-    hst.run_tweakreg(hst.input_images,hst.template,
+    errorcode = hst.run_tweakreg(hst.input_images,hst.reference,
                      hst.options['global_defaults'])
 
     # Sanitize any WFPC2 images
-    banner = 'Sanitizing WFPC2 images'
+    banner = 'Sanitizing WFPC2 images.'
     hst.make_banner(banner)
     for file in hst.input_images:
         if 'wfpc2' in hst.get_instrument(file):
             hst.sanitize_wfpc2(file)
 
     # dolphot image preparation: mask_image, split_groups, calc_sky
-    message = 'Preparing dolphot data for files={files}'
+    message = 'Preparing dolphot data for files={files}.'
     print(message.format(files=','.join(map(str,hst.input_images))))
     for image in hst.input_images:
         # Mask if needs to be masked
@@ -956,25 +1085,39 @@ if __name__ == '__main__':
             if hst.needs_to_calc_sky(split):
                 hst.calc_sky(split, hst.options['detector_defaults'])
 
-    # Generate template image sky file
-    if (hst.needs_to_calc_sky(hst.template)):
-        hst.calc_sky(hst.template,hst.options['detector_defaults'])
+    # Generate reference image sky file
+    if (hst.needs_to_calc_sky(hst.reference)):
+        hst.calc_sky(hst.reference, hst.options['detector_defaults'])
 
     # Write out a list of the input images with metadata for easy reference
     banner = 'Complete list of input images'
     hst.make_banner(banner)
     hst.show_input_list()
 
+    # Check if the total number of images exceeds the maximum number of dolphot
+    # images per run (--maxdolphot).  If so, cut up the list of input images
+    # into separate dolphot param files with Nimg = maxdolphot.  This is mostly
+    # so you don't kill your computer's RAM running dolphot.  Technically, this
+    # also saves time on big (>>a few) dolphot runs.
+    if len(hst.split_images) > hst.max_dolphot_images:
+        # TODO: need to implement this routine and separate dolphot runs and
+        # scraping data from all of the separate dolphot runs
+        message = 'WARNING: total number of input images for dolphot={Nimg} and'
+        message += ' max dolphot images per dolphot run={Nmax}.  Chopping '
+        message += 'images into separate dolphot parameter files.'
+        print(message.format(Nimg=len(hst.split_images),
+                             Nmax=hst.max_dolphot_images))
+
     # Start constructing dolphot param file from split images and reference
-    banner = 'Adding images to dolphot parameter file: {file}'
+    banner = 'Adding images to dolphot parameter file: {file}.'
     hst.make_banner(banner.format(file = hst.dolphot['param']))
-    dolphot_file = open(hst.dolphot['param'],'w')
+    dolphot_file = open(hst.dolphot['param'], 'w')
     hst.generate_base_param_file(dolphot_file, hst.options['global_defaults'],
                                  len(hst.split_images))
 
-    # Write template image to param file
-    hst.add_image_to_param_file(dolphot_file, hst.template, 0,
-                             hst.options['detector_defaults'])
+    # Write reference image to param file
+    hst.add_image_to_param_file(dolphot_file, hst.reference, 0,
+                                hst.options['detector_defaults'])
 
     # Write out image-specific params to dolphot file
     for i,image in enumerate(hst.split_images):
@@ -982,5 +1125,56 @@ if __name__ == '__main__':
                                  hst.options['detector_defaults'])
     dolphot_file.close()
 
-    message = 'It took {time} seconds to complete this script'
-    print(message.format(time = time.time()-start))
+    # Run dolphot using the param file we constructed and input parameters
+    if hst.run_dolphot:
+        cmd = 'dolphot '+hst.dolphot['base']
+        cmd += ' -p'+hst.dolphot['param']
+        cmd += ' > '+hst.dolphot['log']
+        banner = 'Running dolphot with cmd={cmd}'
+        hst.make_banner(banner)
+        os.system(cmd)
+
+        message = 'dolphot is finished (whew)!'
+        print(message)
+
+    # Scrape data from the dolphot catalog for the input coordinates
+    if hst.scrape_dolphot:
+        # Check if dolphot output exists
+        if not os.path.isfile(hst.dolphot['base']):
+            error = 'ERROR: dolphot output {dp} does not exist.  Run dolphot '
+            error += '(using hst123.py --rundp).  Exiting...'
+            print(error.format(dp=hst.dolphot['base']))
+            sys.exit(1)
+        else:
+            message = 'Cutting bad sources from dolphot catalog.'
+            print(message)
+            f = open('tmp', 'w')
+            with open(hst.dolphot['base']) as dolphot_file:
+                for line in dolphot_file:
+                    if (int(line.split(' ')[10]) == 1 and         # Obj type
+                        abs(float(line.split(' ')[6] < 0.3)) and  # Sharpness
+                        float(line.split(' ')[9] < 0.5) and       # Crowding
+                        not hst.nocuts):
+                        f.write(line)
+            f.close()
+            os.rename(f,hst.dolphot['base'])
+
+        # Check for reference image and x,y coordinates to scrape data from dp
+        if hst.reference is '' or hst.coord is None:
+            error = 'ERROR: Need a reference image and coordinate to scrape '
+            error = 'data from the dolphot catalog. Exiting...'
+            print(error)
+            sys.exit(1)
+        else:
+            # Get x,y coordinate from reference image of potential source
+            hdu = fits.open(hst.reference)
+            w = wcs.WCS(hdu[0].header)
+            x,y = wcs.utils.skycoord_to_pixel(self.coord, w,
+                                              origin=1, mode='all')
+
+            # Read dolphot file line by line to find the correct row
+            #with open(hst.dolphot['base']) as dolphot_file:
+                #for line in dolphot_file:
+
+    message = 'It took {time} seconds to complete this script.'
+    print(message.format(time=time.time()-start))
