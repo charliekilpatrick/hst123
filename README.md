@@ -28,46 +28,47 @@ Final photometry is scraped (--scrapedolphot) from the dolphot output and split 
 Usage: hst123.py
 
 Options:
-  -h, --help            show this help message and exit
 
-  --redo                Redo the hst123 reduction by re-copying files from the
+  -h, --help<br/>            show this help message and exit
+
+  --redo<br/>                Redo the hst123 reduction by re-copying files from the
                         raw dir.
 
-  --makeclean, --mc     Clean up all output files from previous runs then
+  --makeclean, --mc<br/>     Clean up all output files from previous runs then
                         exit.
 
-  --download            Download the raw data files given input ra and dec.
+  --download<br/>            Download the raw data files given input ra and dec.
 
-  --before=YYYY-MM-DD   Date after which we should reject all HST observations
+  --before=YYYY-MM-DD<br/>   Date after which we should reject all HST observations
                         for reduction.
 
-  --after=YYYY-MM-DD    Date before which we should reject all HST
+  --after=YYYY-MM-DD<br/>    Date before which we should reject all HST
                         observations for reduction.
 
-  --clobber             Overwrite files when using download mode.
+  --clobber<br/>             Overwrite files when using download mode.
 
-  --ra=deg/HH:MM:SS     RA of interest.
+  --ra=deg/HH:MM:SS<br/>     RA of interest.
 
-  --dec=deg/DD:MM:SS    DEC of interest.
+  --dec=deg/DD:MM:SS<br/>    DEC of interest.
 
-  --reference=ref.fits, --ref=ref.fits
+  --reference=ref.fits, --ref=ref.fits<br/>
                         Name of the reference image.
 
-  --rundolphot, --rd    Run dolphot as part of this hst123 run.
+  --rundolphot, --rd<br/>    Run dolphot as part of this hst123 run.
 
-  --maxdolphot=9999999, --mdp=9999999, --maxdp=9999999
+  --maxdolphot=9999999, --mdp=9999999, --maxdp=9999999<br/>
                         Maximum number of images per dolphot run.
 
-  --alignonly, --ao     When running dolphot, set AlignOnly=1 so dolphot stops
+  --alignonly, --ao<br/>     When running dolphot, set AlignOnly=1 so dolphot stops
                         after image alignment.
 
-  --dolphot=dp, --dp=dp
+  --dolphot=dp, --dp=dp<br/>
                         Name of the dolphot output file.
 
-  --nocuts, --nc        Do not mask bad sources from the dolphot output
+  --nocuts, --nc<br/>        Do not mask bad sources from the dolphot output
                         catalog before scraping data.
 
-  --scrapedolphot, --sd
+  --scrapedolphot, --sd<br/>
                         Scrape photometry from the dolphot catalog from the
                         input RA/Dec.
 
