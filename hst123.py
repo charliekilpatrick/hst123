@@ -208,9 +208,9 @@ class hst123(object):
         'HST observations for reduction.')
     parser.add_option('--clobber', default=False, action='store_true',
         help='Overwrite files when using download mode.')
-    parser.add_option('--ra', default=None, metavar='degrees/HH:MM:SS',
+    parser.add_option('--ra', default=None, metavar='deg/HH:MM:SS',
         type='string', help='RA of interest.')
-    parser.add_option('--dec', default=None, metavar='degrees/DD:MM:SS',
+    parser.add_option('--dec', default=None, metavar='deg/DD:MM:SS',
         type='string', help='DEC of interest.')
     parser.add_option('--reference','--ref', default='', metavar='ref.fits',
         type='string', help='Name of the reference image.')

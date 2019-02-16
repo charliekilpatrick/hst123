@@ -29,31 +29,44 @@ Usage: hst123.py
 
 Options:
   -h, --help            show this help message and exit
+
   --redo                Redo the hst123 reduction by re-copying files from the
                         raw dir.
+
   --makeclean, --mc     Clean up all output files from previous runs then
                         exit.
+
   --download            Download the raw data files given input ra and dec.
+
   --before=YYYY-MM-DD   Date after which we should reject all HST observations
                         for reduction.
+
   --after=YYYY-MM-DD    Date before which we should reject all HST
                         observations for reduction.
+
   --clobber             Overwrite files when using download mode.
-  --ra=degrees/HH:MM:SS
-                        RA of interest.
-  --dec=degrees/DD:MM:SS
-                        DEC of interest.
+
+  --ra=deg/HH:MM:SS     RA of interest.
+
+  --dec=deg/DD:MM:SS    DEC of interest.
+
   --reference=ref.fits, --ref=ref.fits
                         Name of the reference image.
+
   --rundolphot, --rd    Run dolphot as part of this hst123 run.
+
   --maxdolphot=9999999, --mdp=9999999, --maxdp=9999999
                         Maximum number of images per dolphot run.
+
   --alignonly, --ao     When running dolphot, set AlignOnly=1 so dolphot stops
                         after image alignment.
+
   --dolphot=dp, --dp=dp
                         Name of the dolphot output file.
+
   --nocuts, --nc        Do not mask bad sources from the dolphot output
                         catalog before scraping data.
+
   --scrapedolphot, --sd
                         Scrape photometry from the dolphot catalog from the
                         input RA/Dec.
