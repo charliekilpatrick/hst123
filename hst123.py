@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # CDK v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
 # CDK v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
+# CDK v1.02: 2019-02-22. Added fake star injection
 #
 # hst123.py: An all-in-one script for downloading, registering, drizzling,
 # running dolphot, and scraping data from dolphot catalogs.
@@ -76,7 +77,18 @@ global_defaults = {
                 'NegSky': 0,
                 'Force1': 0,
                 'DiagPlotType': 'PNG',
-                'InterpPSFlib': 1}}
+                'InterpPSFlib': 1,
+                'FakeMatch': 3.0,
+                'FakePSF': 2.0,
+                'FakeStarPSF': 1,
+                'FakePad': 0},
+    'fake': {'filter1': None,
+             'filter2': None,
+             'filter1_min': 18.0,
+             'filter1_max': 30.0,
+             'color_min': -5.0,
+             'color_max': 5.0,
+             'nstars': 50000}}
 
 instrument_defaults = {
     'wfc3': {'env_ref': 'iref',
@@ -181,6 +193,13 @@ class hst123(object):
     self.do_fake = False
     self.dolphot = {}
 
+    # Names for the final output photometry table
+    final_names = ['JULIANDATE', 'INSTRUMENT', 'FILTER',
+                   'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR']
+    # Make an empty table with above column names for output photometry table
+    self.final_phot = Table([[0.],['INSTRUMENT'],['FILTER'],[0.],[0.],[0.]],
+        names=final_names)[:0].copy()
+
     # List of options
     self.options = {'global_defaults': global_defaults,
                     'detector_defaults': detector_defaults,
@@ -262,7 +281,7 @@ class hst123(object):
     print('')
     print('')
 
-  def average_magnitudes(self, mags, magerrs, counts, exptimes):
+  def avg_magnitudes(self, mags, magerrs, counts, exptimes):
     # First create a mask and apply to input values
     idx = []
     for i,data in enumerate(zip(mags,magerrs,counts,exptimes)):
@@ -298,7 +317,7 @@ class hst123(object):
   # Given a row of a dolphot file and a columns file, return the data key
   # described by 'data' (e.g., 'VEGAMAG', 'Total counts',
   # 'Magnitude uncertainty') for the input image name
-  def get_dolphot_data(row, columns, data, image):
+  def get_dolphot_data(self, row, columns, data, image):
     # First get the column number from the start of the column file
     l = ''
     with open(columns) as f:
@@ -312,7 +331,7 @@ class hst123(object):
     # Now grab that piece of data from the row and return
     return(row.split()[colnum])
 
-  def show_photometry(final_photometry, latex=False, file=None):
+  def show_photometry(self, final_photometry, latex=False, file=None):
     # Check to make sure dictionary is set up properly
     keys = final_photometry.keys()
     if ('INSTRUMENT' not in keys or 'FILTER' not in keys
@@ -396,8 +415,9 @@ class hst123(object):
   def make_dolphot_dict(self, dolphot):
     return({ 'base': dolphot, 'param': dolphot+'.param',
              'log': dolphot+'.output', 'total_objs': 0,
-             'colnames': [], 'fake': dolphot+'.fake' ,
-             'fake_out': dolphot+'.fakeout'})
+             'colfile': dolphot+'.columns', 'fake': dolphot+'.fake' ,
+             'fake_out': dolphot+'.fakeout', 'radius': 2,
+             'final_phot': dolphot+'.phot'})
 
   # Copy raw data into raw data dir
   def copy_raw_data(self, reverse = False):
@@ -428,6 +448,94 @@ class hst123(object):
                 print(message.format(file=file,base=base))
                 shutil.copyfile(file, base)
             os.chmod(base, 0775)
+
+  # For an input obstable, sort all files into instrument, visit, and filter
+  # so we can group them together for the final output from dolphot
+  def add_visit_info(self, obstable):
+    # First add empty 'visit' column to obstable
+    obstable['visit'] = np.zeros(len(obstable))
+
+    # Sort obstable by date so we assign visits in chronological order
+    obstable.sort('datetime')
+
+    # Time tolerance for defining a 'visit'.  How many days apart were the obs
+    # separated
+    tol = 1
+
+    # Iterate through each file in the obstable
+    for row in obstable:
+        inst = row['instrument'].upper()
+        jd = Time(row['datetime']).jd
+        filt = row['filter'].upper()
+        filename = row['image']
+
+        # If this is the first one we're making, assign it to visit 1
+        if all([obs['visit'] == 0 for obs in obstable]):
+            row['visit'] = 1
+        else:
+            instmask = obstable['instrument'] == inst
+            timemask = [abs(Time(obs['datetime']).jd - jd) < tol
+                            for obs in obstable]
+            filtmask = obstable['filt'] == filt
+            mask = [all(l) for l in zip(instmask, timemask, filtmask)]
+
+            # If no matches, then we need to define a new visit
+            if not any(mask):
+                # no matches. create new visit number = max(visit)+1
+                row['visit'] = np.max(obstable['visit']) + 1
+            else:
+                # otherwise, confirm that all visits of obstable[mask] are same
+                if (len(list(set(obstable[mask]['visit']))) != 1):
+                    error = 'ERROR: visit numbers are incorrectly assigned.'
+                    print(error)
+                    return(1)
+                else:
+                    # visit number is equal to other values in set
+                    row['visit'] = list(set(obstable[mask]['visit']))[0]
+    return(0)
+
+  # Given an input dictionary of files sorted by visits, a row from a dolphot
+  # output file, and a column file corresponding to that dolphot file, parse the
+  # output into a photometry table
+  def parse_phot(self, obstable, row, column_file):
+    # Names for the final output photometry table
+    final_names = ['JULIANDATE', 'INSTRUMENT', 'FILTER',
+                   'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR']
+    # Make an empty table with above column names for output photometry table
+    final_phot = Table([[0.],['INSTRUMENT'],['FILTER'],[0.],[0.],[0.]],
+        names=final_names)[:0].copy()
+
+    # Iterate through the dictionary to get all photometry from files
+    for inst in list(set(obstable['instrument'])):
+        insttable = obstable[obstable['instrument'] == inst]
+        instname = dictionary[inst]['NAME']
+        for visit in list(set(insttable['visit'])):
+            visittable = insttable[insttable['visit'] == visit]
+            for filt in list(set(visittable['filter'])):
+                filttable = visittable[visittable['filter'] == filt]
+                mjds, mags, magerrs, counts, exptimes = ([] for i in range(5))
+                for im in filttable['image']:
+                    mjds = [Time(str(fits.getval(im,'DATE-OBS')) + 'T' +
+                             str(fits.getval(im,'TIME-OBS'))).jd]
+                    mags = [float(self.get_dolphot_data(row[1], 'dp.columns',
+                            'Instrumental', im))]
+                    magerrs = [float(self.get_dolphot_data(row[1], 'dp.columns',
+                               'Magnitude uncertainty', im))]
+                    counts = [float(self.get_dolphot_data(row[1], 'dp.columns',
+                              'Measured counts', im))]
+                    exptimes = [float(fits.getval(im, 'EXPTIME'))]
+
+                # Calculate average of mjds, total of exptimes
+                avg_mjd = np.mean(mjds)
+                total_exptime = np.sum(exptimes)
+
+                # Average magnitude and magnitude errors
+                mag, magerr = self.avg_magnitudes(mags, magerrs,
+                    counts, exptimes)
+
+                final_phot.add_row((avg_mjd, instname, filt,
+                                    total_exptime, mag, magerr))
+    return(final_phot)
 
   # Sanitizes reference header, gets rid of multiple extensions and only
   # preserves science data.
@@ -500,6 +608,11 @@ class hst123(object):
     warning = ''
     detector = ''
     instrument = hdu[0].header['INSTRUME'].lower()
+    if 'c1m.fits' in image:
+        # We need the c1m.fits files, but they aren't reduced as science data
+        warning = 'WARNING: do not need to reduce c1m.fits files.'
+        return(warning, False)
+
     if ('DETECTOR' in hdu[0].header.keys()):
         detector = hdu[0].header['DETECTOR'].lower()
 
@@ -621,17 +734,17 @@ class hst123(object):
 
   # Get a string representing the filter for the input image
   def get_filter(self, image):
-    if 'c0m.fits' in image:
-        f = fits.getval(image, 'FILTNAM1')
-        if len(f) == 0:
-            f = fits.getval(image, 'FILTNAM2')
+    if 'wfpc2' in str(fits.getval(image, 'INSTRUME')).lower():
+        f = str(fits.getval(image, 'FILTNAM1'))
+        if len(f.strip()) == 0:
+            f = str(fits.getval(image, 'FILTNAM2'))
     else:
         try:
-            f = fits.getval(image, 'FILTER')
+            f = str(fits.getval(image, 'FILTER'))
         except:
-            f = fits.getval(image, 'FILTER1')
+            f = str(fits.getval(image, 'FILTER1'))
             if 'clear' in f.lower():
-                f = fits.getval(image, 'FILTER2')
+                f = str(fits.getval(image, 'FILTER2'))
     return(f.lower())
 
   # Get string representing instrument, detectory, and subarray for the input
@@ -837,8 +950,8 @@ class hst123(object):
                     sys.stdout.flush()
                     try:
                         # utils.data.download_file can get buggy if the cache is
-                        # full.  Clear the cache even though we aren't using caching
-                        # to prevent download method from choking
+                        # full.  Clear the cache even though we aren't using
+                        # caching to prevent download method from choking
                         utils.data.clear_download_cache()
                     except RuntimeError:
                         pass
@@ -973,8 +1086,8 @@ class hst123(object):
             interactive=False, clean=True, writecat = False, updatehdr=True,
             wcsname='TWEAK', reusename=True, rfluxunits='counts',
             see2dplot=False, separation=0.5, residplot='No plot', runfile='',
-            imagefindcfg = {'threshold': 5, 'use_sharp_round': True},
-            refimagefindcfg = {'threshold': 5, 'use_sharp_round': True})
+            imagefindcfg = {'threshold': 10, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 10, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
@@ -1129,8 +1242,13 @@ if __name__ == '__main__':
     if options.after is not None:
         hst.after = parse(options.after)
 
+    # If we're re-doing the reduction, copy files that don't exist from the raw
+    # data directory
+    if hst.redo:
+        hst.copy_raw_data(reverse=True)
+
     # If we need to download images, handle that here
-    if (options.download):
+    if options.download:
         if not hst.coord:
             error = 'ERROR: hst123.py --download requires input ra and dec.'
             error += 'Exiting...'
@@ -1150,8 +1268,6 @@ if __name__ == '__main__':
     banner = 'Copying raw data to raw data folder: {dir}.'
     hst.make_banner(banner.format(dir=hst.raw_dir))
     hst.copy_raw_data()
-    if hst.redo:
-        hst.copy_raw_data(reverse=True)
 
     # Check which are HST images that need to be reduced
     banner = 'Checking which images need to be reduced by hst123.'
@@ -1317,11 +1433,11 @@ if __name__ == '__main__':
                     dp=hst.dolphot['base']))
                 width = 80
                 sys.stdout.write('\n')
-                sys.stdout.write('[%s]' % (' ' * width))
+                sys.stdout.write('[%s]' % (' ' * (width-2)))
                 sys.stdout.flush()
-                sys.stdout.write('\b' * (width+1))
+                sys.stdout.write('\b' * (width-1))
                 for i,line in enumerate(dolphot_file):
-                    if (i % int(numlines/(80-1)) == 0):
+                    if (i % int(numlines/(width-1)) == 0):
                         sys.stdout.write('-')
                         sys.stdout.flush()
                     if (int(line.split()[10]) == 1 and         # Obj type
@@ -1352,17 +1468,20 @@ if __name__ == '__main__':
                 # Get x,y coordinate from reference image of potential source
                 hdu = fits.open(hst.reference)
                 w = wcs.WCS(hdu[0].header)
-                x,y = wcs.utils.skycoord_to_pixel(self.coord, w,
-                                                  origin=1, mode='all')
-                message = 'Looking for a source around x={x}, y={y} in {file}.'
-                hst.make_banner(message.format(x=x, y=y, file=reference))
+                x,y = wcs.utils.skycoord_to_pixel(hst.coord, w, origin=1)
+                ra = hst.coord.ra.degree
+                dec = hst.coord.dec.degree
+                radius = hst.dolphot['radius']
+                message = 'Looking for a source around x={x}, y={y} in {file} '
+                message += ' with a radius of {rad}'
+                hst.make_banner(message.format(x=x, y=y, file=hst.reference,
+                    rad=radius))
 
                 data = []
-                radius = hst.dolphot['radius']
                 with open(hst.dolphot['base']) as dolphot_file:
                     for line in dolphot_file:
-                        xline = float(line.split(' ')[3]) + 0.5
-                        yline = float(line.split(' ')[3]) + 0.5
+                        xline = float(line.split()[2]) + 0.5
+                        yline = float(line.split()[3]) + 0.5
                         dist = np.sqrt((xline-x)**2 + (yline-y)**2)
                         if (dist < radius):
                             data.append([dist, line])
@@ -1378,6 +1497,8 @@ if __name__ == '__main__':
                     error += ' Exiting...'
                     print(error)
                     sys.exit(3)
+                elif len(data) == 1:
+                    best = data[0]
                 elif len(data) > 1:
                     warning = 'WARNING: found more than one source. '
                     warning += 'Picking object closest to ra={ra}, dec={dec}.'
@@ -1395,14 +1516,30 @@ if __name__ == '__main__':
                 f = open(hst.dolphot['param'], 'r')
                 for line in f:
                     if ('_file' in line):
-                        if int(line.split('_')[0].strip('img')) == 0:
+                        if 'img0000' in line:
                             continue
-                        filename = line.split('=')[1].strip()+'.fits'
-                        images.append(filename)
+                        else:
+                            filename = line.split('=')[1].strip()+'.fits'
+                            images.append(filename)
                 f.close()
 
-                # Now make an obstable out of images
-                hst.obstable = hst.input_list(images)
+                # Now make an obstable out of images and sort into visits
+                hst.input_list(images, show=False)
+                hst.add_visit_info(hst.obstable)
+
+                # Now get the final photometry for the source
+                hst.final_phot = hst.parse_phot(hst.obstable, best, hst.dolphot['colfile'])
+
+                # Sort the final photometry table by julian date
+                hst.final_phot.sort('JULIANDATE')
+
+                # Show photometry and write out to file
+                message = 'Printing out the final photometry '
+                message += 'for ra={ra}, dec={dec}'
+                hst.make_banner(message.format(ra=ra, dec=dec))
+                phot_file = open(hst.dolphot['final_phot'], 'w')
+                hst.show_photometry(hst.final_phot, file=phot_file)
+                phot_file.close()
 
     # Run fake star injection into dolphot. Therefore uses the dolphot parameter
     # and output file in the current directory rather than deriving new dolphot
@@ -1415,19 +1552,58 @@ if __name__ == '__main__':
         dp_param['FakeStars'] = hst.dolphot['fake']
         dp_param['FakeOut'] = hst.dolphot['fake_out']
 
-        # Now scrape all input files from current dolphot param file
-        if os.path.isfile(hst.dolphot['param']):
-            with open(hst.dolphot['param']) as param_file:
-                for line in param_file:
-                    print(line)
+        # Create the fakestar file given input observations
+        images = []
+        f = open(hst.dolphot['param'], 'r')
+        for line in f:
+            if ('_file' in line):
+                if 'img0000' in line:
+                    continue
+                else:
+                    filename = line.split('=')[1].strip()+'.fits'
+                    images.append(filename)
+        f.close()
 
-        else:
-            error = 'ERROR: current param file {file} does not exist! Must '
-            error += 'generate a param file first.  Exiting...'
-            print(error)
-            sys.exit(2)
+        hst.input_list(images, show=False)
+        hst.add_visit_info(hst.obstable)
 
+        filters = [hst.get_filter(i) for i in hst.obstable['image']]
+        wavelength = []
+        for i in images:
+            try:
+                wavelength.append(fits.getval(i,'PHOTPLAM',extname='PRIMARY'))
+            except:
+                wavelength.append(fits.getval(i,'PHOTPLAM',extname='SCI'))
 
+        # Get the names of the bluest and reddest filters in the dolphot red
+        bluest_filter = ''
+        bluest_wavelength = 2.0e10
+        reddest_filter = ''
+        reddest_wavelength = 0.0
+        for i,filt in enumerate(filters):
+            if (wavelength[i] < bluest_wavelength):
+                bluest_filter = filt
+                bluest_wavelength = wavelength[i]
+            if (wavelength[i] > reddest_wavelength):
+                reddest_filter = filt
+                reddest_wavelength = wavelength[i]
+
+        hst.options['global_defaults']['fake']['filter1'] = bluest_filter
+        hst.options['global_defaults']['fake']['filter2'] = reddest_filter
+
+        cmd = 'fakelist {dp} {filter1} {filter2} {filter1_min} {filter1_max} '
+        cmd += '{color_min} {color_max} -nstar={nstar} > {fake_out}'
+
+        os.system(cmd.format(fake_out=hst.dolphot['fake_out'],
+            **hst.options['global_defaults']['fake']))
+
+        # Re-run dolphot with new parameter file
+        #cmd = 'dolphot '+hst.dolphot['base']
+        #cmd += ' -p'+hst.dolphot['param']
+        #cmd += ' > '+hst.dolphot['log']
+        #banner = 'Running dolphot with cmd={cmd}'
+        #hst.make_banner(banner.format(cmd=cmd))
+        #os.system(cmd)
 
     message = 'It took {time} seconds to complete this script.'
-    print(message.format(time=time.time()-start))
+    hst.make_banner(message.format(time=time.time()-start))
