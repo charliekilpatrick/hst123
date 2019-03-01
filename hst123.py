@@ -194,7 +194,7 @@ class hst123(object):
     self.dolphot = {}
 
     # Names for the final output photometry table
-    final_names = ['JULIANDATE', 'INSTRUMENT', 'FILTER',
+    final_names = ['MJD', 'INSTRUMENT', 'FILTER',
                    'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR']
     # Make an empty table with above column names for output photometry table
     self.final_phot = Table([[0.],['INSTRUMENT'],['FILTER'],[0.],[0.],[0.]],
@@ -335,7 +335,7 @@ class hst123(object):
     # Check to make sure dictionary is set up properly
     keys = final_photometry.keys()
     if ('INSTRUMENT' not in keys or 'FILTER' not in keys
-        or 'JULIANDATE' not in keys or 'MAGNITUDE' not in keys
+        or 'MJD' not in keys or 'MAGNITUDE' not in keys
         or 'MAGNITUDE_ERROR' not in keys or 'EXPTIME' not in keys):
        error = 'ERROR: photometry table has a key error'
        print(error)
@@ -345,10 +345,10 @@ class hst123(object):
         if latex:
             form = '{date: <10} & {inst: <10} & {filt: <10} '
             form += '{exp: <10} & {mag: <8} & {err: <8} \\\\'
-            header = form.format(date='Julian Date', inst='Instrument',
+            header = form.format(date='MJD', inst='Instrument',
                                  filt='Filter', exp='Exposure Time',
                                  mag='Magnitude', err='Uncertainty')
-            units = form.format(date='(JD)', inst='', filt='', exp='(s)',
+            units = form.format(date='(MJD)', inst='', filt='', exp='(s)',
                                 mag='', err='')
             print(header)
             print(units)
@@ -358,7 +358,7 @@ class hst123(object):
         else:
             form = '{date: <13} {inst: <10} {filt: <8} '
             form += '{exp: <14} {mag: <9} {err: <9}'
-            header = form.format(date='# Julian Date', inst='Instrument',
+            header = form.format(date='# MJD', inst='Instrument',
                                  filt='Filter', exp='Exposure Time',
                                  mag='Magnitude', err='Uncertainty')
             print(header)
@@ -366,7 +366,7 @@ class hst123(object):
                 file.write(header+'\n')
 
         for row in final_photometry:
-            line = form.format(date=row['JULIANDATE'], inst=row['INSTRUMENT'],
+            line = form.format(date=row['MJD'], inst=row['INSTRUMENT'],
                                filt=row['FILTER'], exp='%7.3f' % row['EXPTIME'],
                                mag='%3.3f' % row['MAGNITUDE'],
                                err='%3.3f' % row['MAGNITUDE_ERROR'])
@@ -439,7 +439,8 @@ class hst123(object):
     else:
         for file in glob.glob(self.raw_dir+'*.fits'):
             path, base = os.path.split(file)
-            if filecmp.cmp(file,base):
+            # Should catch error where 'base' does not exist
+            if os.path.isfile(base) and filecmp.cmp(file,base):
                 message = '{file} == {base}'
                 print(message.format(file=file,base=base))
                 continue
@@ -465,7 +466,7 @@ class hst123(object):
     # Iterate through each file in the obstable
     for row in obstable:
         inst = row['instrument'].upper()
-        jd = Time(row['datetime']).jd
+        mjd = Time(row['datetime']).mjd
         filt = row['filter'].upper()
         filename = row['image']
 
@@ -474,7 +475,7 @@ class hst123(object):
             row['visit'] = 1
         else:
             instmask = obstable['instrument'] == inst
-            timemask = [abs(Time(obs['datetime']).jd - jd) < tol
+            timemask = [abs(Time(obs['datetime']).mjd - mjd) < tol
                             for obs in obstable]
             filtmask = obstable['filt'] == filt
             mask = [all(l) for l in zip(instmask, timemask, filtmask)]
@@ -499,7 +500,7 @@ class hst123(object):
   # output into a photometry table
   def parse_phot(self, obstable, row, column_file):
     # Names for the final output photometry table
-    final_names = ['JULIANDATE', 'INSTRUMENT', 'FILTER',
+    final_names = ['MJD', 'INSTRUMENT', 'FILTER',
                    'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR']
     # Make an empty table with above column names for output photometry table
     final_phot = Table([[0.],['INSTRUMENT'],['FILTER'],[0.],[0.],[0.]],
@@ -516,7 +517,7 @@ class hst123(object):
                 mjds, mags, magerrs, counts, exptimes = ([] for i in range(5))
                 for im in filttable['image']:
                     mjds = [Time(str(fits.getval(im,'DATE-OBS')) + 'T' +
-                             str(fits.getval(im,'TIME-OBS'))).jd]
+                             str(fits.getval(im,'TIME-OBS'))).mjd]
                     mags = [float(self.get_dolphot_data(row[1], 'dp.columns',
                             'Instrumental', im))]
                     magerrs = [float(self.get_dolphot_data(row[1], 'dp.columns',
@@ -1460,8 +1461,8 @@ if __name__ == '__main__':
 
             # Check for reference image and x,y coordinates to scrape data
             if hst.reference is '' or hst.coord is None:
-                error = 'ERROR: Need a reference image and coordinate to scrape '
-                error = 'data from the dolphot catalog. Exiting...'
+                error = 'ERROR: Need a reference image and coordinate to '
+                error = 'scrape data from the dolphot catalog. Exiting...'
                 print(error)
                 sys.exit(1)
             else:
@@ -1528,10 +1529,11 @@ if __name__ == '__main__':
                 hst.add_visit_info(hst.obstable)
 
                 # Now get the final photometry for the source
-                hst.final_phot = hst.parse_phot(hst.obstable, best, hst.dolphot['colfile'])
+                colfile = hst.dolphot['colfile']
+                hst.final_phot = hst.parse_phot(hst.obstable, best, colfile)
 
-                # Sort the final photometry table by julian date
-                hst.final_phot.sort('JULIANDATE')
+                # Sort the final photometry table by mjd
+                hst.final_phot.sort('MJD')
 
                 # Show photometry and write out to file
                 message = 'Printing out the final photometry '
