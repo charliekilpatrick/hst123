@@ -185,6 +185,7 @@ class hst123(object):
     self.redo = False
     self.download = False
     self.clobber = False
+    self.nocleanup = False
 
     self.max_dolphot_images = 9999999999
     self.run_dolphot = False
@@ -266,6 +267,8 @@ class hst123(object):
         'Requires that dolphot has been run, and so files are taken from the '+\
         'parameters in dolphot output from the current directory rather than '+\
         'files derived from the current run.')
+    parser.add_option('--nocleanup','--nc', default=False, action='store_true',
+        help='Dont clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
     return(parser)
 
   # Make sure all standard output is formatted in the same way with banner
@@ -783,6 +786,9 @@ class hst123(object):
   def split_groups(self,image):
     print('Running split groups for {image}'.format(image=image))
     os.system('splitgroups {filename}'.format(filename=image))
+    # Modify permissions
+    for file in glob.glob(image.replace('.fits', '.chip?.fits')):
+        os.chmod(file, 0775)
 
   # Run the dolphot mask routine for the input image
   def mask_image(self, image, instrument):
@@ -801,6 +807,9 @@ class hst123(object):
                             sigma_low=opt['sigma_low'],
                             sigma_high=opt['sigma_high'])
     os.system(calc_sky)
+    for file in glob.glob(image.replace('.fits','.sky.fits')):
+        os.chmod(file, 0775)
+
 
   # Write the global dolphot parameters to the dolphot parameter file
   def generate_base_param_file(self, param_file, options, n):
@@ -1000,6 +1009,9 @@ class hst123(object):
                 final_rot=0.0, final_scale=options['pixel_scale'],
                 final_outnx=options['nx'], final_outny=options['ny'],
                 final_ra=ra, final_dec=dec)
+
+    # Change permissions on drizzled file
+    os.chmod(output_name, 0775)
 
   # Run cosmic ray clean
   def run_cosmic(self,image,options,output=None):
@@ -1278,6 +1290,12 @@ if __name__ == '__main__':
         if not (needs_reduce):
             print(warning)
             hst.input_images.remove(file)
+
+            # WARNING: these lines delete the actual data and raw data file
+            if 'c1m.fits' not in file:
+                os.remove(file)
+                os.remove(hst.raw_dir+'/'+file)
+
             continue
         filt = hst.get_filter(file).upper()
         if not (filt in hst.options['acceptable_filters']):
@@ -1606,6 +1624,11 @@ if __name__ == '__main__':
         #banner = 'Running dolphot with cmd={cmd}'
         #hst.make_banner(banner.format(cmd=cmd))
         #os.system(cmd)
+
+    # Clean up interstitial files in working directory
+    if not hst.nocleanup:
+        for file in hst.input_images:
+            os.remove(file)
 
     message = 'It took {time} seconds to complete this script.'
     hst.make_banner(message.format(time=time.time()-start))
