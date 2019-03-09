@@ -1145,6 +1145,12 @@ class hst123(object):
     # Get rid of all masked rows as (pretty sure) they aren't HST data anyway
     obsTable = obsTable.filled()
 
+    # Check for before and after to mask data
+    if self.before is not None:
+        obsTable = obsTable[obsTable['t_min'] < Time(self.before).mjd]
+    if self.after is not None:
+        obsTable = obsTable[obsTable['t_min'] > Time(self.after).mjd]
+
     # Construct masks for telescope, data type, detector, and data rights
     telmask = [tel.upper() == 'HST' for tel in obsTable['obs_collection']]
     promask = [pro.upper() == 'IMAGE' for pro in obsTable['dataproduct_type']]
@@ -1257,8 +1263,7 @@ if __name__ == '__main__':
 
     # If we're re-doing the reduction, copy files that don't exist from the raw
     # data directory
-    if hst.redo:
-        hst.copy_raw_data(reverse=True)
+    hst.copy_raw_data(reverse=True)
 
     # If we need to download images, handle that here
     if options.download:
