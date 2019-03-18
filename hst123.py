@@ -212,7 +212,8 @@ class hst123(object):
                               '*rawtmp.fits', '*drz.fits', '*drz.sky.fits',
                               '*idc.fits', '*dxy.fits', '*off.fits',
                               '*d2im.fits', '*d2i.fits', '*npl.fits',
-                              'dp*', '*.log', '*.output']
+                              'dp*', '*.log', '*.output','*sci?.fits',
+                              '*wht.fits','*sci.fits','*StaticMask.fits']
 
   def add_options(self, parser=None, usage=None):
     import optparse
@@ -1095,12 +1096,13 @@ class hst123(object):
     print(message.format(images = ','.join(map(str,run_images)),
                          reference = reference))
     start_tweak = time.time()
-    tweakreg.TweakReg(files = run_images, refimage = reference, verbose=False,
+    tweakreg.TweakReg(files=run_images, refimage=reference, verbose=False,
             interactive=False, clean=True, writecat = False, updatehdr=True,
-            wcsname='TWEAK', reusename=True, rfluxunits='counts',
-            see2dplot=False, separation=0.5, residplot='No plot', runfile='',
-            imagefindcfg = {'threshold': 10, 'use_sharp_round': True},
-            refimagefindcfg = {'threshold': 10, 'use_sharp_round': True})
+            wcsname='TWEAK', reusename=True, rfluxunits='counts', minobj=10,
+            searchrad=2.0, searchunits='arcseconds', runfile='',
+            see2dplot=False, separation=0.5, residplot='No plot',
+            imagefindcfg = {'threshold': 5, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 5, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
