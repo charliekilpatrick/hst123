@@ -151,12 +151,12 @@ detector_defaults = {
                                 'RSky2': '3 6'}}}
 
 acceptable_filters = {
-    'F220W','F250W','F330W','F344N','F435W','F475W','F502N','F550M','F555W',
+    'F220W','F250W','F330W','F344N','F435W','F475W','F550M','F555W',
     'F606W','F625W','F658N','F660N','F660N','F775W','F814W','F850LP','F892N',
     'F098M','F105W','F110W','F125W','F126N','F127M','F128N','F130N','F132N',
     'F139M','F140W','F153M','F160W','F164N','F167N','F200LP','F218W','F225W',
     'F275W','F280N','F300X','F336W','F343N','F350LP','F373N','F390M','F390W',
-    'F395N','F410M','F438W','F467M','F469N','F475X','F487N','F502N','F547M',
+    'F395N','F410M','F438W','F467M','F469N','F475X','F487N','F547M',
     'F600LP','F621M','F625W','F631N','F645N','F656N','F657N','F658N','F665N',
     'F673N','F680N','F689M','F763M','F845M','F953N','F122M','F160BW','F185W',
     'F218W','F255W','F300W','F375N','F380W','F390N','F437N','F439W','F450W',
@@ -866,6 +866,13 @@ class hst123(object):
         # calculate the total exposure time for all pairs.
         unique_filter_inst = list(set(['{}_{}'.format(a_, b_)
                                        for a_, b_ in zip(filts, insts)]))
+
+        # Don't construct reference image from acs/hrc if avoidable
+        if any(['hrc' not in val for val in unique_filter_list]):
+            # remove all elements with hrc
+            new = [val for val in unique_filter_list if 'hrc' not in val]
+            unique_filter_inst = new
+
         total_exposure = []
         for val in unique_filter_inst:
             exposure = 0
