@@ -868,9 +868,9 @@ class hst123(object):
                                        for a_, b_ in zip(filts, insts)]))
 
         # Don't construct reference image from acs/hrc if avoidable
-        if any(['hrc' not in val for val in unique_filter_list]):
+        if any(['hrc' not in val for val in unique_filter_inst]):
             # remove all elements with hrc
-            new = [val for val in unique_filter_list if 'hrc' not in val]
+            new = [val for val in unique_filter_inst if 'hrc' not in val]
             unique_filter_inst = new
 
         total_exposure = []
