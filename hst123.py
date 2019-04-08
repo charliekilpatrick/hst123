@@ -859,8 +859,7 @@ class hst123(object):
 
         # First group images together by filter/instrument
         filts = [self.get_filter(im) for im in self.input_images]
-        insts = [self.get_instrument(im).split('_')[0] + '.' + \
-                 self.get_instrument(im).split('_')[1]
+        insts = [self.get_instrument(im).split('_')[0]
                  for im in self.input_images]
 
         # Group images together by unique instrument/filter pairs and then
