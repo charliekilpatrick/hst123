@@ -118,14 +118,14 @@ detector_defaults = {
                   'input_files': '*_flc.fits', 'pixel_scale': 0.04,
                   'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                   'sigma_low': 2.25, 'sigma_high': 2.00},
-                  'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                  'dolphot': {'apsky': '15 25', 'RAper': 4, 'RChi': 2.0,
                               'RPSF': 10, 'RSky': '15 35',
                               'RSky2': '3 6'}},
     'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flt.fits', 'pixel_scale': 0.09,
                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
-                'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 1.5,
                             'RPSF': 10, 'RSky': '8 20',
                             'RSky2': '3 6'}},
     'acs_wfc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
@@ -146,7 +146,7 @@ detector_defaults = {
                     'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
-                    'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                    'dolphot': {'apsky': '15 25', 'RAper': 4, 'RChi': 1.5,
                                 'RPSF': 10, 'RSky': '15 35',
                                 'RSky2': '3 6'}}}
 
@@ -1473,9 +1473,9 @@ if __name__ == '__main__':
                     if (i % int(numlines/(width-1)) == 0):
                         sys.stdout.write('-')
                         sys.stdout.flush()
-                    if (int(line.split()[10]) == 1 and         # Obj type
-                        abs(float(line.split()[6])) < 0.3 and  # Sharpness
-                        float(line.split()[9]) < 0.5):         # Crowding
+                    if (int(line.split()[10]) == 1)# and         # Obj type
+                        #abs(float(line.split()[6])) < 0.3 and  # Sharpness
+                        #float(line.split()[9]) < 0.5):         # Crowding
                         f.write(line)
                 sys.stdout.write('\n')
 
