@@ -143,7 +143,7 @@ detector_defaults = {
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
     'wfpc2_wfpc2': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
-                    'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
+                    'input_files': '*_c0m.fits', 'pixel_scale': 0.09,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
                     'dolphot': {'apsky': '15 25', 'RAper': 4, 'RChi': 1.5,
@@ -1473,7 +1473,7 @@ if __name__ == '__main__':
                     if (i % int(numlines/(width-1)) == 0):
                         sys.stdout.write('-')
                         sys.stdout.flush()
-                    if (int(line.split()[10]) == 1)# and         # Obj type
+                    if (int(line.split()[10]) == 1):# and         # Obj type
                         #abs(float(line.split()[6])) < 0.3 and  # Sharpness
                         #float(line.split()[9]) < 0.5):         # Crowding
                         f.write(line)
