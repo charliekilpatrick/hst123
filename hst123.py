@@ -850,8 +850,7 @@ class hst123(object):
         # Best possible filter for a dolphot reference image in the approximate
         # order I would want to use for a reference image.  You can also use
         # to force the script to pick a reference image from a specific filter.
-        best_filters = ['f606w','f555w','f814w','f350lp',
-                        'f450w','f439w','f110w','f160w','f550m']
+        best_filters = ['f606w','f555w','f814w','f350lp']
 
         # Best filter suffixes in the approximate order we would want to use to
         # generate a templatea.
