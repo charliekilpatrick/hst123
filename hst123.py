@@ -132,9 +132,9 @@ detector_defaults = {
                 'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
-                'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
-                            'RPSF': 10, 'RSky': '15 35',
-                            'RSky2': '3 6'}},
+                'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
+                            'RPSF': 13, 'RSky': '15 35',
+                            'RSky2': '4 10'}},
     'acs_hrc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flt.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
@@ -146,9 +146,9 @@ detector_defaults = {
                     'input_files': '*_c0m.fits', 'pixel_scale': 0.09,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
-                    'dolphot': {'apsky': '15 25', 'RAper': 4, 'RChi': 1.5,
-                                'RPSF': 10, 'RSky': '15 35',
-                                'RSky2': '3 6'}}}
+                    'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
+                                'RPSF': 13, 'RSky': '15 35',
+                                'RSky2': '4 10'}}}
 
 acceptable_filters = {
     'F220W','F250W','F330W','F344N','F435W','F475W','F550M','F555W',
