@@ -481,7 +481,7 @@ class hst123(object):
             instmask = obstable['instrument'] == inst
             timemask = [abs(Time(obs['datetime']).mjd - mjd) < tol
                             for obs in obstable]
-            filtmask = obstable['filt'] == filt
+            filtmask = [f.upper() == filt for f in obstable['filter']]
             mask = [all(l) for l in zip(instmask, timemask, filtmask)]
 
             # If no matches, then we need to define a new visit
