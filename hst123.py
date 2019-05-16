@@ -513,7 +513,6 @@ class hst123(object):
     # Iterate through the dictionary to get all photometry from files
     for inst in list(set(obstable['instrument'])):
         insttable = obstable[obstable['instrument'] == inst]
-        instname = dictionary[inst]['NAME']
         for visit in list(set(insttable['visit'])):
             visittable = insttable[insttable['visit'] == visit]
             for filt in list(set(visittable['filter'])):
@@ -538,7 +537,7 @@ class hst123(object):
                 mag, magerr = self.avg_magnitudes(mags, magerrs,
                     counts, exptimes)
 
-                final_phot.add_row((avg_mjd, instname, filt,
+                final_phot.add_row((avg_mjd, inst, filt,
                                     total_exptime, mag, magerr))
     return(final_phot)
 
