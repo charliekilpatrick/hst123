@@ -242,11 +242,6 @@ class hst123(object):
         type='string', help='DEC of interest.')
     parser.add_option('--reference','--ref', default='', metavar='ref.fits',
         type='string', help='Name of the reference image.')
-    # WARNING: --rootdir is not yet implemented.  hst123 will always run in the
-    # current directory
-    #parser.add_option('--root','--rootdir', default=None,
-    #    type='string', help='Directory where hst123.py should run/pathway '+\
-    #    'to input files.')
     parser.add_option('--rundolphot','--rd', default=False, action='store_true',
         help='Run dolphot as part of this hst123 run.')
     parser.add_option('--maxdolphot','--mdp','--maxdp', default=9999999,
@@ -1471,9 +1466,7 @@ if __name__ == '__main__':
                     if (i % int(numlines/(width-1)) == 0):
                         sys.stdout.write('-')
                         sys.stdout.flush()
-                    if (int(line.split()[10]) == 1):# and         # Obj type
-                        #abs(float(line.split()[6])) < 0.3 and  # Sharpness
-                        #float(line.split()[9]) < 0.5):         # Crowding
+                    if (int(line.split()[10]) == 1): # Obj type
                         f.write(line)
                 sys.stdout.write('\n')
 
@@ -1629,16 +1622,8 @@ if __name__ == '__main__':
         os.system(cmd.format(fake_out=hst.dolphot['fake_out'],
             **hst.options['global_defaults']['fake']))
 
-        # Re-run dolphot with new parameter file
-        #cmd = 'dolphot '+hst.dolphot['base']
-        #cmd += ' -p'+hst.dolphot['param']
-        #cmd += ' > '+hst.dolphot['log']
-        #banner = 'Running dolphot with cmd={cmd}'
-        #hst.make_banner(banner.format(cmd=cmd))
-        #os.system(cmd)
-
     # Clean up interstitial files in working directory
-    if not hst.nocleanup:
+    if not options.nocleanup:
         for file in hst.input_images:
             os.remove(file)
 
