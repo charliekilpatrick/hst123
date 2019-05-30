@@ -1102,7 +1102,7 @@ class hst123(object):
                          reference = reference))
     start_tweak = time.time()
     tweakreg.TweakReg(files=run_images, refimage=reference, verbose=False,
-            interactive=False, clean=True, writecat = False, updatehdr=True,
+            interactive=False, clean=True, writecat = True, updatehdr=True,
             wcsname='TWEAK', reusename=True, rfluxunits='counts', minobj=10,
             searchrad=2.0, searchunits='arcseconds', runfile='',
             see2dplot=False, separation=0.5, residplot='No plot',
