@@ -2,6 +2,7 @@
 # CDK v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
 # CDK v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
 # CDK v1.02: 2019-02-22. Added fake star injection
+# CDK v1.03: 2019-06-01. Added drizzleall capability to drizzle all visit/filter
 #
 # hst123.py: An all-in-one script for downloading, registering, drizzling,
 # running dolphot, and scraping data from dolphot catalogs.
@@ -265,6 +266,8 @@ class hst123(object):
         'files derived from the current run.')
     parser.add_option('--nocleanup','--nc', default=False, action='store_true',
         help='Dont clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
+    parser.add_option('--drizzleall', default=False, action='store_true',
+        help='Drizzle all visit/filter pairs together.')
     return(parser)
 
   # Make sure all standard output is formatted in the same way with banner
@@ -453,7 +456,7 @@ class hst123(object):
   # so we can group them together for the final output from dolphot
   def add_visit_info(self, obstable):
     # First add empty 'visit' column to obstable
-    obstable['visit'] = np.zeros(len(obstable))
+    obstable['visit'] = [int(0)] * len(obstable)
 
     # Sort obstable by date so we assign visits in chronological order
     obstable.sort('datetime')
@@ -464,25 +467,26 @@ class hst123(object):
 
     # Iterate through each file in the obstable
     for row in obstable:
-        inst = row['instrument'].upper()
+        inst = row['instrument']
         mjd = Time(row['datetime']).mjd
-        filt = row['filter'].upper()
+        filt = row['filter']
         filename = row['image']
 
         # If this is the first one we're making, assign it to visit 1
         if all([obs['visit'] == 0 for obs in obstable]):
-            row['visit'] = 1
+            row['visit'] = int(1)
         else:
             instmask = obstable['instrument'] == inst
             timemask = [abs(Time(obs['datetime']).mjd - mjd) < tol
                             for obs in obstable]
-            filtmask = [f.upper() == filt for f in obstable['filter']]
-            mask = [all(l) for l in zip(instmask, timemask, filtmask)]
+            filtmask = [f == filt for f in obstable['filter']]
+            nzero = obstable['visit'] != 0 # Ignore unassigned visits
+            mask = [all(l) for l in zip(instmask, timemask, filtmask, nzero)]
 
             # If no matches, then we need to define a new visit
             if not any(mask):
                 # no matches. create new visit number = max(visit)+1
-                row['visit'] = np.max(obstable['visit']) + 1
+                row['visit'] = int(np.max(obstable['visit']) + 1)
             else:
                 # otherwise, confirm that all visits of obstable[mask] are same
                 if (len(list(set(obstable[mask]['visit']))) != 1):
@@ -979,8 +983,10 @@ class hst123(object):
                         message += red+' [FAILURE]'+end+'\n'
                         sys.stdout.write(message.format(url=url))
                         print(message.format(url=url))
-                fits.setval(image, key, extname='PRIMARY', value=ref_file)
-                fits.setval(image, key, extname='SCI', value=ref_file)
+                fits.setval(image, key, extname='PRIMARY', value=ref_file,
+                    output_verify='silentfix')
+                fits.setval(image, key, extname='SCI', value=ref_file,
+                    output_verify='silentfix')
         updatewcs.updatewcs(image)
 
     ra = self.coord.ra.degree if self.coord else None
@@ -990,6 +996,8 @@ class hst123(object):
         skysub = False
     else:
         skysub = True
+
+    print(images)
 
     astrodrizzle.AstroDrizzle(images, output=output_name, runfile='',
                 wcskey=wcskey, context=True, group='', build=True,
@@ -1317,6 +1325,13 @@ if __name__ == '__main__':
         print(error)
         sys.exit(1)
 
+    # Get metadata on all input images and put them into an obstable
+    banner = 'Organizing input images by visit'
+    hst.make_banner(banner)
+    hst.input_list(hst.input_images, show=False)
+    hst.add_visit_info(hst.obstable)
+    print(hst.obstable)
+
     # If reference image was not provided then make one
     banner = 'Handling reference image: '
     if not hst.reference:
@@ -1341,7 +1356,7 @@ if __name__ == '__main__':
     # Run main tweakreg to register to the reference
     banner = 'Running main tweakreg.'
     hst.make_banner(banner)
-    errorcode = hst.run_tweakreg(hst.input_images,hst.reference,
+    errorcode = hst.run_tweakreg(hst.input_images, hst.reference,
                      hst.options['global_defaults'])
 
     # Sanitize any WFPC2 images
@@ -1350,6 +1365,27 @@ if __name__ == '__main__':
     for file in hst.input_images:
         if 'wfpc2' in hst.get_instrument(file):
             hst.sanitize_wfpc2(file)
+
+    # Drizzle all visit/filter pairs if drizzleall
+    if options.drizzleall:
+        for visit in list(set(hst.obstable['visit'].data)):
+            vismask = hst.obstable['visit'] == visit
+            visittable = hst.obstable[vismask]
+            for filt in list(set(visittable['filter'])):
+                filmask = visittable['filter'] == filt
+                imagetable = visittable[filmask]
+
+                # Construct a name for the drizzled image
+                refimage = imagetable['image'][0]
+                inst = hst.get_instrument(refimage).split('_')[0]
+                drizname = '{inst}_{filt}_visit{n}_drz.fits'
+                n = str(visit).zfill(3)
+                drizname = drizname.format(inst=inst, filt=filt, n=n)
+
+                print(list(imagetable['image'].data))
+                hst.run_astrodrizzle(list(imagetable['image'].data),
+                    output_name = drizname)
+
 
     # dolphot image preparation: mask_image, split_groups, calc_sky
     message = 'Preparing dolphot data for files={files}.'
