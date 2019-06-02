@@ -1,10 +1,16 @@
 #!/usr/bin/env python
-# CDK v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
-# CDK v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
-# CDK v1.02: 2019-02-22. Added fake star injection
-#
-# hst123.py: An all-in-one script for downloading, registering, drizzling,
-# running dolphot, and scraping data from dolphot catalogs.
+
+"""
+By C. D. Kilpatrick 2019-02-07
+
+v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
+v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
+v1.02: 2019-02-22. Added fake star injection
+
+hst123.py: An all-in-one script for downloading, registering, drizzling,
+running dolphot, and scraping data from dolphot catalogs.
+"""
+
 #
 # Python 2/3 compatibility
 from __future__ import print_function
@@ -1462,7 +1468,7 @@ if __name__ == '__main__':
                 message += 'Cutting bad sources...'
                 sys.stdout.write(message.format(n=numlines,
                     dp=hst.dolphot['base']))
-                width = 80
+                width = 77
                 sys.stdout.write('\n')
                 sys.stdout.write('[%s]' % (' ' * (width-2)))
                 sys.stdout.flush()
