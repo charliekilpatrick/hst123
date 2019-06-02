@@ -182,21 +182,14 @@ class hst123(object):
     self.root_dir = '.'
     self.raw_dir = 'raw/'
 
-    self.keepshort = False
     self.before = None
     self.after = None
-
     self.coord = None
-    self.redo = False
-    self.download = False
+
+    self.keepshort = False
     self.clobber = False
     self.nocleanup = False
 
-    self.max_dolphot_images = 9999999999
-    self.run_dolphot = False
-    self.scrape_dolphot = False
-    self.nocuts = False
-    self.do_fake = False
     self.dolphot = {}
 
     # Names for the final output photometry table
@@ -225,8 +218,6 @@ class hst123(object):
     if parser == None:
         parser = optparse.OptionParser(usage=usage,
             conflict_handler='resolve')
-    parser.add_option('--redo', default=False, action='store_true',
-        help='Redo the hst123 reduction by re-copying files from the raw dir.')
     parser.add_option('--makeclean','--mc', default=False, action='store_true',
         help='Clean up all output files from previous runs then exit.')
     parser.add_option('--download', default=False, action='store_true',
@@ -257,9 +248,6 @@ class hst123(object):
         'image alignment.')
     parser.add_option('--dolphot','--dp', default='dp', type='string',
         metavar='dp', help='Name of the dolphot output file.')
-    parser.add_option('--nocuts','--nc', default=False, action='store_true',
-        help='Do not mask bad sources from the dolphot output catalog before '+\
-        'scraping data.')
     parser.add_option('--scrapedolphot','--sd', default=False,
         action='store_true', help='Scrape photometry from the dolphot '+\
         'catalog from the input RA/Dec.')
@@ -286,6 +274,21 @@ class hst123(object):
     print('#' * n)
     print('')
     print('')
+
+  def make_clean(self):
+    question = 'Are you sure you want to delete '
+    question += 'output from previous hst123 runs? [y/n] '
+    var = input(question)
+    if var != 'y' and var != 'yes':
+        warning = 'WARNING: input={inp}. Exiting...'
+        print(warning)
+        sys.exit(3)
+    for pattern in self.pipeline_products:
+        for file in glob.glob(pattern):
+            if os.path.isfile(file):
+                os.remove(file)
+    self.copy_raw_data(reverse = True)
+    sys.exit(0)
 
   def avg_magnitudes(self, mags, magerrs, counts, exptimes):
     # First create a mask and apply to input values
@@ -373,9 +376,9 @@ class hst123(object):
 
         for row in final_photometry:
             line = form.format(date=row['MJD'], inst=row['INSTRUMENT'],
-                               filt=row['FILTER'], exp='%7.3f' % row['EXPTIME'],
-                               mag='%3.3f' % row['MAGNITUDE'],
-                               err='%3.3f' % row['MAGNITUDE_ERROR'])
+                               filt=row['FILTER'], exp='%7.4f' % row['EXPTIME'],
+                               mag='%3.4f' % row['MAGNITUDE'],
+                               err='%3.4f' % row['MAGNITUDE_ERROR'])
             print(line)
             if file is not None:
                 file.write(line+'\n')
@@ -624,7 +627,7 @@ class hst123(object):
         detector = hdu[0].header['DETECTOR'].lower()
 
     # Get rid of exposures with exptime < 20s
-    if not self.keepshort:
+    if not options.keepshort:
         exptime = hdu[0].header['EXPTIME']
         if (exptime < 20):
             warning = 'WARNING: {img} EXPTIME is {exp} < 20.'
@@ -1144,6 +1147,12 @@ class hst123(object):
 
   # download files for input self.coord
   def download_files(self):
+    # Check for coordinate and exit if it does not exist
+    if not self.coord:
+        error = 'ERROR: coordinate was not provided.  Exiting...'
+        print(error)
+        sys.exit(2)
+
     # Define the search coord/radius and grab all files from MAST that
     # correspond to this region
     search_radius = self.options['global_defaults']['mast_radius']
@@ -1227,45 +1236,26 @@ class hst123(object):
 if __name__ == '__main__':
     # Start timer, create hst123 class obj, parse args
     start = time.time()
-    usagestring='USAGE: hst123.py'
+    usagestring='USAGE: hst123.py ra dec'
     hst = hst123()
     parser = hst.add_options(usage=usagestring)
     options, args = parser.parse_args()
 
     # Starting banner
-    banner = 'Starting hst123.py'
+    banner = 'Starting hst123.'
     hst.make_banner(banner)
 
     # If we're cleaning up a previous run, execute that here
-    if (options.makeclean):
-        question = 'Are you sure you want to delete output from previous hst123'
-        question += ' runs? [y/n] '
-        var = input(question)
-        if var != 'y' and var != 'yes':
-            warning = 'WARNING: input={inp}. Exiting...'
-            print(warning)
-            sys.exit(3)
+    if options.makeclean:
         banner = 'Cleaning output from previous runs of hst123.'
         hst.make_banner(banner)
-        for pattern in hst.pipeline_products:
-            for file in glob.glob(pattern):
-                if os.path.isfile(file):
-                    os.remove(file)
-        hst.copy_raw_data(reverse = True)
-        sys.exit(0)
+        hst.make_clean()
 
     # Handle all other options
     hst.reference = options.reference
-    hst.download = options.download
-    hst.clobber = options.clobber
-    hst.redo = options.redo
+    hst.clobber   = options.clobber
     hst.keepshort = options.keepshort
-    hst.max_dolphot_images = options.maxdolphot
-    hst.run_dolphot = options.rundolphot
-    hst.scrape_dolphot = options.scrapedolphot
-    hst.nocuts = options.nocuts
-    hst.do_fake = options.dofake
-    hst.dolphot = hst.make_dolphot_dict(options.dolphot)
+    hst.dolphot   = hst.make_dolphot_dict(options.dolphot)
     if options.alignonly:
         hst.options['global_defaults']['dolphot']['AlignOnly']=1
     if (options.ra is not None and options.dec is not None):
@@ -1275,22 +1265,16 @@ if __name__ == '__main__':
     if options.after is not None:
         hst.after = parse(options.after)
 
-    # If we're re-doing the reduction, copy files that don't exist from the raw
-    # data directory
+    # Copy files that don't exist from the raw data directory
     hst.copy_raw_data(reverse=True)
 
     # If we need to download images, handle that here
     if options.download:
-        if not hst.coord:
-            error = 'ERROR: hst123.py --download requires input ra and dec.'
-            error += 'Exiting...'
-            print(error)
-            sys.exit(2)
-        else:
-            banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}.'
-            hst.make_banner(banner.format(ra=hst.coord.ra.degree,
-                                          dec=hst.coord.dec.degree))
-            hst.download_files()
+        banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}.'
+        ra = '%7.6f' % hst.coord.ra.degree
+        dec = '%7.6f' % hst.coord.dec.degree
+        hst.make_banner(banner.format(ra=ra, dec=dec))
+        hst.download_files()
 
     # Get input images
     hst.input_images = hst.get_input_images()
@@ -1330,11 +1314,10 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # Get metadata on all input images and put them into an obstable
-    banner = 'Organizing input images by visit'
+    banner = 'Organizing input images by visit.'
     hst.make_banner(banner)
     hst.input_list(hst.input_images, show=False)
     hst.add_visit_info(hst.obstable)
-    print(hst.obstable)
 
     # If reference image was not provided then make one
     banner = 'Handling reference image: '
@@ -1425,22 +1408,8 @@ if __name__ == '__main__':
     hst.make_banner(banner)
     hst.input_list(hst.input_images)
 
-    # Check if the total number of images exceeds the maximum number of dolphot
-    # images per run (--maxdolphot).  If so, cut up the list of input images
-    # into separate dolphot param files with Nimg = maxdolphot.  This is mostly
-    # so you don't kill your computer's RAM running dolphot.  Technically, this
-    # also saves time on big (>>a few) dolphot runs.
-    if len(hst.split_images) > hst.max_dolphot_images:
-        # TODO: need to implement this routine and separate dolphot runs and
-        # scraping data from all of the separate dolphot runs
-        message = 'WARNING: total number of input images for dolphot={Nimg} and'
-        message += ' max dolphot images per dolphot run={Nmax}.  Chopping '
-        message += 'images into separate dolphot parameter files.'
-        print(message.format(Nimg=len(hst.split_images),
-                             Nmax=hst.max_dolphot_images))
-
     # Start constructing dolphot param file from split images and reference
-    if not hst.do_fake:
+    if not options.dofake:
         banner = 'Adding images to dolphot parameter file: {file}.'
         hst.make_banner(banner.format(file = hst.dolphot['param']))
         dolphot_file = open(hst.dolphot['param'], 'w')
@@ -1460,7 +1429,7 @@ if __name__ == '__main__':
         print(message.format(n=len(hst.split_images), dp=hst.dolphot['param']))
 
     # Run dolphot using the param file we constructed and input parameters
-    if hst.run_dolphot:
+    if options.rundolphot:
         if os.path.isfile(hst.dolphot['param']):
             cmd = 'dolphot '+hst.dolphot['base']
             cmd += ' -p'+hst.dolphot['param']
@@ -1479,7 +1448,7 @@ if __name__ == '__main__':
 
 
     # Scrape data from the dolphot catalog for the input coordinates
-    if hst.scrape_dolphot:
+    if options.scrapedolphot:
         # Check if dolphot output exists
         if not os.path.isfile(hst.dolphot['base']):
             error = 'ERROR: dolphot output {dp} does not exist.  Run dolphot '
@@ -1610,7 +1579,7 @@ if __name__ == '__main__':
     # and output file in the current directory rather than deriving new dolphot
     # parameters.  This method will therefore prevent generation of a new
     # dolphot parameter file.
-    if hst.do_fake:
+    if options.dofake:
         # Need to change global parameters to allow fake star injection/create a
         # fake star injection output file
         dp_param = hst.options['global_defaults']['dolphot']
