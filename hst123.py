@@ -6,6 +6,7 @@ By C. D. Kilpatrick 2019-02-07
 v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
 v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
 v1.02: 2019-02-22. Added fake star injection
+v1.03: 2019-06-02. Added drizzleall options and cleaned up options/syntax
 
 hst123.py: An all-in-one script for downloading, registering, drizzling,
 running dolphot, and scraping data from dolphot catalogs.
@@ -20,22 +21,21 @@ except NameError:
     pass
 
 # Dependencies and settings
-import glob, sys, os, shutil, time, subprocess, warnings, filecmp
-import astroquery
-import numpy as np
-from datetime import datetime
-from dateutil.parser import parse
+import glob, sys, os, shutil, time, subprocess, warnings, filecmp, astroquery
 import astropy.wcs as wcs
-from stwcs import updatewcs
-from astropy.io import fits
-from astropy.coordinates import SkyCoord
+import numpy as np
 from astropy import units as u
 from astropy import utils
+from astropy.coordinates import SkyCoord
+from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astroquery.mast import Observations
-from drizzlepac import tweakreg,astrodrizzle
 from astroscrappy import detect_cosmics
+from datetime import datetime
+from dateutil.parser import parse
+from drizzlepac import tweakreg,astrodrizzle
+from stwcs import updatewcs
 warnings.filterwarnings('ignore')
 
 # Color strings for download messages
@@ -45,11 +45,12 @@ end = '\033[0;0m'
 
 # Dictionaries with all options for instruments, detectors, and filters
 global_defaults = {
-    'change_keys': ['IDCTAB','DGEOFILE','NPOLEXT','NPOLFILE','D2IMFILE',
-                    'D2IMEXT','OFFTAB'],
-    'cdbs_ftp': 'ftp://ftp.stsci.edu/cdbs/',
-    'mast_radius': 5 * u.arcmin,
-    'mast_uri': 'https://mast.stsci.edu/api/v0/download/file?uri=',
+    'keys': ['IDCTAB','DGEOFILE','NPOLEXT',
+             'NPOLFILE','D2IMFILE', 'D2IMEXT','OFFTAB'],
+    'cdbs': 'ftp://ftp.stsci.edu/cdbs/',
+    'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
+    'visit': 1,
+    'radius': 5 * u.arcmin,
     'dolphot': {'FitSky': 2,
                 'SkipSky': 2,
                 'RCombine': 1.5,
@@ -192,6 +193,9 @@ class hst123(object):
 
     self.dolphot = {}
 
+    # Names for input image table
+    self.names = ['image','exptime','datetime','filter','instrument']
+
     # Names for the final output photometry table
     final_names = ['MJD', 'INSTRUMENT', 'FILTER',
                    'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR']
@@ -214,51 +218,44 @@ class hst123(object):
                               '*wht.fits','*sci.fits','*StaticMask.fits']
 
   def add_options(self, parser=None, usage=None):
-    import optparse
+    import argparse
     if parser == None:
-        parser = optparse.OptionParser(usage=usage,
-            conflict_handler='resolve')
-    parser.add_option('--makeclean','--mc', default=False, action='store_true',
+        parser = argparse.ArgumentParser(usage=usage,conflict_handler='resolve')
+    parser.add_argument('ra', type=str,
+        help='Right ascension to reduce the HST images')
+    parser.add_argument('dec', type=str,
+        help='Declination to reduce the HST images')
+    parser.add_argument('--makeclean', default=False, action='store_true',
         help='Clean up all output files from previous runs then exit.')
-    parser.add_option('--download', default=False, action='store_true',
+    parser.add_argument('--download', default=False, action='store_true',
         help='Download the raw data files given input ra and dec.')
-    parser.add_option('--keepshort','--ks', default=False, action='store_true',
+    parser.add_argument('--keepshort', default=False, action='store_true',
         help='Keep image files that are shorter than 20 seconds.')
-    parser.add_option('--before', default=None, type='string',
-        metavar='YYYY-MM-DD', help='Date after which we should reject all '+\
-        'HST observations for reduction.')
-    parser.add_option('--after', default=None, type='string',
-        metavar='YYYY-MM-DD', help='Date before which we should reject all '+\
-        'HST observations for reduction.')
-    parser.add_option('--clobber', default=False, action='store_true',
+    parser.add_argument('--before', default=None, type=str,
+        help='Reject obs after this date.')
+    parser.add_argument('--after', default=None, type=str,
+        help='Reject obs before this date.')
+    parser.add_argument('--clobber', default=False, action='store_true',
         help='Overwrite files when using download mode.')
-    parser.add_option('--ra', default=None, metavar='deg/HH:MM:SS',
-        type='string', help='RA of interest.')
-    parser.add_option('--dec', default=None, metavar='deg/DD:MM:SS',
-        type='string', help='DEC of interest.')
-    parser.add_option('--reference','--ref', default='', metavar='ref.fits',
-        type='string', help='Name of the reference image.')
-    parser.add_option('--rundolphot','--rd', default=False, action='store_true',
+    parser.add_argument('--reference','--ref', default='',
+        type=str, help='Name of the reference image.')
+    parser.add_argument('--rundolphot', default=False, action='store_true',
         help='Run dolphot as part of this hst123 run.')
-    parser.add_option('--maxdolphot','--mdp','--maxdp', default=9999999,
-        type='int', metavar=9999999,
-        help='Maximum number of images per dolphot run.')
-    parser.add_option('--alignonly','--ao', default=False, action='store_true',
-        help='When running dolphot, set AlignOnly=1 so dolphot stops after '+\
-        'image alignment.')
-    parser.add_option('--dolphot','--dp', default='dp', type='string',
-        metavar='dp', help='Name of the dolphot output file.')
-    parser.add_option('--scrapedolphot','--sd', default=False,
+    parser.add_argument('--alignonly', default=False, action='store_true',
+        help='Set AlignOnly=1 when running dolphot.')
+    parser.add_argument('--dolphot','--dp', default='dp', type=str,
+        help='Name of the dolphot output file.')
+    parser.add_argument('--scrapedolphot','--sd', default=False,
         action='store_true', help='Scrape photometry from the dolphot '+\
         'catalog from the input RA/Dec.')
-    parser.add_option('--dofake','--df', default=False,
+    parser.add_argument('--dofake','--df', default=False,
         action='store_true', help='Run fake star injection into dolphot. '+\
         'Requires that dolphot has been run, and so files are taken from the '+\
         'parameters in dolphot output from the current directory rather than '+\
         'files derived from the current run.')
-    parser.add_option('--nocleanup','--nc', default=False, action='store_true',
+    parser.add_argument('--nocleanup', default=False, action='store_true',
         help='Dont clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
-    parser.add_option('--drizzleall', default=False, action='store_true',
+    parser.add_argument('--drizzleall', default=False, action='store_true',
         help='Drizzle all visit/filter pairs together.')
     return(parser)
 
@@ -282,7 +279,7 @@ class hst123(object):
     if var != 'y' and var != 'yes':
         warning = 'WARNING: input={inp}. Exiting...'
         print(warning)
-        sys.exit(3)
+        sys.exit(1)
     for pattern in self.pipeline_products:
         for file in glob.glob(pattern):
             if os.path.isfile(file):
@@ -290,10 +287,10 @@ class hst123(object):
     self.copy_raw_data(reverse = True)
     sys.exit(0)
 
-  def avg_magnitudes(self, mags, magerrs, counts, exptimes):
-    # First create a mask and apply to input values
+  def avg_magnitudes(self, counts, exptimes, zpt):
+    # Mask out bad values
     idx = []
-    for i,data in enumerate(zip(mags,magerrs,counts,exptimes)):
+    for i,data in enumerate(zip(mags, magerrs, counts, exptimes)):
         if data[1] < 1.0 and data[2] > 0:
             idx.append(i)
 
@@ -304,13 +301,10 @@ class hst123(object):
     magerrs = np.array(magerrs)[idx]
     counts = np.array(counts)[idx]
     exptimes = np.array(exptimes)[idx]
-
-    # First calculate zero points for these fluxes
-    flux = counts / exptimes
-    zps = mags + 2.5 * np.log10(flux)
+    zpt = np.array(zpt)[idx]
 
     # Now normalize flux and fluxerr to a common zero point
-    flux = flux * 10**(0.4 * (27.5 - zps))
+    flux = counts / exptimes * 10**(0.4 * (27.5 - zpt))
     fluxerr = 1./1.086 * magerrs * flux
 
     # Now calculate average and propagate uncertainties weighted by fluxerr
@@ -318,7 +312,7 @@ class hst123(object):
     average_fluxerr = np.sqrt(np.sum(fluxerr**2))/len(fluxerr)
 
     # Now transform back to magnitude and magnitude error
-    final_mag = 27.5 - 2.5*np.log10(average_flux)
+    final_mag = 27.5 - 2.5 * np.log10(average_flux)
     final_magerr = 1.086 * average_fluxerr / average_flux
 
     return(final_mag, final_magerr)
@@ -348,7 +342,7 @@ class hst123(object):
         or 'MAGNITUDE_ERROR' not in keys or 'EXPTIME' not in keys):
        error = 'ERROR: photometry table has a key error'
        print(error)
-       sys.exit(3)
+       sys.exit(1)
     else:
         form = ''
         if latex:
@@ -383,17 +377,18 @@ class hst123(object):
             if file is not None:
                 file.write(line+'\n')
 
-  def input_list(self, images, show=True):
+  def input_list(self, img, show=True):
     # Make a table with all of the metadata for each image.
-    exptime = [fits.getval(image,'EXPTIME') for image in images]
-    datetim = [fits.getval(image,'DATE-OBS') + 'T' +
-               fits.getval(image,'TIME-OBS') for image in images]
-    filters = [self.get_filter(image) for image in images]
-    instrum = [self.get_instrument(image) for image in images]
+    exp = [fits.getval(image,'EXPTIME') for image in img]
+    dat = [fits.getval(image,'DATE-OBS') + 'T' +
+           fits.getval(image,'TIME-OBS') for image in img]
+    fil = [self.get_filter(image) for image in img]
+    ins = [self.get_instrument(image) for image in img]
 
     # Save this obstable.  Useful for other methods
-    self.obstable = Table([images,exptime,datetim,filters,instrum],
-                   names=('image','exptime','datetime','filter','instrument'))
+    self.obstable = Table([img,exp,dat,fil,ins], names=self.names)
+
+    # Look at the table in order of date
     self.obstable.sort('datetime')
 
     # Show the obstable in a column formatted style
@@ -468,9 +463,8 @@ class hst123(object):
     # Sort obstable by date so we assign visits in chronological order
     obstable.sort('datetime')
 
-    # Time tolerance for defining a 'visit'.  How many days apart were the obs
-    # separated
-    tol = 1
+    # Time tolerance for a 'visit' -- how many days apart are obs?
+    tol = self.options['global_defaults']['visit']
 
     # Iterate through each file in the obstable
     for row in obstable:
@@ -712,8 +706,10 @@ class hst123(object):
         else:
             return(True)
 
-  # Quick script to determine if the input image contains input coordinate.
-  # This routine should only be run on chip?.fits files.
+  # Check if the image contains input coordinate.  This is somewhat complicated
+  # as an image might cover input coordinates, but they land on a bad part of
+  # the detector.  So 1) check if coordinate is in image, and 2) check if
+  # corresponding DQ file lists this part of image as good pixels.
   def image_contains(self, image, coord):
     # sky2xy is way better/faster than astropy.wcs. Also, astropy.wcs has a
     # problem with chip? files generated by splitgroups because the WCSDVARR
@@ -727,6 +723,7 @@ class hst123(object):
         print(message.format(image=image, ra=ra, dec=dec))
         return(False)
     else:
+        x,y = result.split()[4:6]
         return(True)
 
   # Determine if we need to run the dolphot mask routine
@@ -759,7 +756,7 @@ class hst123(object):
 
   # Get string representing instrument, detectory, and subarray for the input
   # image
-  def get_instrument(self,image):
+  def get_instrument(self, image):
     hdu = fits.open(image, mode='readonly')
     inst = hdu[0].header['INSTRUME'].lower()
     if inst.upper() == 'WFPC2':
@@ -923,7 +920,7 @@ class hst123(object):
         print(message.format(reference=output_name, files=reference_images))
         self.reference = output_name
 
-        self.run_tweakreg(reference_images,'',self.options['global_defaults'])
+        self.run_tweakreg(reference_images, '')
         self.run_astrodrizzle(reference_images, output_name = output_name)
 
   # Run the drizzlepac astrodrizzle routine using detector parameters.
@@ -948,7 +945,7 @@ class hst123(object):
         sys.exit(1)
 
     options = self.options['detector_defaults'][det]
-    change_keys = self.options['global_defaults']['change_keys']
+    change_keys = self.options['global_defaults']['keys']
     for image in images:
         inst = self.get_instrument(image).split('_')[0]
         ref = self.options['instrument_defaults'][inst]['env_ref']
@@ -965,7 +962,7 @@ class hst123(object):
             if (ref+'$' in val):
                 ref_file = val.split('$')[1]
                 if not os.path.exists(ref_file):
-                    url = self.options['global_defaults']['cdbs_ftp']
+                    url = self.options['global_defaults']['cdbs']
                     url += ref+'/'+ref_file
                     message = 'Downloading file: {url}'
                     sys.stdout.write(message.format(url=url))
@@ -1057,7 +1054,10 @@ class hst123(object):
     hdulist.close()
 
   # Run tweakreg on all input images
-  def run_tweakreg(self, images, reference, options):
+  def run_tweakreg(self, images, reference):
+
+    # Get options from object
+    options = self.options['global_defaults']
 
     # Make a copy of the input image list
     run_images = list(images)
@@ -1151,18 +1151,18 @@ class hst123(object):
     if not self.coord:
         error = 'ERROR: coordinate was not provided.  Exiting...'
         print(error)
-        sys.exit(2)
+        sys.exit(1)
 
     # Define the search coord/radius and grab all files from MAST that
     # correspond to this region
-    search_radius = self.options['global_defaults']['mast_radius']
+    search_radius = self.options['global_defaults']['radius']
     try:
         obsTable = Observations.query_region(self.coord, radius=search_radius)
     except astroquery.exceptions.RemoteServiceError:
         error = 'ERROR: MAST is not working for some reason. '
         error += 'Try again later.  Exiting...'
         print(error)
-        sys.exit(2)
+        sys.exit(1)
 
 
     # Get rid of all masked rows as (pretty sure) they aren't HST data anyway
@@ -1212,7 +1212,7 @@ class hst123(object):
                 sys.stdout.write(message.format(image=filename))
                 sys.stdout.flush()
 
-                url = self.options['global_defaults']['mast_uri'] + uri
+                url = self.options['global_defaults']['mast'] + uri
                 try:
                     # utils.data.download_file can get buggy if the cache is
                     # full.  Clear the cache even though we aren't using caching
@@ -1236,10 +1236,28 @@ class hst123(object):
 if __name__ == '__main__':
     # Start timer, create hst123 class obj, parse args
     start = time.time()
-    usagestring='USAGE: hst123.py ra dec'
+    usagestring='hst123.py ra dec'
     hst = hst123()
+
+    # Handle ra/dec in command line so there's no ambiguity about declination
+    if len(sys.argv) < 3:
+        print(usagestring)
+        sys.exit(1)
+    else:
+        ra = sys.argv[1]
+        dec = sys.argv[2]
+        if (not (hst.is_number(ra) and hst.is_number(dec)) and
+           (':' not in ra and ':' not in dec)):
+            error = 'ERROR: cannot interpret ra={ra}, dec={dec}.'
+            print(error.format(ra=ra, dec=dec))
+            sys.exit(1)
+        else:
+            hst.coord = hst.parse_coord(ra, dec)
+            sys.argv[1] = str(hst.coord.ra.degree)
+            sys.argv[2] = str(hst.coord.dec.degree)
+
     parser = hst.add_options(usage=usagestring)
-    options, args = parser.parse_args()
+    options = parser.parse_args()
 
     # Starting banner
     banner = 'Starting hst123.'
@@ -1258,8 +1276,6 @@ if __name__ == '__main__':
     hst.dolphot   = hst.make_dolphot_dict(options.dolphot)
     if options.alignonly:
         hst.options['global_defaults']['dolphot']['AlignOnly']=1
-    if (options.ra is not None and options.dec is not None):
-        hst.coord = hst.parse_coord(options.ra, options.dec)
     if options.before is not None:
         hst.before = parse(options.before)
     if options.after is not None:
@@ -1279,7 +1295,7 @@ if __name__ == '__main__':
     # Get input images
     hst.input_images = hst.get_input_images()
 
-    # Make raw/ in current dir and copy files into raw/ then copy un-edited
+    # Make raw/ in current dir and copy files into raw/ and copy un-edited
     # versions of files back into working dir
     banner = 'Copying raw data to raw data folder: {dir}.'
     hst.make_banner(banner.format(dir=hst.raw_dir))
@@ -1290,16 +1306,11 @@ if __name__ == '__main__':
     hst.make_banner(banner)
     for file in list(hst.input_images):
         warning, needs_reduce = hst.needs_to_be_reduced(file)
-        if not (needs_reduce):
+        if not needs_reduce:
             print(warning)
             hst.input_images.remove(file)
-
-            # WARNING: these lines delete the actual data and raw data file
-            if 'c1m.fits' not in file:
-                os.remove(file)
-                os.remove(hst.raw_dir+'/'+file)
-
             continue
+
         filt = hst.get_filter(file).upper()
         if not (filt in hst.options['acceptable_filters']):
             warning = 'WARNING: {img} with FILTER={filt} '
@@ -1343,15 +1354,7 @@ if __name__ == '__main__':
     # Run main tweakreg to register to the reference
     banner = 'Running main tweakreg.'
     hst.make_banner(banner)
-    errorcode = hst.run_tweakreg(hst.input_images, hst.reference,
-                     hst.options['global_defaults'])
-
-    # Sanitize any WFPC2 images
-    banner = 'Sanitizing WFPC2 images.'
-    hst.make_banner(banner)
-    for file in hst.input_images:
-        if 'wfpc2' in hst.get_instrument(file):
-            hst.sanitize_wfpc2(file)
+    errorcode = hst.run_tweakreg(hst.input_images, hst.reference)
 
     # Drizzle all visit/filter pairs if drizzleall
     if options.drizzleall:
@@ -1373,6 +1376,12 @@ if __name__ == '__main__':
                 hst.run_astrodrizzle(list(imagetable['image'].data),
                     output_name = drizname)
 
+    # Sanitize any WFPC2 images
+    banner = 'Sanitizing WFPC2 images.'
+    hst.make_banner(banner)
+    for file in hst.input_images:
+        if 'wfpc2' in hst.get_instrument(file):
+            hst.sanitize_wfpc2(file)
 
     # dolphot image preparation: mask_image, split_groups, calc_sky
     message = 'Preparing dolphot data for files={files}.'
@@ -1444,7 +1453,7 @@ if __name__ == '__main__':
             error = 'ERROR: dolphot parameter file {file} does not exist!'
             error += ' Generate a parameter file first (no --dofake).'
             print(error.format(file=hst.dolphot['param']))
-            sys.exit(2)
+            sys.exit(1)
 
 
     # Scrape data from the dolphot catalog for the input coordinates
@@ -1454,7 +1463,7 @@ if __name__ == '__main__':
             error = 'ERROR: dolphot output {dp} does not exist.  Run dolphot '
             error += '(using hst123.py --rundp).  Exiting...'
             print(error.format(dp=hst.dolphot['base']))
-            sys.exit(2)
+            sys.exit(1)
         else:
             message = 'Cutting bad sources from dolphot catalog.'
             hst.make_banner(message)
@@ -1529,7 +1538,7 @@ if __name__ == '__main__':
                     error = 'ERROR: did not find any candidate sources.'
                     error += ' Exiting...'
                     print(error)
-                    sys.exit(3)
+                    sys.exit(1)
                 elif len(data) == 1:
                     best = data[0]
                 elif len(data) > 1:
