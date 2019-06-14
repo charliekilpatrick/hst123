@@ -21,7 +21,8 @@ except NameError:
     pass
 
 # Dependencies and settings
-import glob, sys, os, shutil, time, subprocess, warnings, filecmp, astroquery
+import glob, sys, os, shutil, time
+import re, subprocess, warnings, filecmp, astroquery
 import astropy.wcs as wcs
 import numpy as np
 from astropy import units as u
@@ -35,6 +36,7 @@ from astroscrappy import detect_cosmics
 from datetime import datetime
 from dateutil.parser import parse
 from drizzlepac import tweakreg,astrodrizzle
+from photutils import SkyCircularAperture,aperture_photometry
 from stwcs import updatewcs
 warnings.filterwarnings('ignore')
 
@@ -149,7 +151,7 @@ detector_defaults = {
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
     'wfpc2_wfpc2': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
-                    'input_files': '*_c0m.fits', 'pixel_scale': 0.09,
+                    'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
                     'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
@@ -168,6 +170,44 @@ acceptable_filters = {
     'F218W','F255W','F300W','F375N','F380W','F390N','F437N','F439W','F450W',
     'F569W','F588N','F622W','F631N','F673N','F675W','F702W','F785LP','F791W',
     'F953N','F1042M'}
+
+# AB mag zero points for all HST imaging filters
+zeropoint = {
+    'wfc3_uvis': {'f200lp': 27.430, 'f218w': 22.952, 'f225w': 24.078,
+        'f275w': 24.169, 'f280n': 20.943, 'f300x': 24.985, 'f336w': 24.708,
+        'f343n': 23.906, 'f350lp': 26.982, 'f373n': 21.920, 'f390m': 23.641,
+        'f390w': 25.394, 'f395n': 22.688, 'f410m': 23.614, 'f438w': 24.856,
+        'f467m': 23.702, 'f469n': 21.827, 'f475w': 25.722, 'f475x': 26.178,
+        'f487n': 22.244, 'f502n': 22.326, 'f547m': 24.771, 'f555w': 25.824,
+        'f600lp': 25.911, 'f606w': 26.103, 'f621m': 24.626, 'f625w': 25.550,
+        'f631n': 21.904, 'f645n': 22.260, 'f656n': 20.486, 'f657n': 22.670,
+        'f658n': 21.056, 'f665n': 22.747, 'f673n': 22.596, 'f680n': 23.813,
+        'f689m': 24.493, 'f763m': 24.238, 'f775w': 24.890, 'f814w': 25.139,
+        'f845m': 23.823, 'f850lp': 23.888, 'f953n': 20.452},
+    'wfc3_ir': {'f105w': 26.2687, 'f110w': 26.8223, 'f125w': 26.2303,
+        'f140w': 26.4524, 'f160w': 25.9463, 'f098m': 25.6674, 'f127m': 24.6412,
+        'f139m': 24.4793, 'f153m': 24.4635, 'f126n': 22.8609, 'f128n': 22.9726,
+        'f130n': 22.9900, 'f132n': 22.9472, 'f164n': 22.9089, 'f167n': 22.9568},
+    'acs_wfc': {'f435w': 25.660, 'f475w': 26.052,'f502n': 22.283,
+        'f550m': 24.852, 'f555w': 25.710, 'f606w': 26.493, 'f625w': 25.899,
+        'f658n': 22.757, 'f660n': 21.707, 'f775w': 25.659, 'f814w': 25.937,
+        'f850lp': 24.851, 'f892n': 22.393},
+    'acs_hrc': {'f220w': 23.523, 'f250w': 23.734, 'f330w': 24.085,
+        'f344n': 21.546, 'f435w': 25.097, 'f475w': 25.538, 'f502n': 21.824,
+        'f550m': 24.441, 'f555w': 25.251, 'f606w': 25.984, 'f625w': 25.366,
+        'f658n': 22.186, 'f660n': 21.129, 'f775w': 24.951, 'f814w': 25.282,
+        'f850lp': 24.404, 'f892n': 21.871},
+    'wfpc2_wfpc2': {'f122m': 13.752, 'f160bw': 14.946, 'f170w': 16.313,
+        'f185w': 16.014, 'f218w': 16.558, 'f255w': 17.037, 'f300w': 19.433,
+        'f336w': 19.460, 'f343n': 14.023, 'f375n': 15.238, 'f380w': 20.972,
+        'f390n': 17.537, 'f410m': 19.669, 'f437n': 17.297, 'f439w': 20.916,
+        'f450w': 22.016, 'f467m': 20.012, 'f469n': 17.573, 'f487n': 17.380,
+        'f502n': 17.988, 'f547m': 21.676, 'f555w': 22.561, 'f569w': 22.253,
+        'f588n': 19.179, 'f606w': 22.896, 'f622w': 22.368, 'f631n': 18.516,
+        'f656n': 17.564, 'f658n': 18.115, 'f673n': 18.753, 'f675w': 22.042,
+        'f702w': 22.431, 'f785lp': 20.738, 'f791w': 21.512, 'f814w': 21.659,
+        'f850lp': 20.018, 'f953n': 16.186, 'f1042m': 16.326}
+}
 
 class hst123(object):
 
@@ -207,7 +247,8 @@ class hst123(object):
     self.options = {'global_defaults': global_defaults,
                     'detector_defaults': detector_defaults,
                     'instrument_defaults': instrument_defaults,
-                    'acceptable_filters': acceptable_filters}
+                    'acceptable_filters': acceptable_filters,
+                    'zeropoint': zeropoint}
 
     # List of pipeline products in case they need to be cleaned at start
     self.pipeline_products = ['*chip?.fits', '*chip?.sky.fits',
@@ -287,17 +328,21 @@ class hst123(object):
     self.copy_raw_data(reverse = True)
     sys.exit(0)
 
-  def avg_magnitudes(self, counts, exptimes, zpt):
+  def get_zpt(self, det, filt):
+    # Get zero point given an input instrument and filter
+    return(self.options['zeropoint'][det][filt])
+
+
+  def avg_magnitudes(self, magerrs, counts, exptimes, zpt):
     # Mask out bad values
     idx = []
-    for i,data in enumerate(zip(mags, magerrs, counts, exptimes)):
-        if data[1] < 1.0 and data[2] > 0:
+    for i,data in enumerate(magerrs):
+        if data < 0.5:
             idx.append(i)
 
     if not idx:
         return (float('NaN'),float('NaN'))
 
-    mags = np.array(mags)[idx]
     magerrs = np.array(magerrs)[idx]
     counts = np.array(counts)[idx]
     exptimes = np.array(exptimes)[idx]
@@ -517,25 +562,27 @@ class hst123(object):
             visittable = insttable[insttable['visit'] == visit]
             for filt in list(set(visittable['filter'])):
                 filttable = visittable[visittable['filter'] == filt]
-                mjds, mags, magerrs, counts, exptimes = ([] for i in range(5))
+                mjds, mags, magerrs, counts, exptimes, zpts = ([] for i in range(6))
                 for im in filttable['image']:
-                    mjds = [Time(str(fits.getval(im,'DATE-OBS')) + 'T' +
-                             str(fits.getval(im,'TIME-OBS'))).mjd]
-                    mags = [float(self.get_dolphot_data(row[1], 'dp.columns',
-                            'Instrumental', im))]
-                    magerrs = [float(self.get_dolphot_data(row[1], 'dp.columns',
-                               'Magnitude uncertainty', im))]
-                    counts = [float(self.get_dolphot_data(row[1], 'dp.columns',
-                              'Measured counts', im))]
-                    exptimes = [float(fits.getval(im, 'EXPTIME'))]
+                    mjds.append(Time(str(fits.getval(im,'DATE-OBS')) + 'T' +
+                             str(fits.getval(im,'TIME-OBS'))).mjd)
+                    mags.append(float(self.get_dolphot_data(row[1], 'dp.columns',
+                            'Instrumental', im)))
+                    magerrs.append(float(self.get_dolphot_data(row[1],
+                        'dp.columns', 'Magnitude uncertainty', im)))
+                    counts.append(float(self.get_dolphot_data(row[1],
+                              'dp.columns', 'Measured counts', im)))
+                    exptimes.append(float(fits.getval(im, 'EXPTIME')))
+                    det = det = '_'.join(self.get_instrument(im).split('_')[:2])
+                    zpts.append(float(self.get_zpt(det, filt)))
 
                 # Calculate average of mjds, total of exptimes
                 avg_mjd = np.mean(mjds)
                 total_exptime = np.sum(exptimes)
 
                 # Average magnitude and magnitude errors
-                mag, magerr = self.avg_magnitudes(mags, magerrs,
-                    counts, exptimes)
+                mag, magerr = self.avg_magnitudes(magerrs,
+                    counts, exptimes, zpts)
 
                 final_phot.add_row((avg_mjd, inst, filt,
                                     total_exptime, mag, magerr))
@@ -698,7 +745,7 @@ class hst123(object):
   def needs_to_split_groups(self,image):
     return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
 
-  def needs_to_calc_sky(self,image):
+  def needs_to_calc_sky(self, image):
     files = glob.glob(image.replace('.fits','.sky.fits'))
     if (len(files) == 0):
         if self.coord:
@@ -711,20 +758,61 @@ class hst123(object):
   # the detector.  So 1) check if coordinate is in image, and 2) check if
   # corresponding DQ file lists this part of image as good pixels.
   def image_contains(self, image, coord):
-    # sky2xy is way better/faster than astropy.wcs. Also, astropy.wcs has a
-    # problem with chip? files generated by splitgroups because the WCSDVARR
-    # gets split off from the data, which is required by WCS (see fobj).
-    ra = coord.ra.degree
-    dec = coord.dec.degree
-    cmd = 'sky2xy {image} {ra} {dec}'.format(image=image, ra=ra, dec=dec)
-    result = subprocess.check_output(cmd, shell=True)
-    if ('off image' in result):
-        message = '{image} does not contain ra={ra}, dec={dec}'
-        print(message.format(image=image, ra=ra, dec=dec))
+    message = 'Examining image={image}'
+    print(message.format(image=image))
+
+    if 'drz.fits' in image:
+        # Just need to check if x,y in image and not nan at that pixel
+        hdu = fits.open(image)
+        w = wcs.WCS(hdu['SCI'].header)
+        x,y = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
+
+        if (x < 0 or x > hdu['SCI'].header['NAXIS1'] or
+            y < 0 or y > hdu['SCI'].header['NAXIS2']):
+            return(True)
+        else:
+            return(False)
+
+
+    # Get parent file
+    mask_file = re.sub(r"chip\d{1}.", "", image)
+
+    # Get chip number
+    i = int(image.split('.')[1].strip('chip'))
+
+    instrument = self.get_instrument(image)
+
+    # Transform chip into the right index for the HDU
+    if 'acs' in instrument or 'wfc3' in instrument:
+        index = 3 * i # for the DQ extension
+    elif 'wfpc2' in instrument:
+        index = i
+
+    message = 'Examining image index={i} in mask file={image}'
+    print(message.format(i=index,image=mask_file))
+
+    if 'wfpc2' in instrument:
+        mask_file = mask_file.replace('c0m','c1m')
+
+    hdu = fits.open('raw/'+mask_file)
+    w = wcs.WCS(hdu[index].header)
+    x,y = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
+
+    if (x < 0 or x > hdu[i].header['NAXIS1'] or
+        y < 0 or y > hdu[i].header['NAXIS2']):
         return(False)
     else:
-        x,y = result.split()[4:6]
-        return(True)
+        # We dont want the source to land in a masked part of the image
+        # Do photometry on the data
+        aperture = SkyCircularAperture(coord, 0.2 * u.arcsec)
+        phot_table = aperture_photometry(hdu[index], aperture)
+        if phot_table['aperture_sum'].data[0] > 100.0:
+            m = 'Aperture sum is {sum} for image {im} at x={x},y={y}, index={ind}'
+            print(m.format(sum=phot_table['aperture_sum'].data[0],
+                x=x, y=y, ind=index, im=mask_file))
+            return(False)
+        else:
+            return(True)
 
   # Determine if we need to run the dolphot mask routine
   def needs_to_be_masked(self,image):
@@ -1001,13 +1089,11 @@ class hst123(object):
     else:
         skysub = True
 
-    print(images)
-
     astrodrizzle.AstroDrizzle(images, output=output_name, runfile='',
                 wcskey=wcskey, context=True, group='', build=True,
                 num_cores=8, preserve=False, clean=True, skysub=skysub,
                 skystat='mode', skylower=0.0, skyupper=None, updatewcs=True,
-                driz_sep_fillval=-100000, driz_sep_bits=0, driz_sep_wcs=True,
+                driz_sep_fillval=-50000, driz_sep_bits=0, driz_sep_wcs=True,
                 driz_sep_rot=0.0, driz_sep_scale=options['pixel_scale'],
                 driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
                 driz_sep_ra=ra, driz_sep_dec=dec,
@@ -1116,8 +1202,8 @@ class hst123(object):
             wcsname='TWEAK', reusename=True, rfluxunits='counts', minobj=10,
             searchrad=2.0, searchunits='arcseconds', runfile='',
             see2dplot=False, separation=0.5, residplot='No plot',
-            imagefindcfg = {'threshold': 5, 'use_sharp_round': True},
-            refimagefindcfg = {'threshold': 5, 'use_sharp_round': True})
+            imagefindcfg = {'threshold': 10, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 10, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
