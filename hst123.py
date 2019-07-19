@@ -99,21 +99,21 @@ global_defaults = {
              'nstars': 50000}}
 
 instrument_defaults = {
-    'wfc3': {'env_ref': 'iref',
+    'wfc3': {'env_ref': 'iref.old',
              'crpars': {'rdnoise': 6.5,
                         'gain': 1.0,
                         'saturation': 70000.0,
                         'sig_clip': 4.0,
                         'sig_frac': 0.2,
                         'obj_lim': 6.0}},
-    'acs': {'env_ref': 'jref',
+    'acs': {'env_ref': 'jref.old',
             'crpars': {'rdnoise': 6.5,
                        'gain': 1.0,
                        'saturation': 70000.0,
                        'sig_clip': 3.0,
                        'sig_frac': 0.1,
                        'obj_lim': 5.0}},
-    'wfpc2': {'env_ref': 'uref',
+    'wfpc2': {'env_ref': 'uref.old',
               'crpars': {'rdnoise': 10.0,
                          'gain': 7.0,
                          'saturation': 27000.0,
@@ -1036,7 +1036,8 @@ class hst123(object):
     change_keys = self.options['global_defaults']['keys']
     for image in images:
         inst = self.get_instrument(image).split('_')[0]
-        ref = self.options['instrument_defaults'][inst]['env_ref']
+        ref_url = self.options['instrument_defaults'][inst]['env_ref']
+        ref = ref_url.strip('.old')
         for key in change_keys:
             try:
                 val = fits.getval(image, key, extname='PRIMARY')
@@ -1051,7 +1052,7 @@ class hst123(object):
                 ref_file = val.split('$')[1]
                 if not os.path.exists(ref_file):
                     url = self.options['global_defaults']['cdbs']
-                    url += ref+'/'+ref_file
+                    url += ref_url+'/'+ref_file
                     message = 'Downloading file: {url}'
                     sys.stdout.write(message.format(url=url))
                     sys.stdout.flush()
@@ -1202,8 +1203,8 @@ class hst123(object):
             wcsname='TWEAK', reusename=True, rfluxunits='counts', minobj=10,
             searchrad=2.0, searchunits='arcseconds', runfile='',
             see2dplot=False, separation=0.5, residplot='No plot',
-            imagefindcfg = {'threshold': 10, 'use_sharp_round': True},
-            refimagefindcfg = {'threshold': 10, 'use_sharp_round': True})
+            imagefindcfg = {'threshold': 15, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 15, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
