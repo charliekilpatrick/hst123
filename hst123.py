@@ -99,21 +99,21 @@ global_defaults = {
              'nstars': 50000}}
 
 instrument_defaults = {
-    'wfc3': {'env_ref': 'iref',
+    'wfc3': {'env_ref': 'iref.old',
              'crpars': {'rdnoise': 6.5,
                         'gain': 1.0,
                         'saturation': 70000.0,
                         'sig_clip': 4.0,
                         'sig_frac': 0.2,
                         'obj_lim': 6.0}},
-    'acs': {'env_ref': 'jref',
+    'acs': {'env_ref': 'jref.old',
             'crpars': {'rdnoise': 6.5,
                        'gain': 1.0,
                        'saturation': 70000.0,
                        'sig_clip': 3.0,
                        'sig_frac': 0.1,
                        'obj_lim': 5.0}},
-    'wfpc2': {'env_ref': 'uref',
+    'wfpc2': {'env_ref': 'uref.old',
               'crpars': {'rdnoise': 10.0,
                          'gain': 7.0,
                          'saturation': 27000.0,
@@ -562,13 +562,12 @@ class hst123(object):
             visittable = insttable[insttable['visit'] == visit]
             for filt in list(set(visittable['filter'])):
                 filttable = visittable[visittable['filter'] == filt]
-                mjds, mags, magerrs,\
-                    counts, exptimes, zpts = ([] for i in range(6))
+                mjds, mags, magerrs, counts, exptimes, zpts = ([] for i in range(6))
                 for im in filttable['image']:
                     mjds.append(Time(str(fits.getval(im,'DATE-OBS')) + 'T' +
                              str(fits.getval(im,'TIME-OBS'))).mjd)
-                    mags.append(float(self.get_dolphot_data(row[1],
-                        'dp.columns', 'Instrumental', im)))
+                    mags.append(float(self.get_dolphot_data(row[1], 'dp.columns',
+                            'Instrumental', im)))
                     magerrs.append(float(self.get_dolphot_data(row[1],
                         'dp.columns', 'Magnitude uncertainty', im)))
                     counts.append(float(self.get_dolphot_data(row[1],
@@ -808,12 +807,25 @@ class hst123(object):
         aperture = SkyCircularAperture(coord, 0.2 * u.arcsec)
         phot_table = aperture_photometry(hdu[index], aperture)
         if phot_table['aperture_sum'].data[0] > 100.0:
-            m = 'Aperture sum={sum} for image {im} at x={x},y={y}, index={ind}'
+            m = 'Aperture sum is {sum} for image {im} at x={x},y={y}, index={ind}'
             print(m.format(sum=phot_table['aperture_sum'].data[0],
                 x=x, y=y, ind=index, im=mask_file))
             return(False)
         else:
             return(True)
+
+  # Determine if we need to run the dolphot mask routine
+  def needs_to_be_masked(self,image):
+    # Masking should remove all of the DQ arrays etc, so make sure that any
+    # extensions with data in in them are only SCI extensions. This might not be
+    # 100% robust, but should be good enough.
+    hdulist = fits.open(image)
+    needs_masked = False
+    for hdu in hdulist:
+        if hdu.data is not None and 'EXTNAME' in hdu.header:
+            if hdu.header['EXTNAME'].upper() != 'SCI':
+                needs_masked = True
+    return(needs_masked)
 
   # Get a string representing the filter for the input image
   def get_filter(self, image):
@@ -864,9 +876,7 @@ class hst123(object):
   # Run the dolphot splitgroups routine
   def split_groups(self,image):
     print('Running split groups for {image}'.format(image=image))
-    split = 'splitgroups {filename}'.format(filename=image)
-    print(split)
-    os.system(split)
+    os.system('splitgroups {filename}'.format(filename=image))
     # Modify permissions
     for file in glob.glob(image.replace('.fits', '.chip?.fits')):
         os.chmod(file, 0775)
@@ -876,7 +886,6 @@ class hst123(object):
     maskimage = self.get_dq_image(image)
     cmd = '{instrument}mask {image} {maskimage}'
     mask = cmd.format(instrument=instrument, image=image, maskimage=maskimage)
-    print(mask)
     os.system(mask)
 
   # Run the dolphot calcsky routine
@@ -931,7 +940,7 @@ class hst123(object):
         # Best possible filter for a dolphot reference image in the approximate
         # order I would want to use for a reference image.  You can also use
         # to force the script to pick a reference image from a specific filter.
-        best_filters = ['f606w','f555w','f814w','f350lp','f791w']
+        best_filters = ['f606w','f555w','f814w','f350lp']
 
         # Best filter suffixes in the approximate order we would want to use to
         # generate a templatea.
@@ -1027,7 +1036,8 @@ class hst123(object):
     change_keys = self.options['global_defaults']['keys']
     for image in images:
         inst = self.get_instrument(image).split('_')[0]
-        ref = self.options['instrument_defaults'][inst]['env_ref']
+        ref_url = self.options['instrument_defaults'][inst]['env_ref']
+        ref = ref_url.strip('.old')
         for key in change_keys:
             try:
                 val = fits.getval(image, key, extname='PRIMARY')
@@ -1042,7 +1052,7 @@ class hst123(object):
                 ref_file = val.split('$')[1]
                 if not os.path.exists(ref_file):
                     url = self.options['global_defaults']['cdbs']
-                    url += ref+'/'+ref_file
+                    url += ref_url+'/'+ref_file
                     message = 'Downloading file: {url}'
                     sys.stdout.write(message.format(url=url))
                     sys.stdout.flush()
@@ -1189,12 +1199,12 @@ class hst123(object):
                          reference = reference))
     start_tweak = time.time()
     tweakreg.TweakReg(files=run_images, refimage=reference, verbose=False,
-            interactive=False, clean=True, writecat = False, updatehdr=True,
+            interactive=False, clean=True, writecat = True, updatehdr=True,
             wcsname='TWEAK', reusename=True, rfluxunits='counts', minobj=10,
             searchrad=2.0, searchunits='arcseconds', runfile='',
             see2dplot=False, separation=0.5, residplot='No plot',
-            imagefindcfg = {'threshold': 10, 'use_sharp_round': True},
-            refimagefindcfg = {'threshold': 10, 'use_sharp_round': True})
+            imagefindcfg = {'threshold': 15, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 15, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
@@ -1464,8 +1474,9 @@ if __name__ == '__main__':
     message = 'Preparing dolphot data for files={files}.'
     print(message.format(files=','.join(map(str,hst.input_images))))
     for image in hst.input_images:
-        # Always mask all of the images
-        hst.mask_image(image, hst.get_instrument(image).split('_')[0])
+        # Mask if needs to be masked
+        if hst.needs_to_be_masked(image):
+            hst.mask_image(image, hst.get_instrument(image).split('_')[0])
 
         # Split groups if needs split groups
         if hst.needs_to_split_groups(image):
