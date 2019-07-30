@@ -113,7 +113,7 @@ instrument_defaults = {
                        'sig_clip': 3.0,
                        'sig_frac': 0.1,
                        'obj_lim': 5.0}},
-    'wfpc2': {'env_ref': 'uref.old',
+    'wfpc2': {'env_ref': 'uref',
               'crpars': {'rdnoise': 10.0,
                          'gain': 7.0,
                          'saturation': 27000.0,
@@ -1203,8 +1203,8 @@ class hst123(object):
             wcsname='TWEAK', reusename=True, rfluxunits='counts', minobj=10,
             searchrad=2.0, searchunits='arcseconds', runfile='',
             see2dplot=False, separation=0.5, residplot='No plot',
-            imagefindcfg = {'threshold': 15, 'use_sharp_round': True},
-            refimagefindcfg = {'threshold': 15, 'use_sharp_round': True})
+            imagefindcfg = {'threshold': 5, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 5, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
