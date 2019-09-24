@@ -1212,8 +1212,8 @@ class hst123(object):
             wcsname='TWEAK', reusename=True, rfluxunits='counts', minobj=10,
             searchrad=2.0, searchunits='arcseconds', runfile='',
             see2dplot=False, separation=0.5, residplot='No plot',
-            imagefindcfg = {'threshold': 15, 'use_sharp_round': True},
-            refimagefindcfg = {'threshold': 15, 'use_sharp_round': True})
+            imagefindcfg = {'threshold': 5, 'use_sharp_round': True},
+            refimagefindcfg = {'threshold': 5, 'use_sharp_round': True})
 
     message = 'Tweakreg took {time} seconds to execute.'
     print(message.format(time = time.time()-start_tweak))
