@@ -113,7 +113,7 @@ instrument_defaults = {
                        'sig_clip': 3.0,
                        'sig_frac': 0.1,
                        'obj_lim': 5.0}},
-    'wfpc2': {'env_ref': 'uref.old',
+    'wfpc2': {'env_ref': 'uref',
               'crpars': {'rdnoise': 10.0,
                          'gain': 7.0,
                          'saturation': 27000.0,
@@ -820,12 +820,21 @@ class hst123(object):
     # extensions with data in in them are only SCI extensions. This might not be
     # 100% robust, but should be good enough.
     hdulist = fits.open(image)
-    needs_masked = False
-    for hdu in hdulist:
-        if hdu.data is not None and 'EXTNAME' in hdu.header:
-            if hdu.header['EXTNAME'].upper() != 'SCI':
-                needs_masked = True
-    return(needs_masked)
+    header = hdulist[0].header
+    inst = get_instrument(image).split('_')[0].upper()
+    if inst is 'WFPC2':
+        if 'DOLWFPC2' in header.keys():
+            if header['DOLWFPC2']==0:
+                return(False)
+    if inst is 'WFC3':
+        if 'DOL_WFC3': in header.keys():
+            if header['DOL_WFC3']==0:
+                return(False)
+    if inst is 'ACS':
+        if 'DOL_ACS': in header.keys():
+            if header['DOL_ACS']==0:
+                return(False)
+    return(True)
 
   # Get a string representing the filter for the input image
   def get_filter(self, image):
