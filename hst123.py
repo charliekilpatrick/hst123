@@ -821,7 +821,7 @@ class hst123(object):
     # 100% robust, but should be good enough.
     hdulist = fits.open(image)
     header = hdulist[0].header
-    inst = get_instrument(image).split('_')[0].upper()
+    inst = self.get_instrument(image).split('_')[0].upper()
     if inst is 'WFPC2':
         if 'DOLWFPC2' in header.keys():
             if header['DOLWFPC2']==0:
