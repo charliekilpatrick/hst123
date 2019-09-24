@@ -827,11 +827,11 @@ class hst123(object):
             if header['DOLWFPC2']==0:
                 return(False)
     if inst is 'WFC3':
-        if 'DOL_WFC3': in header.keys():
+        if 'DOL_WFC3' in header.keys():
             if header['DOL_WFC3']==0:
                 return(False)
     if inst is 'ACS':
-        if 'DOL_ACS': in header.keys():
+        if 'DOL_ACS' in header.keys():
             if header['DOL_ACS']==0:
                 return(False)
     return(True)
