@@ -596,7 +596,7 @@ class hst123(object):
     # Going to write out newhdu
     # Only want science extension from orig reference
     newhdu = fits.HDUList()
-    newhdu.append(hdu['SCI'])
+    newhdu.append(hdu[0])
 
     # Want to preserve header info, so combine SCI+PRIMARY headers
     for key in hdu['PRIMARY'].header.keys():
