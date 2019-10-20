@@ -227,6 +227,8 @@ class hst123(object):
     self.after = None
     self.coord = None
 
+    self.reffilter = None
+
     self.keepshort = False
     self.clobber = False
     self.nocleanup = False
@@ -289,6 +291,8 @@ class hst123(object):
     parser.add_argument('--scrapedolphot','--sd', default=False,
         action='store_true', help='Scrape photometry from the dolphot '+\
         'catalog from the input RA/Dec.')
+    parser.add_argument('--reffilter', default=None, type=str,
+        help='Use this filter for the reference image if available.')
     parser.add_argument('--dofake','--df', default=False,
         action='store_true', help='Run fake star injection into dolphot. '+\
         'Requires that dolphot has been run, and so files are taken from the '+\
@@ -475,12 +479,10 @@ class hst123(object):
     if not reverse:
         if not os.path.exists(self.raw_dir):
             os.mkdir(self.raw_dir)
-            os.chmod(self.raw_dir, 0775)
         for f in self.input_images:
             if not os.path.isfile(self.raw_dir+f):
                 # Create new file and change permissions
                 shutil.copyfile(f, self.raw_dir+f)
-                os.chmod(self.raw_dir+f, 0775)
     # reverse = True will copy files from the raw dir to the working directory
     # if the working files are different from the raw dir.  This is necessary
     # for the pipeline to work properly, as some procedures (esp. WCS checking,
@@ -497,7 +499,6 @@ class hst123(object):
                 message = '{file} != {base}'
                 print(message.format(file=file,base=base))
                 shutil.copyfile(file, base)
-            os.chmod(base, 0775)
 
   # For an input obstable, sort all files into instrument, visit, and filter
   # so we can group them together for the final output from dolphot
@@ -596,22 +597,22 @@ class hst123(object):
     # Going to write out newhdu
     # Only want science extension from orig reference
     newhdu = fits.HDUList()
-    newhdu.append(hdu[0])
+    newhdu.append(hdu['SCI'])
 
     # Want to preserve header info, so combine SCI+PRIMARY headers
     for key in hdu['PRIMARY'].header.keys():
-        if (key not in newhdu[0].header.keys()+['COMMENT','HISTORY']):
-            newhdu[0].header[key] = hdu['PRIMARY'].header[key]
+        if (key not in newhdu['SCI'].header.keys()+['COMMENT','HISTORY']):
+            newhdu['SCI'].header[key] = hdu['PRIMARY'].header[key]
 
     # Make sure that reference header reflects one extension
-    newhdu[0].header['EXTEND']=False
+    newhdu['SCI'].header['EXTEND']=False
 
     # Add header variables that dolphot needs: GAIN, RDNOISE, SATURATE
-    inst = newhdu[0].header['INSTRUME'].lower()
+    inst = newhdu['SCI'].header['INSTRUME'].lower()
     opt  = self.options['instrument_defaults'][inst]['crpars']
-    newhdu[0].header['SATURATE'] = opt['saturation']
-    newhdu[0].header['RDNOISE']  = opt['rdnoise']
-    newhdu[0].header['GAIN']     = opt['gain']
+    newhdu['SCI'].header['SATURATE'] = opt['saturation']
+    newhdu['SCI'].header['RDNOISE']  = opt['rdnoise']
+    newhdu['SCI'].header['GAIN']     = opt['gain']
 
     if 'WHT' in [h.name for h in hdu]:
         wght = hdu['WHT'].data
@@ -748,10 +749,7 @@ class hst123(object):
   def needs_to_calc_sky(self, image):
     files = glob.glob(image.replace('.fits','.sky.fits'))
     if (len(files) == 0):
-        if self.coord:
-            return(self.image_contains(image, self.coord))
-        else:
-            return(True)
+        return(True)
 
   # Check if the image contains input coordinate.  This is somewhat complicated
   # as an image might cover input coordinates, but they land on a bad part of
@@ -887,8 +885,8 @@ class hst123(object):
     print('Running split groups for {image}'.format(image=image))
     os.system('splitgroups {filename}'.format(filename=image))
     # Modify permissions
-    for file in glob.glob(image.replace('.fits', '.chip?.fits')):
-        os.chmod(file, 0775)
+    #for file in glob.glob(image.replace('.fits', '.chip?.fits')):
+    #    os.chmod(file, 0775)
 
   # Run the dolphot mask routine for the input image
   def mask_image(self, image, instrument):
@@ -907,8 +905,8 @@ class hst123(object):
                             sigma_low=opt['sigma_low'],
                             sigma_high=opt['sigma_high'])
     os.system(calc_sky)
-    for file in glob.glob(image.replace('.fits','.sky.fits')):
-        os.chmod(file, 0775)
+    #for file in glob.glob(image.replace('.fits','.sky.fits')):
+    #    os.chmod(file, 0775)
 
 
   # Write the global dolphot parameters to the dolphot parameter file
@@ -950,6 +948,10 @@ class hst123(object):
         # order I would want to use for a reference image.  You can also use
         # to force the script to pick a reference image from a specific filter.
         best_filters = ['f606w','f555w','f814w','f350lp']
+
+        if self.reffilter:
+            if self.reffilter.upper() in self.options['acceptable_filters']:
+                best_filters = [self.reffilter.lower()]
 
         # Best filter suffixes in the approximate order we would want to use to
         # generate a templatea.
@@ -1059,36 +1061,37 @@ class hst123(object):
                     continue
             if (ref+'$' in val):
                 ref_file = val.split('$')[1]
-                if not os.path.exists(ref_file):
-                    url = self.options['global_defaults']['cdbs']
-                    url += ref_url+'/'+ref_file
-                    message = 'Downloading file: {url}'
+            else:
+                ref_file = val
+            if not os.path.exists(ref_file):
+                url = self.options['global_defaults']['cdbs']
+                url += ref_url+'/'+ref_file
+                message = 'Downloading file: {url}'
+                sys.stdout.write(message.format(url=url))
+                sys.stdout.flush()
+                try:
+                    # utils.data.download_file can get buggy if the cache is
+                    # full.  Clear the cache even though we aren't using
+                    # caching to prevent download method from choking
+                    utils.data.clear_download_cache()
+                except RuntimeError:
+                    pass
+                try:
+                    dat = utils.data.download_file(url, cache=False,
+                        show_progress=False, timeout=120)
+                    shutil.move(dat, ref_file)
+                    message = '\r' + message
+                    message += green+' [SUCCESS]'+end+'\n'
                     sys.stdout.write(message.format(url=url))
-                    sys.stdout.flush()
-                    try:
-                        # utils.data.download_file can get buggy if the cache is
-                        # full.  Clear the cache even though we aren't using
-                        # caching to prevent download method from choking
-                        utils.data.clear_download_cache()
-                    except RuntimeError:
-                        pass
-                    try:
-                        dat = utils.data.download_file(url, cache=False,
-                            show_progress=False, timeout=120)
-                        shutil.move(dat, ref_file)
-                        os.chmod(ref_file, 0775)
-                        message = '\r' + message
-                        message += green+' [SUCCESS]'+end+'\n'
-                        sys.stdout.write(message.format(url=url))
-                    except:
-                        message = '\r' + message
-                        message += red+' [FAILURE]'+end+'\n'
-                        sys.stdout.write(message.format(url=url))
-                        print(message.format(url=url))
-                fits.setval(image, key, extname='PRIMARY', value=ref_file,
-                    output_verify='silentfix')
-                fits.setval(image, key, extname='SCI', value=ref_file,
-                    output_verify='silentfix')
+                except:
+                    message = '\r' + message
+                    message += red+' [FAILURE]'+end+'\n'
+                    sys.stdout.write(message.format(url=url))
+                    print(message.format(url=url))
+            fits.setval(image, key, extname='PRIMARY', value=ref_file,
+                output_verify='silentfix')
+            fits.setval(image, key, extname='SCI', value=ref_file,
+                output_verify='silentfix')
         updatewcs.updatewcs(image)
 
     ra = self.coord.ra.degree if self.coord else None
@@ -1120,7 +1123,7 @@ class hst123(object):
                 final_ra=ra, final_dec=dec)
 
     # Change permissions on drizzled file
-    os.chmod(output_name, 0775)
+    #os.chmod(output_name, 0775)
 
   # Run cosmic ray clean
   def run_cosmic(self,image,options,output=None):
@@ -1188,7 +1191,6 @@ class hst123(object):
 
         # Copy the raw data into a temporary file
         shutil.copyfile(image, rawtmp)
-        os.chmod(rawtmp, 0775)
 
         # Clean cosmic rays on the image in place. We do this so we don't
         # accidentally pick cosmic rays for alignment
@@ -1199,7 +1201,6 @@ class hst123(object):
     if (reference == '' or reference == None):
         reference = 'dummy.fits'
         shutil.copyfile(images[0], reference)
-        os.chmod(reference, 0775)
 
     message = 'Executing tweakreg with images: {images} \n'
     message += 'Reference image: {reference} \n'
@@ -1320,7 +1321,6 @@ class hst123(object):
                     dat = utils.data.download_file(url, cache=False,
                         show_progress=False, timeout=120)
                     shutil.move(dat, filename)
-                    os.chmod(filename, 0775)
                     message = '\r' + message
                     message += green+' [SUCCESS]'+end+'\n'
                     sys.stdout.write(message.format(image=filename))
@@ -1369,6 +1369,7 @@ if __name__ == '__main__':
     hst.reference = options.reference
     hst.clobber   = options.clobber
     hst.keepshort = options.keepshort
+    hst.reffilter = options.reffilter
     hst.dolphot   = hst.make_dolphot_dict(options.dolphot)
     if options.alignonly:
         hst.options['global_defaults']['dolphot']['AlignOnly']=1
