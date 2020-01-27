@@ -140,9 +140,9 @@ detector_defaults = {
                 'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
-                'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
-                            'RPSF': 13, 'RSky': '15 35',
-                            'RSky2': '4 10'}},
+                'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
+                            'RPSF': 10, 'RSky': '15 35',
+                            'RSky2': '3 6'}},
     'acs_hrc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flt.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
@@ -151,7 +151,7 @@ detector_defaults = {
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
     'wfpc2_wfpc2': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
-                    'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
+                    'input_files': '*_c0m.fits', 'pixel_scale': 0.05,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
                     'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
@@ -228,6 +228,7 @@ class hst123(object):
     self.coord = None
 
     self.reffilter = None
+    self.object = None
 
     self.keepshort = False
     self.clobber = False
@@ -302,6 +303,9 @@ class hst123(object):
         help='Dont clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
     parser.add_argument('--drizzleall', default=False, action='store_true',
         help='Drizzle all visit/filter pairs together.')
+    parser.add_argument('--object', default=None, type=str,
+        help='Change the object name in all science files to value and '+\
+        'use that value in the filenames for drizzled images.')
     return(parser)
 
   # Make sure all standard output is formatted in the same way with banner
@@ -597,26 +601,29 @@ class hst123(object):
     # Going to write out newhdu
     # Only want science extension from orig reference
     newhdu = fits.HDUList()
-    newhdu.append(hdu['SCI'])
+    newhdu.append(hdu['PRIMARY'])
 
-    # Want to preserve header info, so combine SCI+PRIMARY headers
+    # Want to preserve header info, so combine PRIMARY headers
     for key in hdu['PRIMARY'].header.keys():
-        if (key not in newhdu['SCI'].header.keys()+['COMMENT','HISTORY']):
-            newhdu['SCI'].header[key] = hdu['PRIMARY'].header[key]
+        if (key not in newhdu['PRIMARY'].header.keys()+['COMMENT','HISTORY']):
+            newhdu['PRIMARY'].header[key] = hdu['PRIMARY'].header[key]
 
     # Make sure that reference header reflects one extension
-    newhdu['SCI'].header['EXTEND']=False
+    newhdu['PRIMARY'].header['EXTEND']=False
 
     # Add header variables that dolphot needs: GAIN, RDNOISE, SATURATE
-    inst = newhdu['SCI'].header['INSTRUME'].lower()
+    inst = newhdu['PRIMARY'].header['INSTRUME'].lower()
     opt  = self.options['instrument_defaults'][inst]['crpars']
-    newhdu['SCI'].header['SATURATE'] = opt['saturation']
-    newhdu['SCI'].header['RDNOISE']  = opt['rdnoise']
-    newhdu['SCI'].header['GAIN']     = opt['gain']
+    newhdu['PRIMARY'].header['SATURATE'] = opt['saturation']
+    newhdu['PRIMARY'].header['RDNOISE']  = opt['rdnoise']
+    newhdu['PRIMARY'].header['GAIN']     = opt['gain']
 
     if 'WHT' in [h.name for h in hdu]:
         wght = hdu['WHT'].data
-        newhdu['SCI'].data[np.where(wght == 0)] = float('NaN')
+        newhdu['PRIMARY'].data[np.where(wght == 0)] = float('NaN')
+    elif os.path.exists(reference.replace('.fits', '.weight.fits')):
+        wght = fits.open(reference.replace('.fits', '.weight.fits'))[0].data
+        newhdu['PRIMARY'].data[np.where(wght == 0)] = float('NaN')
 
     # Write out to same file w/ overwrite
     newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
@@ -756,61 +763,14 @@ class hst123(object):
   # the detector.  So 1) check if coordinate is in image, and 2) check if
   # corresponding DQ file lists this part of image as good pixels.
   def image_contains(self, image, coord):
-    message = 'Examining image={image}'
-    print(message.format(image=image))
 
-    if 'drz.fits' in image:
-        # Just need to check if x,y in image and not nan at that pixel
-        hdu = fits.open(image)
-        w = wcs.WCS(hdu['SCI'].header)
-        x,y = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
-
-        if (x < 0 or x > hdu['SCI'].header['NAXIS1'] or
-            y < 0 or y > hdu['SCI'].header['NAXIS2']):
-            return(True)
-        else:
-            return(False)
-
-
-    # Get parent file
-    mask_file = re.sub(r"chip\d{1}.", "", image)
-
-    # Get chip number
-    i = int(image.split('.')[1].strip('chip'))
-
-    instrument = self.get_instrument(image)
-
-    # Transform chip into the right index for the HDU
-    if 'acs' in instrument or 'wfc3' in instrument:
-        index = 3 * i # for the DQ extension
-    elif 'wfpc2' in instrument:
-        index = i
-
-    message = 'Examining image index={i} in mask file={image}'
-    print(message.format(i=index,image=mask_file))
-
-    if 'wfpc2' in instrument:
-        mask_file = mask_file.replace('c0m','c1m')
-
-    hdu = fits.open('raw/'+mask_file)
-    w = wcs.WCS(hdu[index].header)
-    x,y = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
-
-    if (x < 0 or x > hdu[i].header['NAXIS1'] or
-        y < 0 or y > hdu[i].header['NAXIS2']):
+    cmd = 'sky2xy {image} {ra} {dec}'
+    cmd = cmd.format(image=image, ra=coord.ra.degree, dec=coord.dec.degree)
+    result = os.popen(cmd).read()
+    if 'off image' in result:
         return(False)
     else:
-        # We dont want the source to land in a masked part of the image
-        # Do photometry on the data
-        aperture = SkyCircularAperture(coord, 0.2 * u.arcsec)
-        phot_table = aperture_photometry(hdu[index], aperture)
-        if phot_table['aperture_sum'].data[0] > 100.0:
-            m = 'Aperture sum is {sum} for image {im} at x={x},y={y}, index={ind}'
-            print(m.format(sum=phot_table['aperture_sum'].data[0],
-                x=x, y=y, ind=index, im=mask_file))
-            return(False)
-        else:
-            return(True)
+        return(True)
 
   # Determine if we need to run the dolphot mask routine
   def needs_to_be_masked(self,image):
@@ -1013,7 +973,19 @@ class hst123(object):
                 self.get_instrument(im).split('_')[0] == best_filt_inst):
                 reference_images.append(im)
         best_filt,best_inst = best_filt_inst.split('_')
-        output_name = best_inst+'_'+best_filt+'_drz.fits'
+
+        # Generate output name like other drizzled image
+        # Make a photpipe-like image name
+        drizname = ''
+        if self.object:
+            drizname = '{obj}.{inst}.{filt}.ref.drz.fits'
+            drizname = drizname.format(inst=best_inst, filt=best_filt,
+                obj=self.object)
+        else:
+            drizname = '{inst}.{filt}.ref.drz.fits'
+            drizname = drizname.format(inst=best_inst, filt=best_filt)
+
+        output_name = drizname
         message = 'Reference image name will be: {reference}. '
         message += 'Generating from input files {files}.'
         print(message.format(reference=output_name, files=reference_images))
@@ -1059,6 +1031,8 @@ class hst123(object):
                     error = 'WARNING: {key} is not part of {image} header.'
                     print(error.format(key=key,image=image))
                     continue
+            if val == 'N/A':
+                continue
             if (ref+'$' in val):
                 ref_file = val.split('$')[1]
             else:
@@ -1103,7 +1077,7 @@ class hst123(object):
         skysub = True
 
     astrodrizzle.AstroDrizzle(images, output=output_name, runfile='',
-                wcskey=wcskey, context=True, group='', build=True,
+                wcskey=wcskey, context=True, group='', build=False,
                 num_cores=8, preserve=False, clean=True, skysub=skysub,
                 skystat='mode', skylower=0.0, skyupper=None, updatewcs=True,
                 driz_sep_fillval=-50000, driz_sep_bits=0, driz_sep_wcs=True,
@@ -1122,8 +1096,28 @@ class hst123(object):
                 final_outnx=options['nx'], final_outny=options['ny'],
                 final_ra=ra, final_dec=dec)
 
-    # Change permissions on drizzled file
-    #os.chmod(output_name, 0775)
+    # Rename science (sci), weight (wht), and mask (ctx) files
+    weight_file = output_name.replace('.fits', '_wht.fits')
+    mask_file = output_name.replace('.fits', '_ctx.fits')
+    science_file = output_name.replace('.fits', '_sci.fits')
+
+    if os.path.exists(weight_file):
+        os.rename(weight_file, output_name.replace('.fits', '.weight.fits'))
+    if os.path.exists(mask_file):
+        os.rename(mask_file, output_name.replace('.fits', '.mask.fits'))
+    if os.path.exists(science_file):
+        os.rename(science_file, output_name)
+
+    # Add header keys on drizzled file
+    hdu = fits.open(output_name, mode='update')
+    filt = self.get_filter(images[0])
+    hdu[0].header['FILTER'] = filt.upper()
+    hdu[0].header['TELID'] = 'HST'
+    hdu[0].header['OBSTYPE'] = 'OBJECT'
+    if self.object:
+        hdu[0].header['TARGNAME'] = self.object
+        hdu[0].header['OBJECT'] = self.object
+    hdu.close()
 
   # Run cosmic ray clean
   def run_cosmic(self,image,options,output=None):
@@ -1336,6 +1330,10 @@ if __name__ == '__main__':
     hst = hst123()
 
     # Handle ra/dec in command line so there's no ambiguity about declination
+    if '-h' in sys.argv or '--help' in sys.argv:
+        parser = hst.add_options(usage=usagestring)
+        options = parser.parse_args()
+        sys.exit()
     if len(sys.argv) < 3:
         print(usagestring)
         sys.exit(1)
@@ -1370,6 +1368,7 @@ if __name__ == '__main__':
     hst.clobber   = options.clobber
     hst.keepshort = options.keepshort
     hst.reffilter = options.reffilter
+    hst.object    = options.object
     hst.dolphot   = hst.make_dolphot_dict(options.dolphot)
     if options.alignonly:
         hst.options['global_defaults']['dolphot']['AlignOnly']=1
@@ -1427,6 +1426,14 @@ if __name__ == '__main__':
     hst.input_list(hst.input_images, show=False)
     hst.add_visit_info(hst.obstable)
 
+    # Update object name if it is passed as an argument
+    if hst.object:
+        for file in hst.input_images:
+            hdu = fits.open(file, mode='update')
+            hdu[0].header['TARGNAME'] = hst.object
+            hdu[0].header['OBJECT'] = hst.object
+            hdu.close()
+
     # If reference image was not provided then make one
     banner = 'Handling reference image: '
     if not hst.reference:
@@ -1465,13 +1472,33 @@ if __name__ == '__main__':
                 # Construct a name for the drizzled image
                 refimage = imagetable['image'][0]
                 inst = hst.get_instrument(refimage).split('_')[0]
-                drizname = '{inst}_{filt}_visit{n}_drz.fits'
-                n = str(visit).zfill(3)
-                drizname = drizname.format(inst=inst, filt=filt, n=n)
+                n = str(visit).zfill(4)
+                ex_img = imagetable['image'].data[0]
+                date_obj = Time(fits.getval(ex_img, 'DATE-OBS'))
+                date_str = date_obj.datetime.strftime('%y%m%d')
+
+                # Make a photpipe-like image name
+                drizname = ''
+                if hst.object:
+                    drizname = '{obj}.{inst}.{filt}.ut{date}_{n}.drz.fits'
+                    drizname = drizname.format(inst=inst, filt=filt, n=n,
+                        date=date_str, obj=hst.object)
+                else:
+                    drizname = '{inst}.{filt}.ut{date}_{n}.drz.fits'
+                    drizname = drizname.format(inst=inst, filt=filt, n=n,
+                        date=date_str)
 
                 print(list(imagetable['image'].data))
                 hst.run_astrodrizzle(list(imagetable['image'].data),
                     output_name = drizname)
+                hst.sanitize_reference(drizname)
+
+                # Make a sky file for the drizzled image and rename 'noise'
+                if (hst.needs_to_calc_sky(drizname)):
+                    hst.calc_sky(drizname, hst.options['detector_defaults'])
+                    sky_image = drizname.replace('.fits', '.sky.fits')
+                    noise_name = drizname.replace('.fits', '.noise.fits')
+                    shutil.copy(sky_image, noise_name)
 
     # Sanitize any WFPC2 images
     banner = 'Sanitizing WFPC2 images.'
