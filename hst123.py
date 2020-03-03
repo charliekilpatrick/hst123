@@ -1337,15 +1337,31 @@ class hst123(object):
                     'use_sharp_round': True})
 
             tweakreg_success = True
+
         except MemoryError:
             message = '\n\n' + '#'*80 + '\n'
-            message += 'WARNING: tweakreg failed due to a memory error!\n'
+            message += 'WARNING: tweakreg failed!\n'
             message += '#'*80 + '\n'
             message += 'Too many sources are detected for threshold={t}\n'
             message += 'Trying threshold={nt}.\n\n'
             print(message.format(t=self.threshold, nt=self.threshold*2))
 
             self.threshold = 2 * self.threshold
+
+        except TypeError:
+            message = '\n\n' + '#'*80 + '\n'
+            message += 'WARNING: tweakreg failed!\n'
+            message += '#'*80 + '\n'
+            message += 'Too many sources are detected for threshold={t}\n'
+            message += 'Trying threshold={nt}.\n\n'
+
+            print(message.format(t=self.threshold, nt=self.threshold/2.))
+
+            self.threshold = self.threshold/2.
+            if self.threshold < 3:
+                m='ERROR: threshold={t} is too low!  Exiting tweakreg...'
+                print(m.format(t=self.threshold))
+                break
 
 
     message = 'Tweakreg took {time} seconds to execute.'
@@ -1373,6 +1389,9 @@ class hst123(object):
 
     if os.path.isfile('dummy.fits'):
         os.remove('dummy.fits')
+
+    if not tweakreg_success:
+        return(1)
 
     return(0)
 
