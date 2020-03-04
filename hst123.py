@@ -669,22 +669,26 @@ class hst123(object):
   def sanitize_reference(self, reference):
     hdu = fits.open(reference, mode='readonly')
 
-    # Check if already sanitized.  If so then exit.
-    if 'SANITIZE' in hdu[0].header.keys():
-        if hdu[0].header['SANITIZE']==1:
-            print('{ref} already sanitized.'.format(ref=reference))
-            return(0)
-
     # Going to write out newhdu
     # Only want science extension from orig reference
     newhdu = fits.HDUList()
     newhdu.append(hdu['PRIMARY'])
 
+    if newhdu['PRIMARY'].data is None:
+        if len(hdu)>1 and hdu[1].data is not None:
+            newhdu['PRIMARY'].data = hdu[1].data
+
     # Want to preserve header info, so combine PRIMARY headers
-    hkeys = list(newhdu['PRIMARY'].header.keys())+['COMMENT','HISTORY']
+    hkeys = list(newhdu['PRIMARY'].header.keys())
     for key in hdu['PRIMARY'].header.keys():
         if key not in hkeys:
             newhdu['PRIMARY'].header[key] = hdu['PRIMARY'].header[key]
+
+    # COMMENT and HISTORY keys are annoying, so get rid of those
+    if 'COMMENT' in newhdu['PRIMARY'].header.keys():
+        del newhdu['PRIMARY'].header['COMMENT']
+    if 'HISTORY' in newhdu['PRIMARY'].header.keys():
+        del newhdu['PRIMARY'].header['HISTORY']
 
     # Make sure that reference header reflects one extension
     newhdu['PRIMARY'].header['EXTEND']=False
@@ -703,9 +707,7 @@ class hst123(object):
         wght = fits.open(reference.replace('.fits', '.weight.fits'))[0].data
         newhdu['PRIMARY'].data[np.where(wght == 0)] = float('NaN')
 
-    # Re-arrange extensions for PRIMARY (header)/SCIENCE (data) format
-    newhdu.append(newhdu['PRIMARY'])
-    newhdu[0].data = None
+    # Mark as SANITIZE
     newhdu['PRIMARY'].header['SANITIZE']=1
 
     # Write out to same file w/ overwrite
@@ -821,9 +823,9 @@ class hst123(object):
     if (instrument.upper() == 'ACS' and
         detector.upper() == 'WFC' and 'flc.fits' in image):
         is_not_hst_image = True
-    if (instrument.upper() == 'ACS' and
-        detector.upper() == 'HRC' and 'flt.fits' in image):
-        is_not_hst_image = True
+    #if (instrument.upper() == 'ACS' and
+    #    detector.upper() == 'HRC' and 'flt.fits' in image):
+    #    is_not_hst_image = True
     if (instrument.upper() == 'WFC3' and
         detector.upper() == 'UVIS' and 'flc.fits' in image):
         is_not_hst_image = True
@@ -1170,32 +1172,53 @@ class hst123(object):
         shutil.copy(images[0], 'dummy.fits')
         images.append('dummy.fits')
 
+    # Make a copy of each input image so drizzlepac doesn't edit their headers
+    tmp_input = []
+    for image in images:
+        tmp = image.replace('.fits','rawtmp.fits')
+
+        # Copy the raw data into a temporary file
+        shutil.copyfile(image, rawtmp)
+
     start_drizzle = time.time()
 
-    astrodrizzle.AstroDrizzle(images, output=output_name, runfile='',
-        wcskey=wcskey, context=True, group='', build=False,
-        num_cores=8, preserve=False, clean=True, skysub=skysub,
-        skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
-        driz_sep_fillval=-50000, driz_sep_bits=0, driz_sep_wcs=True,
-        driz_sep_rot=0.0, driz_sep_scale=options['pixel_scale'],
-        driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
-        driz_sep_ra=ra, driz_sep_dec=dec,
-        combine_maskpt=0.2, combine_type=combine_type,
-        combine_nlow=0, combine_nhigh=0, combine_lthresh=-10000,
-        combine_hthresh=None, combine_nsigma='4 3',
-        driz_cr=True, driz_cr_snr='3.5 3.0', driz_cr_grow=1,
-        driz_cr_ctegrow=0, driz_cr_scale='1.2 0.7',
-        final_pixfrac=1.0, final_fillval=-50000,
-        final_bits=options['driz_bits'], final_units='counts',
-        final_wcs=True, final_refimage=None,
-        final_rot=0.0, final_scale=options['pixel_scale'],
-        final_outnx=options['nx'], final_outny=options['ny'],
-        final_ra=ra, final_dec=dec)
+    tries = 0
+    while tries < 3:
+        try:
+            astrodrizzle.AstroDrizzle(tmp_input, output=output_name, runfile='',
+                wcskey=wcskey, context=True, group='', build=False,
+                num_cores=8, preserve=False, clean=True, skysub=skysub,
+                skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
+                driz_sep_fillval=-50000, driz_sep_bits=0, driz_sep_wcs=True,
+                driz_sep_rot=0.0, driz_sep_scale=options['pixel_scale'],
+                driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
+                driz_sep_ra=ra, driz_sep_dec=dec,
+                combine_maskpt=0.2, combine_type=combine_type,
+                combine_nlow=0, combine_nhigh=0, combine_lthresh=-10000,
+                combine_hthresh=None, combine_nsigma='4 3',
+                driz_cr=True, driz_cr_snr='3.5 3.0', driz_cr_grow=1,
+                driz_cr_ctegrow=0, driz_cr_scale='1.2 0.7',
+                final_pixfrac=1.0, final_fillval=-50000,
+                final_bits=options['driz_bits'], final_units='counts',
+                final_wcs=True, final_refimage=None,
+                final_rot=0.0, final_scale=options['pixel_scale'],
+                final_outnx=options['nx'], final_outny=options['ny'],
+                final_ra=ra, final_dec=dec)
+            break
+        except FileNotFoundError:
+            # Usually happens because of a file missing in astropy cache.
+            # Try clearing the download cache and then re-try
+            clear_download_cache()
+            tries += 1
+
 
     message = 'Astrodrizzle took {time} seconds to execute.'
     print(message.format(time = time.time()-start_drizzle))
     print('')
     print('')
+
+    for image in tmp_input:
+        os.remove(image)
 
     # Get rid of extra dummy files
     if os.path.exists('dummy.fits'):
@@ -1300,9 +1323,26 @@ class hst123(object):
         crpars = self.options['instrument_defaults'][inst]['crpars']
         self.run_cosmic(image,crpars)
 
+    modified = False
     if (reference == '' or reference == None):
         reference = 'dummy.fits'
         shutil.copyfile(images[0], reference)
+    # Check the header of the reference image if it has more than one ext
+    else:
+        hdu = fits.open(reference)
+        if len(hdu)==1:
+
+            # Copy the data from the primary extension into a secondary ext
+            newhdu = fits.HDUList()
+            newhdu.append(hdu['PRIMARY'])
+            newhdu.append(hdu['PRIMARY'])
+            newhdu[0].data = None
+
+            # Overwrite the current reference image and record that its modified
+            newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+            modified = True
+
+
 
     message = 'Tweakreg will run on the following images:'
     print(message)
@@ -1390,6 +1430,11 @@ class hst123(object):
     if os.path.isfile('dummy.fits'):
         os.remove('dummy.fits')
 
+    if modified:
+        hdu = fits.open(reference)
+        newhdu.append(hdu[1])
+        newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+
     if not tweakreg_success:
         return(1)
 
@@ -1469,7 +1514,7 @@ class hst123(object):
                 ('c0m.fits' in filename and 'PC/WFC' in instrument) or
                 ('c1m.fits' in filename and 'PC/WFC' in instrument) or
                 ('flc.fits' in filename and 'ACS/WFC' in instrument) or
-                ('flt.fits' in filename and 'ACS/HRC' in instrument) or
+                #('flt.fits' in filename and 'ACS/HRC' in instrument) or
                 ('flc.fits' in filename and 'WFC3/UVIS' in instrument) or
                 ('flt.fits' in filename and 'WFC3/IR' in instrument)):
                 obsid = prod['obsID']
