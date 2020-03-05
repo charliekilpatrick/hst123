@@ -672,43 +672,45 @@ class hst123(object):
     # Going to write out newhdu
     # Only want science extension from orig reference
     newhdu = fits.HDUList()
-    newhdu.append(hdu['PRIMARY'])
 
-    if newhdu['PRIMARY'].data is None:
-        if len(hdu)>1 and hdu[1].data is not None:
-            newhdu['PRIMARY'].data = hdu[1].data
+    hdr = hdu[0].header
+    if 'EXTNAME' in hdr.keys() and hdr['EXTNAME']=='PRIMARY':
+        newhdu.append(hdu[0])
+        newhdu[0].header['EXTNAME']='PRIMARY'
+    else:
+        newhdu.append(hdu[0])
+        newhdu[0].header['EXTNAME']='PRIMARY'
 
-    # Want to preserve header info, so combine PRIMARY headers
-    hkeys = list(newhdu['PRIMARY'].header.keys())
-    for key in hdu['PRIMARY'].header.keys():
-        if key not in hkeys:
-            newhdu['PRIMARY'].header[key] = hdu['PRIMARY'].header[key]
+    # Copy over if missing data
+    if newhdu[0].data is None:
+        if hdu[1].data is not None:
+            newhdu[0].data = hdu[1].data
 
     # COMMENT and HISTORY keys are annoying, so get rid of those
-    if 'COMMENT' in newhdu['PRIMARY'].header.keys():
-        del newhdu['PRIMARY'].header['COMMENT']
+    if 'COMMENT' in newhdu[0].header.keys():
+        del newhdu[0].header['COMMENT']
     if 'HISTORY' in newhdu['PRIMARY'].header.keys():
-        del newhdu['PRIMARY'].header['HISTORY']
+        del newhdu[0].header['HISTORY']
 
     # Make sure that reference header reflects one extension
-    newhdu['PRIMARY'].header['EXTEND']=False
+    newhdu[0].header['EXTEND']=False
 
     # Add header variables that dolphot needs: GAIN, RDNOISE, SATURATE
-    inst = newhdu['PRIMARY'].header['INSTRUME'].lower()
+    inst = newhdu[0].header['INSTRUME'].lower()
     opt  = self.options['instrument_defaults'][inst]['crpars']
-    newhdu['PRIMARY'].header['SATURATE'] = opt['saturation']
-    newhdu['PRIMARY'].header['RDNOISE']  = opt['rdnoise']
-    newhdu['PRIMARY'].header['GAIN']     = opt['gain']
+    newhdu[0].header['SATURATE'] = opt['saturation']
+    newhdu[0].header['RDNOISE']  = opt['rdnoise']
+    newhdu[0].header['GAIN']     = opt['gain']
 
     if 'WHT' in [h.name for h in hdu]:
         wght = hdu['WHT'].data
-        newhdu['PRIMARY'].data[np.where(wght == 0)] = float('NaN')
+        newhdu[0].data[np.where(wght == 0)] = float('NaN')
     elif os.path.exists(reference.replace('.fits', '.weight.fits')):
         wght = fits.open(reference.replace('.fits', '.weight.fits'))[0].data
-        newhdu['PRIMARY'].data[np.where(wght == 0)] = float('NaN')
+        newhdu[0].data[np.where(wght == 0)] = float('NaN')
 
     # Mark as SANITIZE
-    newhdu['PRIMARY'].header['SANITIZE']=1
+    newhdu[0].header['SANITIZE']=1
 
     # Write out to same file w/ overwrite
     newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
@@ -1178,7 +1180,8 @@ class hst123(object):
         tmp = image.replace('.fits','rawtmp.fits')
 
         # Copy the raw data into a temporary file
-        shutil.copyfile(image, rawtmp)
+        shutil.copyfile(image, tmp)
+        tmp_input.append(tmp)
 
     start_drizzle = time.time()
 
@@ -1277,6 +1280,72 @@ class hst123(object):
     hdulist.writeto(output, overwrite=True, output_verify='silentfix')
     hdulist.close()
 
+  # Prepare reference image for tweakreg.  Requires a specific organization of
+  # data and header keys for tweakreg to parse
+  def prepare_reference_tweakreg(self, reference):
+    hdu = fits.open(reference)
+
+    # Summary is organized: EXTNAME, EXTVER, TYPE, CARDS, DIMENSIONS, FORMAT
+    data = [h._summary() for h in hdu]
+
+    if len(data)==1:
+
+        newhdu = fits.HDUList()
+        newhdu.append(hdu[0])
+        newhdu.append(hdu[0])
+        newhdu[0].data = None
+
+        # Update EXTVER
+        newhdu[0].header['EXTVER']=1
+        newhdu[1].header['EXTVER']=1
+
+        # Set the EXTNAMEs
+        newhdu[0].header['EXTNAME']='PRIMARY'
+        newhdu[1].header['EXTNAME']='SCI'
+
+        # Write out to same file and return True
+        newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+
+        return(True)
+
+    else:
+        # Get the smallest index extension that contains a data/image array
+        idxIm = [i for i,d in enumerate(data) if (d[2].strip()=='ImageHDU')]
+
+        # Get index of the primary extension
+        idxPr = [i for i,d in enumerate(data)
+            if (d[0].strip().upper()=='PRIMARY')]
+
+        if len(idxIm)>0:
+            newhdu = fits.HDUList()
+            newhdu.append(hdu[np.min(idxIm)])
+            newhdu.append(hdu[np.min(idxIm)])
+            newhdu[0].data = None
+
+            # If there is a primary extension, overwrite the header vars
+            if len(idxPr)>0:
+                primary = hdu[np.min(idxPr)]
+                hkeys = list(newhdu[0].header.keys())
+                for key in primary.header.keys():
+                    newhdu[0].header[key] = hdu[0].header[key]
+
+            # Update EXTVER
+            newhdu[0].header['EXTVER']=1
+            newhdu[1].header['EXTVER']=1
+
+            # Set the EXTNAMEs
+            newhdu[0].header['EXTNAME']='PRIMARY'
+            newhdu[1].header['EXTNAME']='SCI'
+
+            # Write out to same file and return True
+            newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+
+            return(True)
+
+        else:
+            # If there is no image index, we can't create a good reference image
+            return(False)
+
   # Run tweakreg on all input images
   def run_tweakreg(self, images, reference):
 
@@ -1303,7 +1372,7 @@ class hst123(object):
 
 
     # Check if we just removed all of the images
-    if (len(run_images) == 0):
+    if len(run_images) == 0:
         warning = 'WARNING: All images have been run through tweakreg.'
         print(warning)
         return(1)
@@ -1327,22 +1396,17 @@ class hst123(object):
     if (reference == '' or reference == None):
         reference = 'dummy.fits'
         shutil.copyfile(images[0], reference)
+
     # Check the header of the reference image if it has more than one ext
-    else:
-        hdu = fits.open(reference)
-        if len(hdu)==1:
+    elif reference!='dummy.fits':
+        check = self.prepare_reference_tweakreg(reference)
 
-            # Copy the data from the primary extension into a secondary ext
-            newhdu = fits.HDUList()
-            newhdu.append(hdu['PRIMARY'])
-            newhdu.append(hdu['PRIMARY'])
-            newhdu[0].data = None
-
-            # Overwrite the current reference image and record that its modified
-            newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+        if not check:
+            # Can't use this reference image, just use one of the input
+            reference = 'dummy.fits'
+            shutil.copyfile(images[0], reference)
+        else:
             modified = True
-
-
 
     message = 'Tweakreg will run on the following images:'
     print(message)
@@ -1431,9 +1495,8 @@ class hst123(object):
         os.remove('dummy.fits')
 
     if modified:
-        hdu = fits.open(reference)
-        newhdu.append(hdu[1])
-        newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+        # Re-sanitize reference using main sanitize function
+        self.sanitize_reference(reference)
 
     if not tweakreg_success:
         return(1)
