@@ -7,7 +7,12 @@ v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
 v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
 v1.02: 2019-02-22. Added fake star injection
 v1.03: 2019-06-02. Added drizzleall options and cleaned up options/syntax
-v1.04: 2019-02-10. Updated to python=3.7
+v1.04: 2020-02-10. Updated to python=3.7
+v1.05: 2020-03-04. Fixes to sanitizing reference images for tweakreg/dolphot
+v1.06: 2020-03-07. Added archiving capability (--archive dir) for analyzing
+                   large volumes of data (see description in "def archive")
+v1.07: 2020-03-08. Updates to archiving capability and added the script
+                   construct_hst_archive.py to help generate archive.
 
 hst123.py: An all-in-one script for downloading, registering, drizzling,
 running dolphot, and scraping data from dolphot catalogs.
@@ -222,6 +227,8 @@ class hst123(object):
     self.after = None
     self.coord = None
 
+    self.productlist = None
+
     self.reffilter = None
     self.object = None
 
@@ -309,6 +316,8 @@ class hst123(object):
     parser.add_argument('--archive', default=None, type=str,
         help='Download and save raw data to an archive directory instead of '+\
         'same folder as reduction (see global_defaults[\'archive\'])')
+    parser.add_argument('--workdir', default=None, type=str,
+        help='Use the input working directory rather than the current dir')
     return(parser)
 
   # Make sure all standard output is formatted in the same way with banner
@@ -548,7 +557,7 @@ class hst123(object):
              'final_phot': dolphot+'.phot'})
 
   # Copy raw data into raw data dir
-  def copy_raw_data(self, reverse = False):
+  def copy_raw_data(self, reverse = False, check_for_coord = False):
     # reverse = False will simply backup data in the working directory to the
     # raw dir
     if not reverse:
@@ -564,6 +573,12 @@ class hst123(object):
     # tweakreg, astrodrizzle) require un-edited files.
     else:
         for file in glob.glob(self.raw_dir+'*.fits'):
+            # If check_for_coord, only copy files that have target coord
+            if check_for_coord:
+                warning, check = self.needs_to_be_reduced(file, save_c1m=True)
+                if not check:
+                    print(warning)
+                    continue
             path, base = os.path.split(file)
             # Should catch error where 'base' does not exist
             if os.path.isfile(base) and filecmp.cmp(file,base):
@@ -574,6 +589,116 @@ class hst123(object):
                 message = '{file} != {base}'
                 print(message.format(file=file,base=base))
                 shutil.copyfile(file, base)
+
+  # Function to check the archive parameter provided
+  # by the --archive option.  Allows for organizing a large archive folder
+  # on your machine to avoid having multiple copies of the same raw data files
+  # and speed up the analysis process when adding new objects.
+  def check_archive(self, product, archivedir=None):
+
+    if not archivedir:
+        archivedir = self.archivedir
+    if not os.path.exists(archivedir):
+        try:
+            os.makedirs(archivedir)
+        except:
+            error = 'ERROR: could not make archive dir {0}\n'
+            error += 'Enable write permissions to this location\n'
+            error += 'Exiting...'
+            print(error.format(archivedir))
+            sys.exit()
+
+    # Resolve the filename for product row object
+    filefmt = '{inst}/{det}/{ra}/{name}'
+
+    # Parse the product['instrument_name'] value into inst/det
+    filename = product['productFilename']
+    instrument = product['instrument_name']
+    ra = str(int(np.round(product['ra'])))
+
+    if 'WFPC2' in instrument.upper() or 'PC/WFC' in instrument.upper():
+        inst = 'WFPC2'; det='WFPC2'
+        file = filefmt.format(inst=inst, det=det, ra=ra, name=filename)
+    else:
+        # Then filename should just be inst/det
+        inst,det = instrument.split('/')
+        file = filefmt.format(inst=inst, det=det, ra=ra, name=filename)
+
+    fullfile = archivedir + '/' + file
+
+    path, basefile = os.path.split(fullfile)
+    if not os.path.exists(path):
+        try:
+            os.makedirs(path)
+        except:
+            error = 'ERROR: could not make archive dir {0}\n'
+            error += 'Enable write permissions to this location\n'
+            error += 'Exiting...'
+            print(error.format(path))
+            sys.exit()
+
+        return(False, fullfile)
+
+    else:
+        if os.path.exists(fullfile):
+            return(True, fullfile)
+        else:
+            return(False, fullfile)
+
+  def copy_raw_data_archive(self, product, archivedir=None, workdir=None,
+    check_for_coord = False):
+
+    if not archivedir:
+        archivedir = self.archivedir
+    if not os.path.exists(archivedir):
+        warning = 'WARNING: could find archive dir {0}'
+        print(warning.format(archivedir))
+        return(1)
+
+    # Resolve the filename for product row object
+    filefmt = '{inst}/{det}/{ra}/{name}'
+
+    # Parse the product['instrument_name'] value into inst/det
+    filename = product['productFilename']
+    instrument = product['instrument_name']
+    ra = str(int(np.round(product['ra'])))
+
+    if 'WFPC2' in instrument.upper() or 'PC/WFC' in instrument.upper():
+        inst = 'WFPC2'; det='WFPC2'
+        file = filefmt.format(inst=inst, det=det, ra=ra, name=filename)
+    else:
+        # Then filename should just be inst/det
+        inst,det = instrument.split('/')
+        file = filefmt.format(inst=inst, det=det, ra=ra, name=filename)
+
+    fullfile = archivedir + '/' + file
+    path, basefile = os.path.split(fullfile)
+
+    if not os.path.exists(fullfile):
+        warning = 'WARNING: could find file {0}'
+        print(warning.format(fullfile))
+        return(1)
+    else:
+        if check_for_coord:
+            warning, check = self.needs_to_be_reduced(fullfile, save_c1m=True)
+            if not check:
+                print(warning)
+                return(0)
+        if workdir:
+            fulloutfile = workdir + '/' + basefile
+        else:
+            fulloutfile = basefile
+
+        # Check whether fulloutfile exists and if files are the same
+        if os.path.exists(fulloutfile) and filecmp.cmp(fullfile, fulloutfile):
+            message = '{file} == {base}'
+            print(message.format(file=fullfile,base=fulloutfile))
+            return(0)
+        else:
+            message = '{file} != {base}'
+            print(message.format(file=fullfile,base=fulloutfile))
+            shutil.copyfile(fullfile, fulloutfile)
+            return(0)
 
   # For an input obstable, sort all files into instrument, visit, and filter
   # so we can group them together for the final output from dolphot
@@ -748,13 +873,13 @@ class hst123(object):
         print(error.format(ra=ra,dec=dec))
         return(None)
 
-  def needs_to_be_reduced(self,image):
+  def needs_to_be_reduced(self, image, save_c1m=False):
     hdu = fits.open(image, mode='readonly')
     is_not_hst_image = False
     warning = ''
     detector = ''
     instrument = hdu[0].header['INSTRUME'].lower()
-    if 'c1m.fits' in image:
+    if 'c1m.fits' in image and not save_c1m:
         # We need the c1m.fits files, but they aren't reduced as science data
         warning = 'WARNING: do not need to reduce c1m.fits files.'
         return(warning, False)
@@ -834,6 +959,9 @@ class hst123(object):
     if (instrument.upper() == 'WFC3' and
         detector.upper() == 'IR' and 'flt.fits' in image):
         is_not_hst_image = True
+    if save_c1m:
+        if (instrument.upper() == 'WFPC2' and 'c1m.fits' in image):
+            is_not_hst_image = True
     return(warning.format(img=image, inst=instrument, det=detector),
         is_not_hst_image)
 
@@ -1504,7 +1632,7 @@ class hst123(object):
     return(0)
 
   # download files for input self.coord
-  def download_files(self):
+  def download_files(self, dest=None):
     try:
         # utils.data.download_file can get buggy if the cache is
         # full.  Clear the cache even though we aren't using caching
@@ -1552,11 +1680,6 @@ class hst123(object):
     if not self.keepshort:
         masks.append([t > 15. for t in obsTable['t_exptime']])
 
-    # Check if the observations contain input coordinate
-    #if self.coord:
-    #    masks.append([self.region_contains_coord(r, self.coord)
-    #        for r in obsTable['s_region']])
-
     # Apply the masks to the observation table
     mask = [all(l) for l in list(map(list, zip(*masks)))]
     obsTable = obsTable[mask]
@@ -1566,12 +1689,18 @@ class hst123(object):
     for obs in obsTable:
         productList = Observations.get_product_list(obs)
         instrument = obs['instrument_name']
+        s_ra = obs['s_ra']
+        s_dec = obs['s_dec']
+        productList.add_column([instrument]*len(productList),
+            name='instrument_name')
+        productList.add_column([s_ra]*len(productList), name='ra')
+        productList.add_column([s_dec]*len(productList), name='dec')
         for prod in productList:
             filename = prod['productFilename']
-            if (os.path.isfile(filename) and not self.clobber):
-                message = '{file} exists and clobber = False. Skipping...'
-                print(message.format(file = filename))
-                continue
+
+            if dest:
+                filename = dest + '/' + filename
+
             if (('c0m.fits' in filename and 'WFPC2' in instrument) or
                 ('c1m.fits' in filename and 'WFPC2' in instrument) or
                 ('c0m.fits' in filename and 'PC/WFC' in instrument) or
@@ -1580,6 +1709,26 @@ class hst123(object):
                 #('flt.fits' in filename and 'ACS/HRC' in instrument) or
                 ('flc.fits' in filename and 'WFC3/UVIS' in instrument) or
                 ('flt.fits' in filename and 'WFC3/IR' in instrument)):
+
+                if not self.productlist:
+                    self.productlist = Table(prod)
+                else:
+                    self.productlist.add_row(prod)
+
+                # Check if we enabled the archive option
+                if self.archivedir:
+                    check,fullfile = self.check_archive(prod,
+                        archivedir=self.archivedir)
+                    filename = fullfile
+                    if check:
+                        message = '{file} exists. Skipping...'
+                        print(message.format(file=filename))
+                        continue
+                elif os.path.isfile(filename):
+                    message = '{file} exists. Skipping...'
+                    print(message.format(file = filename))
+                    continue
+
                 obsid = prod['obsID']
                 uri = prod['dataURI']
 
@@ -1647,6 +1796,7 @@ if __name__ == '__main__':
     hst.reffilter = options.reffilter
     hst.object    = options.object
     hst.dolphot   = hst.make_dolphot_dict(options.dolphot)
+    hst.workdir   = options.workdir
     if options.alignonly:
         hst.options['global_defaults']['dolphot']['AlignOnly']=1
     if options.before is not None:
@@ -1654,25 +1804,56 @@ if __name__ == '__main__':
     if options.after is not None:
         hst.after = parse(options.after)
 
-    # Copy files that don't exist from the raw data directory
-    hst.copy_raw_data(reverse=True)
+    # Handle archive dir option
+    hst.archivedir = options.archive
+    # WARNING WARNING WARNING: this is a hack to prevent people apart from me
+    # from using the archive option and cluttering up our system will HST files.
+    # If you're reading this message, you probably know how to use this option.
+    if hst.archivedir:
+        if hst.archivedir != hst.options['global_defaults']['archive']:
+            hst.archivedir = hst.options['global_defaults']['archive']
 
-    # If we need to download images, handle that here
-    if options.download:
+    if hst.archivedir and not options.download:
+        error = 'ERROR: --archive must be used with --download\n'
+        error += 'Exiting...'
+        print(error)
+        sys.exit()
+
+    if hst.archivedir:
+        # First download and then copy to working directory
         banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}.'
         ra = '%7.6f' % hst.coord.ra.degree
         dec = '%7.6f' % hst.coord.dec.degree
         hst.make_banner(banner.format(ra=ra, dec=dec))
         hst.download_files()
 
+        if hst.productlist:
+            banner = 'Copying raw data to working dir'
+            hst.make_banner(banner)
+            for product in hst.productlist:
+                hst.copy_raw_data_archive(product, archivedir=hst.archivedir,
+                    workdir=hst.workdir, check_for_coord=True)
+        else:
+            error = 'ERROR: no HST products were found for this ra/dec\n'
+            error += 'Exiting...'
+            print(error)
+            sys.exit()
+    else:
+        # If we need to download additional images, handle that here
+        if options.download:
+            banner = 'Downloading HST data from MAST for ra={ra}, dec={dec}.'
+            ra = '%7.6f' % hst.coord.ra.degree
+            dec = '%7.6f' % hst.coord.dec.degree
+            hst.make_banner(banner.format(ra=ra, dec=dec))
+            hst.download_files(dest='raw')
+
+        # Assume that all files are in the raw/ data directory
+        banner = 'Copying raw data to working dir'
+        hst.make_banner(banner)
+        hst.copy_raw_data(reverse=True, check_for_coord=True)
+
     # Get input images
     hst.input_images = hst.get_input_images()
-
-    # Make raw/ in current dir and copy files into raw/ and copy un-edited
-    # versions of files back into working dir
-    banner = 'Copying raw data to raw data folder: {dir}.'
-    hst.make_banner(banner.format(dir=hst.raw_dir))
-    hst.copy_raw_data()
 
     # Check which are HST images that need to be reduced
     banner = 'Checking which images need to be reduced by hst123.'
@@ -1801,7 +1982,11 @@ if __name__ == '__main__':
         if hst.coord:
             for im in list(split_images):
                 if not hst.image_contains(im, hst.coord):
+                    # If the image doesn't contain coord, remove from
+                    # split_images and delete that file
                     split_images.remove(im)
+                    os.remove(im)
+
         hst.split_images.extend(split_images)
 
         # Run calc sky on split images if they need calc sky
@@ -1809,8 +1994,9 @@ if __name__ == '__main__':
             if hst.needs_to_calc_sky(split):
                 hst.calc_sky(split, hst.options['detector_defaults'])
 
-    # Generate reference image sky file
-    if (hst.needs_to_calc_sky(hst.reference)):
+    # Always re-calculate reference sky image as sanitizing the image can mess
+    # up the properties of the reference image (don't want to re-use old one)
+    if os.path.exists(hst.reference):
         hst.calc_sky(hst.reference, hst.options['detector_defaults'])
 
     # Write out a list of the input images with metadata for easy reference
