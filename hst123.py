@@ -35,7 +35,6 @@ from astroquery.mast import Observations
 from astroscrappy import detect_cosmics
 from dateutil.parser import parse
 from drizzlepac import tweakreg,astrodrizzle,catalogs
-from photutils import SkyCircularAperture,aperture_photometry
 from stwcs import updatewcs
 from shapely.geometry import Polygon, Point
 
@@ -360,8 +359,9 @@ class hst123(object):
         # full.  Clear the cache even though we aren't using caching
         # to prevent download method from choking
         if 'HOME' in os.environ.keys():
-            astropath = '/.astropy/cache/download/py3/'
+            astropath = '/.astropy/cache/download/py3/urlmap.dir'
             astropy_cache = os.environ['HOME'] + astropath
+            print('Clearing cache: {0}'.format(astropy_cache))
             if os.path.exists(astropy_cache):
                 clear_download_cache()
     except RuntimeError:
@@ -2373,7 +2373,8 @@ if __name__ == '__main__':
 
             # Add split images to the list of split images
             if hst.coord:
-                for im in list(split_images):
+                split_images = glob.glob(image.replace('.fits', '.chip?.fits'))
+                for im in split_images:
                     if not hst.image_contains(im, hst.coord):
                         # If the image doesn't contain coord, delete that file
                         os.remove(im)
