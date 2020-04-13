@@ -247,6 +247,8 @@ class hst123(object):
     self.reference = ''
     self.root_dir = '.'
     self.rawdir = 'raw/'
+    self.summary_file = 'summary.out'
+
     self.usagestring = 'hst123.py ra dec'
 
     self.before = None
@@ -642,7 +644,7 @@ class hst123(object):
 
     return(chip)
 
-  def input_list(self, img, show=True, save=False, image_number=[]):
+  def input_list(self, img, show=True, save=False, file=None, image_number=[]):
     # Make a table with all of the metadata for each image.
     exp = [fits.getval(image,'EXPTIME') for image in img]
     dat = [fits.getval(image,'DATE-OBS') + 'T' +
@@ -664,9 +666,9 @@ class hst123(object):
     obstable.sort('datetime')
 
     # Show the obstable in a column formatted style
+    form = '{file: <26} {inst: <18} {filt: <10} '
+    form += '{exp: <10} {date: <10} {time: <10}'
     if show:
-        form = '{file: <26} {inst: <18} {filt: <10} '
-        form += '{exp: <10} {date: <10} {time: <10}'
         header = form.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
                              exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
         print(header)
@@ -678,6 +680,34 @@ class hst123(object):
                     date=Time(row['datetime']).datetime.strftime('%Y-%m-%d'),
                     time=Time(row['datetime']).datetime.strftime('%H:%M:%S'))
             print(line)
+
+    if file:
+        form = '{inst: <10} {filt: <10} {exp: <10} {date: <10}'
+        header = form.format(inst='INSTRUMENT', filt='FILTER', exp='EXPTIME',
+            date='DATE')
+        outfile = open(file, 'w')
+        outfile.write(header+'\n')
+        for row in obstable:
+
+            # Format instrument name
+            inst = row['instrument'].lower()
+            if 'wfc3' in inst and 'uvis' in inst: inst='WFC3/UVIS'
+            if 'wfc3' in inst and 'ir' in inst: inst='WFC3/IR'
+            if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
+            if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
+            if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
+            if 'wfpc2' in inst: inst='WFPC2'
+            if '_' in inst: inst.upper().replace('_full','').replace('_','/')
+
+            date_decimal='%1.3f'% (Time(row['datetime']).mjd % 1.0)
+            date = Time(row['datetime']).datetime.strftime('%Y-%m-%d')
+            date += date_decimal[1:]
+
+            line=form.format(date=date, inst=inst, filt=row['filter'].upper(),
+                exp=row['exptime'])
+            outfile.write(line+'\n')
+
+        outfile.close()
 
     # Automatically add visit info
     obstable = self.add_visit_info(obstable)
@@ -2415,10 +2445,12 @@ if __name__ == '__main__':
     # Write out a list of the input images with metadata for easy reference
     if len(hst.input_images)>0:
         hst.make_banner('Complete list of input images')
-        hst.input_list(hst.input_images, show=True, save=False)
+        hst.input_list(hst.input_images, show=True, save=False,
+            file=hst.summary_file)
     elif len(hst.split_images)>0:
         hst.make_banner('Complete list of input images')
-        hst.input_list(hst.split_images, show=True, save=False)
+        hst.input_list(hst.split_images, show=True, save=False,
+            file=hst.summary_file)
 
     # Start constructing dolphot param file from split images and reference
     banner = 'Adding images to dolphot parameter file: {file}.'
