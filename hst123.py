@@ -247,7 +247,7 @@ class hst123(object):
     self.reference = ''
     self.root_dir = '.'
     self.rawdir = 'raw/'
-    self.summary_file = 'summary.out'
+    self.summary_file = 'exposure_summary.out'
 
     self.usagestring = 'hst123.py ra dec'
 
@@ -352,6 +352,8 @@ class hst123(object):
         help='Skip running tweakreg.')
     parser.add_argument('--drizdim', default=5200, type=int,
         help='Override the dimensions of drizzled images.')
+    parser.add_argument('--drizscale', default=None, type=float,
+        help='Override the pixel scale of drizzled images (units are arcsec).')
     return(parser)
 
   def clear_downloads(self):
@@ -665,6 +667,9 @@ class hst123(object):
     # Look at the table in order of date
     obstable.sort('datetime')
 
+    # Automatically add visit info
+    obstable = self.add_visit_info(obstable)
+
     # Show the obstable in a column formatted style
     form = '{file: <26} {inst: <18} {filt: <10} '
     form += '{exp: <10} {date: <10} {time: <10}'
@@ -682,35 +687,46 @@ class hst123(object):
             print(line)
 
     if file:
-        form = '{inst: <10} {filt: <10} {exp: <10} {date: <10}'
+        form = '{inst: <10} {filt: <10} {exp: <10} {date: <12}'
         header = form.format(inst='INSTRUMENT', filt='FILTER', exp='EXPTIME',
             date='DATE')
         outfile = open(file, 'w')
         outfile.write(header+'\n')
-        for row in obstable:
 
-            # Format instrument name
-            inst = row['instrument'].lower()
-            if 'wfc3' in inst and 'uvis' in inst: inst='WFC3/UVIS'
-            if 'wfc3' in inst and 'ir' in inst: inst='WFC3/IR'
-            if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
-            if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
-            if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
-            if 'wfpc2' in inst: inst='WFPC2'
-            if '_' in inst: inst.upper().replace('_full','').replace('_','/')
+        # Iterate over visit, instrument, filter
+        for visit in list(set(obstable['visit'])):
+            visittable = obstable[obstable['visit'] == visit]
+            for inst in list(set(visittable['instrument'])):
+                insttable = visittable[visittable['instrument'] == inst]
+                for filt in list(set(insttable['filter'])):
+                    ftable = insttable[insttable['filter'] == filt]
 
-            date_decimal='%1.3f'% (Time(row['datetime']).mjd % 1.0)
-            date = Time(row['datetime']).datetime.strftime('%Y-%m-%d')
-            date += date_decimal[1:]
+                    # Format instrument name
+                    instname = inst
+                    if 'wfc3' in inst and 'uvis' in inst: instname='WFC3/UVIS'
+                    if 'wfc3' in inst and 'ir' in inst: instname='WFC3/IR'
+                    if 'acs' in inst and 'wfc' in inst: instname='ACS/WFC'
+                    if 'acs' in inst and 'wfc' in inst: instname='ACS/WFC'
+                    if 'acs' in inst and 'wfc' in inst: instname='ACS/WFC'
+                    if 'wfpc2' in inst: instname='WFPC2'
+                    if '_' in instname:
+                        instname=instname.upper()
+                        instname=instname.replace('_full','').replace('_','/')
 
-            line=form.format(date=date, inst=inst, filt=row['filter'].upper(),
-                exp=row['exptime'])
-            outfile.write(line+'\n')
+                    mjd = [Time(r['datetime']).mjd for r in ftable]
+                    time = Time(np.mean(mjd), format='mjd')
+
+                    exptime = np.sum(ftable['exptime'])
+
+                    date_decimal='%1.3f'% (time.mjd % 1.0)
+                    date = time.datetime.strftime('%Y-%m-%d')
+                    date += date_decimal[1:]
+
+                    line=form.format(date=date, inst=instname,
+                        filt=filt.upper(), exp=exptime)
+                    outfile.write(line+'\n')
 
         outfile.close()
-
-    # Automatically add visit info
-    obstable = self.add_visit_info(obstable)
 
     # Save as the primary obstable for this reduction?
     if save:
@@ -752,6 +768,9 @@ class hst123(object):
 
     message = 'Cutting bad sources from dolphot catalog.'
     print(message)
+
+    # Get colfile
+    colfile = dolphot['colfile']
 
     # Cut bad sources
     f = open('tmp', 'w')
@@ -1590,6 +1609,7 @@ class hst123(object):
             hdu[i].header[key] = ref_file
 
     hdu.writeto(image, overwrite=True, output_verify='silentfix')
+    hdu.info()
 
     updatewcs.updatewcs(image)
 
@@ -1630,6 +1650,11 @@ class hst123(object):
     else:
         skysub = True
 
+    if self.options['args'].drizscale:
+        pixscale = self.options['args'].drizscale
+    else:
+        pixscale = options['pixel_scale']
+
     # Make a copy of each input image so drizzlepac doesn't edit their headers
     tmp_input = []
     for image in obstable['image']:
@@ -1653,7 +1678,7 @@ class hst123(object):
                 num_cores=8, preserve=False, clean=True, skysub=skysub,
                 skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
                 driz_sep_fillval=-50000, driz_sep_bits=0, driz_sep_wcs=True,
-                driz_sep_rot=0.0, driz_sep_scale=options['pixel_scale'],
+                driz_sep_rot=0.0, driz_sep_scale=None,
                 driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
                 driz_sep_ra=ra, driz_sep_dec=dec,
                 combine_maskpt=0.2, combine_type=combine_type,
@@ -1664,7 +1689,7 @@ class hst123(object):
                 final_pixfrac=1.0, final_fillval=-50000,
                 final_bits=options['driz_bits'], final_units='counts',
                 final_wcs=True, final_refimage=None,
-                final_rot=0.0, final_scale=options['pixel_scale'],
+                final_rot=0.0, final_scale=pixscale,
                 final_outnx=options['nx'], final_outny=options['ny'],
                 final_ra=ra, final_dec=dec)
             break
@@ -2439,8 +2464,10 @@ if __name__ == '__main__':
     # Always re-calculate reference sky image as sanitizing the image can mess
     # up the properties of the reference image (don't want to re-use old one)
     if os.path.exists(hst.options['args'].reference):
-        hst.calc_sky(hst.options['args'].reference,
-            hst.options['detector_defaults'])
+        message = 'Running calcsky for reference image: {ref}'
+        print(message.format(ref=hst.options['args'].reference))
+        #hst.calc_sky(hst.options['args'].reference,
+        #    hst.options['detector_defaults'])
 
     # Write out a list of the input images with metadata for easy reference
     if len(hst.input_images)>0:
