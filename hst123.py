@@ -246,7 +246,7 @@ class hst123(object):
 
     self.reference = ''
     self.root_dir = '.'
-    self.rawdir = 'raw/'
+    self.rawdir = 'raw'
     self.summary_file = 'exposure_summary.out'
 
     self.usagestring = 'hst123.py ra dec'
@@ -2402,6 +2402,9 @@ if __name__ == '__main__':
             banner = 'Downloading HST data from MAST for: {ra} {dec}'
             hst.make_banner(banner.format(ra=ra, dec=dec))
             hst.productlist = hst.get_productlist(hst.coord, default['radius'])
+            if hst.rawdir:
+                if not os.path.exists(hst.rawdir):
+                    os.makedirs(hst.rawdir)
             hst.download_files(hst.productlist, dest=hst.rawdir,
                 clobber=hst.options['args'].clobber)
 
