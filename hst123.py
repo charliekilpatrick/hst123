@@ -263,6 +263,8 @@ class hst123(object):
     self.archive = False
     self.keep_objfile = False
 
+    self.magsystem = 'abmag'
+
     # Detection threshold used for image alignment by tweakreg
     self.threshold = 30.
 
@@ -354,6 +356,13 @@ class hst123(object):
         help='Override the dimensions of drizzled images.')
     parser.add_argument('--drizscale', default=None, type=float,
         help='Override the pixel scale of drizzled images (units are arcsec).')
+    parser.add_argument('--scrapeall', default=False, action='store_true',
+        help='Scrape all candidate counterparts within the scrape radius '+\
+        '(default=2 pixels) and output to files dpXXX.phot where XXX is '+\
+        'zero-padded integer for labeling sources in order of proximity to '+\
+        'input coordinate.')
+    parser.add_argument('--scraperadius', default=None, type=float,
+        help='Override the dolphot scrape radius (units are arcsec).')
     return(parser)
 
   def clear_downloads(self):
@@ -554,9 +563,15 @@ class hst123(object):
     return(row.split()[colnum])
 
   def show_data(self, phottable, form, header, units, f=None, avg=False):
+
     if avg:
         print('\n# Average Photometry')
         if f: f.write('\n# Average Photometry \n')
+    else:
+        for key in phottable.meta.keys():
+            out = '# {key} = {val}'
+            if f: f.write(out.format(key=key, val=phottable.meta[key])+'\n')
+            print(out.format(key=key, val=phottable.meta[key]))
 
     if header: print(header)
     if f and header: f.write(header+'\n')
@@ -584,6 +599,9 @@ class hst123(object):
 
         print(line)
         if f: f.write(line+'\n')
+
+    print('\n')
+    f.write('\n')
 
   def show_photometry(self, final_photometry, latex=False, show=True, f=None):
 
@@ -614,7 +632,7 @@ class hst123(object):
         if final_photometry:
             self.show_data(final_photometry, form, header, units, f=f)
         if avg_photometry:
-            self.show_data(avg_photometry, form, header, units, f=f)
+            self.show_data(avg_photometry, form, header, units, f=f, avg=True)
 
     if show:
 
@@ -626,7 +644,7 @@ class hst123(object):
         if final_photometry:
             self.show_data(final_photometry, form, header, '', f=f)
         if avg_photometry:
-            self.show_data(avg_photometry, form, header, '', f=f)
+            self.show_data(avg_photometry, form, header, '', f=f, avg=True)
 
   def get_chip(self, image):
     # Returns the chip (i.e., 1 for UVIS1, 2 for UVIS2, 1 for WFPC2/PC, 2-4 for
@@ -647,6 +665,9 @@ class hst123(object):
     return(chip)
 
   def input_list(self, img, show=True, save=False, file=None, image_number=[]):
+    # Input variables
+    zptype = self.magsystem
+
     # Make a table with all of the metadata for each image.
     exp = [fits.getval(image,'EXPTIME') for image in img]
     dat = [fits.getval(image,'DATE-OBS') + 'T' +
@@ -655,7 +676,7 @@ class hst123(object):
     ins = [self.get_instrument(image) for image in img]
     det = ['_'.join(self.get_instrument(image).split('_')[:2]) for image in img]
     chip= [self.get_chip(image) for image in img]
-    zpt = [self.get_zpt(i, ccdchip=c) for i,c in zip(img,chip)]
+    zpt = [self.get_zpt(i, ccdchip=c, zptype=zptype) for i,c in zip(img,chip)]
 
     if not image_number:
         image_number = [0 for image in img]
@@ -750,7 +771,7 @@ class hst123(object):
              'fakelist': dolphot+'.fakelist', 'fakelog': dolphot+'.fake.output',
              'radius': 2, 'final_phot': dolphot+'.phot'})
 
-  def scrapedolphot(self, coord, reference, images, dolphot):
+  def scrapedolphot(self, coord, reference, images, dolphot, scrapeall=False):
 
     # Check input variables
     if not os.path.isfile(dolphot['base']):
@@ -810,6 +831,19 @@ class hst123(object):
     dec = coord.dec.degree
     radius = dolphot['radius']
 
+    # Check if we need to override dolphot scrape radius
+    if self.options['args'].scraperadius:
+        # Calculate what the radius will be for reference image in pixels
+        # we can do this pretty easily with a trick from dec
+        angradius = self.options['args'].scraperadius/3600.
+        if dec < 89:
+            dec1 = coord.dec.degree + angradius
+        else:
+            dec1 = coord.dec.degree - angradius
+        coord1 = SkyCoord(ra, dec1, unit='deg')
+        x1,y1 = wcs.utils.skycoord_to_pixel(coord1, w, origin=1)
+        radius = np.sqrt((x-x1)**2+(y-y1)**2)
+
     message = 'Looking for a source around x={x}, y={y} in {file} '
     message += ' with a radius of {rad}'
     print(message.format(x=x, y=y, file=reference, rad=radius))
@@ -834,19 +868,35 @@ class hst123(object):
     if len(data) == 0:
         return(None)
     else:
-        if len(data)>1:
+        data = sorted(data, key=lambda obj: obj[0])
+        if not scrapeall:
             warning = 'WARNING: found more than one source. '
             warning += 'Picking object closest to: {ra} {dec}'
             print(warning.format(ra=ra, dec=dec))
-        # Get the minimum separation then parse out the dolphot row data
-        data = sorted(data, key=lambda obj: obj[0])[0][1]
+            data = [data[0]]
 
     # Now make an obstable out of images and sort into visits
     obstable = self.input_list(images, show=False, save=False)
 
     # Now get the final photometry for the source and sort
-    final_phot = hst.parse_phot(obstable, data, colfile)
-    final_phot.sort(['MJD','FILTER'])
+    final_phot=[]
+    for i,dat in enumerate(data):
+        source_phot = hst.parse_phot(obstable, dat[1], colfile)
+
+        source_phot.meta['separation'] = dat[0]
+        source_phot.meta['magsystem']=self.magsystem
+
+        # Add final data to meta
+        if 'x' in source_phot.meta.keys() and 'y' in source_phot.meta.keys():
+            x = [float(source_phot.meta['x'])]
+            y = [float(source_phot.meta['y'])]
+            coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)[0]
+
+            source_phot.meta['ra']=coord.ra.degree
+            source_phot.meta['dec']=coord.dec.degree
+
+        source_phot.sort(['MJD','FILTER'])
+        final_phot.append(source_phot)
 
     return(final_phot)
 
@@ -1071,6 +1121,17 @@ class hst123(object):
     final_phot = Table([[0.],['X'*24],['X'*12],[0.],[0.],[0.]], names=fnames)
     final_phot = final_phot[:0].copy()
 
+    # Get general object statistics to put in final_phot metadata
+    x=self.get_dolphot_data(row, cfile, 'Object X', '')
+    y=self.get_dolphot_data(row, cfile, 'Object Y', '')
+    sharpness=self.get_dolphot_data(row, cfile, 'Object sharpness', '')
+    roundness=self.get_dolphot_data(row, cfile, 'Object roundness', '')
+
+    final_phot.meta['x']=x
+    final_phot.meta['y']=y
+    final_phot.meta['sharpness']=sharpness
+    final_phot.meta['roundness']=roundness
+
     # Iterate through the dictionary to get all photometry from files
     for inst in list(set(obstable['instrument'])):
         insttable = obstable[obstable['instrument'] == inst]
@@ -1104,6 +1165,11 @@ class hst123(object):
   # preserves science data.
   def sanitize_reference(self, reference):
     hdu = fits.open(reference, mode='readonly')
+
+    # If already sanitized, then exit as we dont need to re-sanitize
+    if 'SANITIZE' in hdu[0].header.keys():
+        if hdu[0].header['SANITIZE']==1:
+            return(None)
 
     # Going to write out newhdu
     # Only want science extension from orig reference
@@ -1291,6 +1357,7 @@ class hst123(object):
     return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
 
   def needs_to_calc_sky(self, image):
+    print('Checking for',image.replace('.fits','.sky.fits'))
     files = glob.glob(image.replace('.fits','.sky.fits'))
     if (len(files) == 0):
         return(True)
@@ -1805,8 +1872,27 @@ class hst123(object):
             if len(idxPr)>0:
                 primary = hdu[np.min(idxPr)]
                 hkeys = list(newhdu[0].header.keys())
-                for key in primary.header.keys():
-                    newhdu[0].header[key] = hdu[0].header[key]
+                for n,key in enumerate(primary.header.keys()):
+                    if not key.strip():
+                        continue
+                    if isinstance(hdu[0].header[key], str):
+                        if '\n' in hdu[0].header[key]:
+                            continue
+                    if key=='FILETYPE':
+                        newhdu[0].header[key]='SCI'
+                    elif key=='FILENAME':
+                        newhdu[0].header[key]=reference
+                    elif key=='EXTEND':
+                        newhdu[0].header[key]=True
+                    else:
+                        val = hdu[0].header[key]
+                        if isinstance(val, str):
+                            val = val.strip().replace('\n',' ')
+                        newhdu[0].header[key] = val
+
+            # Update image name
+            newhdu[0].header['FILENAME']=reference
+            newhdu[1].header['FILENAME']=reference
 
             # Update EXTVER
             newhdu[0].header['EXTVER']=1
@@ -1815,6 +1901,16 @@ class hst123(object):
             # Set the EXTNAMEs
             newhdu[0].header['EXTNAME']='PRIMARY'
             newhdu[1].header['EXTNAME']='SCI'
+
+            # We'll need to resanitize the images
+            if 'SANITIZE' in newhdu[0].header.keys():
+                del newhdu[0].header['SANITIZE']
+            if 'SANITIZE' in newhdu[1].header.keys():
+                del newhdu[1].header['SANITIZE']
+
+            # We'll need to regenerate the sky image
+            if os.path.exists(reference.replace('.fits','.sky.fits')):
+                os.remove(reference.replace('.fits','.sky.fits'))
 
             # Write out to same file and return True
             newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
@@ -1829,15 +1925,15 @@ class hst123(object):
   def check_images_for_tweakreg(self, run_images):
 
     for file in list(run_images):
+        print('Checking {0} for WCSNAME=TWEAK'.format(file))
         hdu = fits.open(file, mode='readonly')
         remove_image = False
         for i,h in enumerate(hdu):
             if h.name == 'SCI':
                 header = h.header
-                for key in header.keys():
-                    if key=='WCSNAME':
-                        if header[key] == 'TWEAK':
-                            remove_image = True
+                if 'WCSNAME' in header.keys():
+                    if header['WCSNAME']=='TWEAK':
+                        remove_image = True
 
         if remove_image:
             run_images.remove(file)
@@ -1913,6 +2009,8 @@ class hst123(object):
         warning = 'WARNING: All images have been run through tweakreg.'
         print(warning)
         return(True)
+
+    print('Need to run tweakreg for images:',','.join(run_images))
 
     tmp_images = []
     for image in run_images:
@@ -2466,8 +2564,9 @@ if __name__ == '__main__':
     if os.path.exists(hst.options['args'].reference):
         message = 'Running calcsky for reference image: {ref}'
         print(message.format(ref=hst.options['args'].reference))
-        #hst.calc_sky(hst.options['args'].reference,
-        #    hst.options['detector_defaults'])
+        if hst.needs_to_calc_sky(hst.options['args'].reference):
+            hst.calc_sky(hst.options['args'].reference,
+                hst.options['detector_defaults'])
 
     # Write out a list of the input images with metadata for easy reference
     if len(hst.input_images)>0:
@@ -2642,12 +2741,35 @@ if __name__ == '__main__':
         message = 'Starting scrape dolphot for: {ra} {dec}'
         hst.make_banner(message.format(ra=ra, dec=dec))
         hst.final_phot = hst.scrapedolphot(hst.coord,
-            hst.options['args'].reference, hst.split_images, hst.dolphot)
+            hst.options['args'].reference, hst.split_images, hst.dolphot,
+            scrapeall=hst.options['args'].scrapeall)
         if hst.final_phot:
-            message = 'Printing out the final photometry for: {ra} {dec}'
-            hst.make_banner(message.format(ra=ra, dec=dec))
-            with open(hst.dolphot['final_phot'], 'w') as f:
-                hst.show_photometry(hst.final_phot, f=f)
+            message = 'Printing out the final photometry for: {ra} {dec}\n'
+            message += 'There is photometry for {n} sources'
+            hst.make_banner(message.format(ra=ra, dec=dec,
+                n=len(hst.final_phot)))
+            for i,phot in enumerate(hst.final_phot):
+                outfile = hst.dolphot['final_phot']
+                base = hst.dolphot['base']
+                if not hst.options['args'].scrapeall:
+                    out = outfile
+                else:
+                    num = str(i).zfill(len(str(len(hst.final_phot))))
+                    out = outfile+num
+
+                message = 'Photometry for source {n} '
+                message = message.format(n=i)
+                keys = phot.meta.keys()
+                if 'x' in keys and 'y' in keys and 'sep' in keys:
+                    message += 'at x,y={x},{y}.\n'
+                    message += 'Separated from input coordinate by {sep}.'
+                    message = message.format(x=phot.meta['x'], y=phot.meta['y'],
+                        sep=phot.meta['sep'])
+                print(message)
+
+                with open(out, 'w') as f:
+                    hst.show_photometry(phot, f=f)
+                print('\n')
         else:
             message = 'WARNING: did not find a source for: {ra} {dec}'
             hst.make_banner(message.format(ra=ra, dec=dec))
