@@ -48,6 +48,11 @@ global_defaults = {
     'archive': '/data2/ckilpatrick/hst/archive',
     'keys': ['IDCTAB','DGEOFILE','NPOLEXT',
              'NPOLFILE','D2IMFILE', 'D2IMEXT','OFFTAB'],
+    'badkeys': ['ATODFILE','WF4TFILE','BLEVFILE','BLEVDFIL','BIASFILE',
+        'BIASDFIL','DARKFILE','DARKFDIL','FLATFILE','FLATDFIL','SHADFILE',
+        'PHOTTAB','GRAPHTAB','COMPTAB','IDCTAB','OFFTAB','DGEOFILE',
+        'MASKCORR','ATODCORR','WF4TCORR','BLEVCORR','DARKCORR','FLATCORR',
+        'SHADCORR','DOSATMAP','DOPHOTOM','DOHISTOS','DRIZCORR','OUTDTYPE'],
     'cdbs': 'ftp://ftp.stsci.edu/cdbs/',
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
     'visit': 1,
@@ -186,53 +191,20 @@ acceptable_filters = {
     'F569W','F588N','F622W','F631N','F673N','F675W','F702W','F785LP','F791W',
     'F953N','F1042M'}
 
-# All zero points in hst123 are calculated in the AB mag system (this is
-# different from dolphot, which uses the Vega mag system).  This is to take
-# advantage of the fact that all HST images contain the PHOTFLAM and PHOTPLAM
-# header keys for each chip, and:
-#         ZP_AB = -2.5*np.log10(PHOTFLAM)-5*np.log10(PHOTPLAM)-2.408
-# for reference, see the WFPC2, ACS, and WFC3 zero point pages.
-# WFPC2: http://www.stsci.edu/instruments/wfpc2/Wfpc2_dhb/wfpc2_ch52.html
-# ACS: http://www.stsci.edu/hst/instrumentation/acs/data-analysis/zeropoints
-# WFC3: http://www.stsci.edu/hst/instrumentation/wfc3/data-analysis/
-#photometric-calibration
+"""
+Zeropoints in hst123 are calculated in the AB mag system by default (this is
+different from dolphot, which uses the Vega mag system).  hst123 takes
+advantage of the fact that all HST images contain the PHOTFLAM and PHOTPLAM
+header keys for each chip, and:
+         ZP_AB = -2.5*np.log10(PHOTFLAM)-5*np.log10(PHOTPLAM)-2.408
 
-zeropoint = {
-    'wfc3_uvis': {'f200lp': 27.430, 'f218w': 22.952, 'f225w': 24.078,
-        'f275w': 24.169, 'f280n': 20.943, 'f300x': 24.985, 'f336w': 24.708,
-        'f343n': 23.906, 'f350lp': 26.982, 'f373n': 21.920, 'f390m': 23.641,
-        'f390w': 25.394, 'f395n': 22.688, 'f410m': 23.614, 'f438w': 24.856,
-        'f467m': 23.702, 'f469n': 21.827, 'f475w': 25.722, 'f475x': 26.178,
-        'f487n': 22.244, 'f502n': 22.326, 'f547m': 24.771, 'f555w': 25.824,
-        'f600lp': 25.911, 'f606w': 26.103, 'f621m': 24.626, 'f625w': 25.550,
-        'f631n': 21.904, 'f645n': 22.260, 'f656n': 20.486, 'f657n': 22.670,
-        'f658n': 21.056, 'f665n': 22.747, 'f673n': 22.596, 'f680n': 23.813,
-        'f689m': 24.493, 'f763m': 24.238, 'f775w': 24.890, 'f814w': 25.139,
-        'f845m': 23.823, 'f850lp': 23.888, 'f953n': 20.452},
-    'wfc3_ir': {'f105w': 26.2687, 'f110w': 26.8223, 'f125w': 26.2303,
-        'f140w': 26.4524, 'f160w': 25.9463, 'f098m': 25.6674, 'f127m': 24.6412,
-        'f139m': 24.4793, 'f153m': 24.4635, 'f126n': 22.8609, 'f128n': 22.9726,
-        'f130n': 22.9900, 'f132n': 22.9472, 'f164n': 22.9089, 'f167n': 22.9568},
-    'acs_wfc': {'f435w': 25.660, 'f475w': 26.052,'f502n': 22.283,
-        'f550m': 24.852, 'f555w': 25.710, 'f606w': 26.493, 'f625w': 25.899,
-        'f658n': 22.757, 'f660n': 21.707, 'f775w': 25.659, 'f814w': 25.937,
-        'f850lp': 24.851, 'f892n': 22.393},
-    'acs_hrc': {'f220w': 23.523, 'f250w': 23.734, 'f330w': 24.085,
-        'f344n': 21.546, 'f435w': 25.097, 'f475w': 25.538, 'f502n': 21.824,
-        'f550m': 24.441, 'f555w': 25.251, 'f606w': 25.984, 'f625w': 25.366,
-        'f658n': 22.186, 'f660n': 21.129, 'f775w': 24.951, 'f814w': 25.282,
-        'f850lp': 24.404, 'f892n': 21.871},
-    'wfpc2_wfpc2': {'f122m': 13.752, 'f160bw': 14.946, 'f170w': 16.313,
-        'f185w': 16.014, 'f218w': 16.558, 'f255w': 17.037, 'f300w': 19.433,
-        'f336w': 19.460, 'f343n': 14.023, 'f375n': 15.238, 'f380w': 20.972,
-        'f390n': 17.537, 'f410m': 19.669, 'f437n': 17.297, 'f439w': 20.916,
-        'f450w': 22.016, 'f467m': 20.012, 'f469n': 17.573, 'f487n': 17.380,
-        'f502n': 17.988, 'f547m': 21.676, 'f555w': 22.561, 'f569w': 22.253,
-        'f588n': 19.179, 'f606w': 22.896, 'f622w': 22.368, 'f631n': 18.516,
-        'f656n': 17.564, 'f658n': 18.115, 'f673n': 18.753, 'f675w': 22.042,
-        'f702w': 22.431, 'f785lp': 20.738, 'f791w': 21.512, 'f814w': 21.659,
-        'f850lp': 20.018, 'f953n': 16.186, 'f1042m': 16.326}
-}
+For reference, see the WFPC2, ACS, and WFC3 zero point pages:
+
+    WFPC2: http://www.stsci.edu/instruments/wfpc2/Wfpc2_dhb/wfpc2_ch52.html
+    ACS: http://www.stsci.edu/hst/instrumentation/acs/data-analysis/zeropoints
+    WFC3: http://www.stsci.edu/hst/instrumentation/wfc3/data-analysis/
+          photometric-calibration
+"""
 
 class hst123(object):
 
@@ -266,7 +238,7 @@ class hst123(object):
     self.magsystem = 'abmag'
 
     # Detection threshold used for image alignment by tweakreg
-    self.threshold = 30.
+    self.threshold = 50.
 
     self.dolphot = {}
 
@@ -277,6 +249,7 @@ class hst123(object):
     # Names for the final output photometry table
     final_names = ['MJD', 'INSTRUMENT', 'FILTER',
                    'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR']
+
     # Make an empty table with above column names for output photometry table
     self.final_phot = Table([[0.],['INSTRUMENT'],['FILTER'],[0.],[0.],[0.]],
         names=final_names)[:0].copy()
@@ -286,7 +259,6 @@ class hst123(object):
                     'detector_defaults': detector_defaults,
                     'instrument_defaults': instrument_defaults,
                     'acceptable_filters': acceptable_filters,
-                    'zeropoint': zeropoint,
                     'catalog': catalog_pars,
                     'args': None}
 
@@ -1257,7 +1229,7 @@ class hst123(object):
     try:
         coord = SkyCoord(ra, dec, frame='icrs', unit=unit)
         return(coord)
-    except:
+    except ValueError:
         error = 'ERROR: Cannot parse coordinates: {ra} {dec}'
         print(error.format(ra=ra,dec=dec))
         return(None)
@@ -1932,7 +1904,7 @@ class hst123(object):
             if h.name == 'SCI':
                 header = h.header
                 if 'WCSNAME' in header.keys():
-                    if header['WCSNAME']=='TWEAK':
+                    if header['WCSNAME'].strip()=='TWEAK':
                         remove_image = True
 
         if remove_image:
@@ -1947,7 +1919,7 @@ class hst123(object):
   # Given an input image, look for a matching catalog and estimate what the
   # threshold should be for this image.  If no catalog exists, generate one
   # on the fly and estimate threshold
-  def get_tweakreg_thresholds(self, image, thresh):
+  def get_tweakreg_thresholds(self, image, thresh, runcat=True):
 
     # Analyze the input images
     cat_str = '_sci*_xy_catalog.coo'
@@ -1975,19 +1947,22 @@ class hst123(object):
             thresh=np.max(best_thresh)
 
     else:
-        # Generate a catalog on the fly for an arbitrary input threshold
-        filename="{:s}[{:d}]".format(image, 1)
-        wcs = stwcs.wcsutil.HSTWCS(filename)
-        catalog_mode = 'automatic'
-        catalog = catalogs.generateCatalog(wcs, mode=catalog_mode,
-            catalog=filename, threshold=self.threshold,
-            **self.options['catalog'])
-        catalog.buildCatalogs()
+        if runcat:
+            # Generate a catalog on the fly for an arbitrary input threshold
+            filename="{:s}[{:d}]".format(image, 1)
+            wcs = stwcs.wcsutil.HSTWCS(filename)
+            catalog_mode = 'automatic'
+            catalog = catalogs.generateCatalog(wcs, mode=catalog_mode,
+                catalog=filename, threshold=self.threshold,
+                **self.options['catalog'])
+            catalog.buildCatalogs()
 
-        data['nobjects'] = catalog.num_objects
+            data['nobjects'] = catalog.num_objects
+        else:
+            return(None)
 
     # Scale threshold to the image with the largest number of objects
-    threshold = thresh * (data['nobjects']/10000.)**0.6
+    threshold = thresh * (data['nobjects']/7000.)**0.6
     if threshold<3.0: threshold=3.0
 
     return(threshold)
@@ -2069,9 +2044,16 @@ class hst123(object):
                 message += 'Images: {im}'
                 print(message.format(ref=reference, im=','.join(tweak_img)))
 
-                deepest = sorted(tweak_img,
-                    key=lambda im: fits.getval(im, 'EXPTIME'))[-1]
-                ithresh = self.get_tweakreg_thresholds(deepest, ithresh)
+                thresholds = np.array([self.get_tweakreg_thresholds(im, ithresh,
+                    runcat=False) for im in tweak_img])
+                thresholds = [t for t in thresholds if t is not None]
+                if thresholds:
+                    ithresh = np.max(thresholds)
+                else:
+                    deepest = sorted(tweak_img,
+                        key=lambda im: fits.getval(im, 'EXPTIME'))[-1]
+                    ithresh = self.get_tweakreg_thresholds(deepest, ithresh)
+
                 rthresh = self.get_tweakreg_thresholds(reference, rthresh)
 
                 # Other input options
