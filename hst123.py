@@ -665,7 +665,7 @@ class hst123(object):
 
     # Show the obstable in a column formatted style
     form = '{file: <26} {inst: <18} {filt: <10} '
-    form += '{exp: <10} {date: <10} {time: <10}'
+    form += '{exp: <12} {date: <10} {time: <10}'
     if show:
         header = form.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
                              exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
@@ -674,13 +674,14 @@ class hst123(object):
         for row in obstable:
             line = form.format(file=row['image'],
                     inst=row['instrument'].upper(),
-                    filt=row['filter'].upper(), exp=row['exptime'],
+                    filt=row['filter'].upper(),
+                    exp='%7.4f' % row['exptime'],
                     date=Time(row['datetime']).datetime.strftime('%Y-%m-%d'),
                     time=Time(row['datetime']).datetime.strftime('%H:%M:%S'))
             print(line)
 
     if file:
-        form = '{inst: <10} {filt: <10} {exp: <10} {date: <12}'
+        form = '{inst: <10} {filt: <10} {exp: <12} {date: <16}'
         header = form.format(inst='INSTRUMENT', filt='FILTER', exp='EXPTIME',
             date='DATE')
         outfile = open(file, 'w')
@@ -711,12 +712,12 @@ class hst123(object):
 
                     exptime = np.sum(ftable['exptime'])
 
-                    date_decimal='%1.3f'% (time.mjd % 1.0)
+                    date_decimal='%1.5f'% (time.mjd % 1.0)
                     date = time.datetime.strftime('%Y-%m-%d')
                     date += date_decimal[1:]
 
                     line=form.format(date=date, inst=instname,
-                        filt=filt.upper(), exp=exptime)
+                        filt=filt.upper(), exp='%7.4f' % exptime)
                     outfile.write(line+'\n')
 
         outfile.close()
@@ -1962,7 +1963,7 @@ class hst123(object):
             return(None)
 
     # Scale threshold to the image with the largest number of objects
-    threshold = thresh * (data['nobjects']/7000.)**0.6
+    threshold = thresh * (data['nobjects']/8000.)**0.6
     if threshold<3.0: threshold=3.0
 
     return(threshold)
@@ -2033,7 +2034,7 @@ class hst123(object):
     ithresh = self.threshold ; rthresh = self.threshold
     tries = 0
 
-    while (not tweakreg_success or tries > 7):
+    while (not tweakreg_success and tries < 7):
         try:
             tweak_img = self.check_images_for_tweakreg(tweak_img)
             if tweak_img:
