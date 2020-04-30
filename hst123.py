@@ -2564,6 +2564,8 @@ if __name__ == '__main__':
     if os.path.exists(hst.options['args'].reference):
         message = 'Running calcsky for reference image: {ref}'
         print(message.format(ref=hst.options['args'].reference))
+        # Make sure reference is sanitized first
+        hst.sanitize_reference(hst.options['args'].reference)
         if hst.needs_to_calc_sky(hst.options['args'].reference):
             hst.calc_sky(hst.options['args'].reference,
                 hst.options['detector_defaults'])
