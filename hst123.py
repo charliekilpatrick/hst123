@@ -479,17 +479,23 @@ class hst123(object):
   def avg_magnitudes(self, magerrs, counts, exptimes, zpt):
     # Mask out bad values
     idx = []
-    for i,data in enumerate(magerrs):
-        if data < 0.5:
-            idx.append(i)
+    for i in np.arange(len(magerrs)):
+        try:
+            if (float(magerrs[i]) < 0.5 and float(counts[i]) > 0.0 and
+                float(exptimes[i]) > 0.0 and float(zpt[i]) > 0.0):
+                idx.append(i)
+        except:
+            pass
 
     if not idx:
         return (float('NaN'),float('NaN'))
 
-    magerrs = np.array(magerrs)[idx]
-    counts = np.array(counts)[idx]
-    exptimes = np.array(exptimes)[idx]
-    zpt = np.array(zpt)[idx]
+    magerrs = np.array([float(m) for m in magerrs])[idx]
+    counts = np.array([float(c) for c in counts])[idx]
+    exptimes = np.array([float(e) for e in exptimes])[idx]
+    zpt = np.array([float(z) for z in zpt])[idx]
+
+    print(magerrs, counts, exptimes, zpt)
 
     # Normalize flux and fluxerr to a common zero point
     flux = counts / exptimes * 10**(0.4 * (27.5 - zpt))
@@ -532,7 +538,10 @@ class hst123(object):
     colnum = self.get_dolphot_column(colfile, key, image)
 
     # Now grab that piece of data from the row and return
-    return(row.split()[colnum])
+    if colnum:
+        return(row.split()[colnum])
+    else:
+        return(None)
 
   def show_data(self, phottable, form, header, units, f=None, avg=False):
 
@@ -1061,27 +1070,32 @@ class hst123(object):
   # mjd, magnitude, and magnitude error
   def calc_avg_stats(self, obstable, data, colfile):
 
-    mstr = 'Instrumental'
     estr = 'Magnitude uncertainty'
     cstr = 'Measured counts'
 
-    mjd = [Time(d).mjd for d in obstable['datetime']]
-    mags = [float(self.get_dolphot_data(data, colfile, mstr, image))
-        for image in obstable['image']]
-    err = [float(self.get_dolphot_data(data, colfile, estr, image))
-        for image in obstable['image']]
-    counts = [float(self.get_dolphot_data(data, colfile, cstr, image))
-        for image in obstable['image']]
-    exptime = [e for e in obstable['exptime']]
-    filts = [f for f in obstable['filter']]
-    det = [d for d in obstable['detector']]
-    zpt = [z for z in obstable['zeropoint']]
+    mjds = [] ; err = [] ; counts = [] ; exptime = [] ; filts = []
+    det = [] ; zpt = []
+    for row in obstable:
+        error = self.get_dolphot_data(data, colfile, estr, row['image'])
+        count = self.get_dolphot_data(data, colfile, cstr, row['image'])
 
-    avg_mjd = np.mean(mjd)
-    total_exptime = np.sum(exptime)
-    mag, magerr = self.avg_magnitudes(err, counts, exptime, zpt)
+        if error and count:
+            mjds.append(Time(row['datetime']).mjd)
+            err.append(error)
+            counts.append(count)
+            exptime.append(row['exptime'])
+            filts.append(row['filter'])
+            det.append(row['detector'])
+            zpt.append(row['zeropoint'])
 
-    return(avg_mjd, mag, magerr, total_exptime)
+    if len(mjds) > 0:
+        avg_mjd = np.mean(mjds)
+        total_exptime = np.sum(exptime)
+        mag, magerr = self.avg_magnitudes(err, counts, exptime, zpt)
+
+        return(avg_mjd, mag, magerr, total_exptime)
+    else:
+        return(np.nan, np.nan, np.nan, np.nan)
 
   # Given an input dictionary of files sorted by visits, a row from a dolphot
   # output file, and a column file corresponding to that dolphot file, parse the
