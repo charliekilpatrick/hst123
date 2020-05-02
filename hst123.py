@@ -1153,11 +1153,6 @@ class hst123(object):
   def sanitize_reference(self, reference):
     hdu = fits.open(reference, mode='readonly')
 
-    # If already sanitized, then exit as we dont need to re-sanitize
-    if 'SANITIZE' in hdu[0].header.keys():
-        if hdu[0].header['SANITIZE']==1:
-            return(None)
-
     # Going to write out newhdu
     # Only want science extension from orig reference
     newhdu = fits.HDUList()
@@ -1629,6 +1624,12 @@ class hst123(object):
 
     hdu = fits.open(image)
 
+    # Skip this file if WCS is already modified
+    if 'WCSMOD' in hdu[0].header.keys():
+        if hdu[0].header['WCSMOD']==1:
+            hdu.close()
+            return(None)
+
     for i,h in enumerate(hdu):
         for key in change_keys:
             if key in list(hdu[i].header.keys()):
@@ -1662,10 +1663,16 @@ class hst123(object):
 
             hdu[i].header[key] = ref_file
 
+    hdu[0].header['WCSMOD']=1
+
     hdu.writeto(image, overwrite=True, output_verify='silentfix')
     hdu.info()
 
-    updatewcs.updatewcs(image)
+    # Usually if updatewcs fails, that means it's already been done
+    try:
+        updatewcs.updatewcs(image)
+    except:
+        return(None)
 
   # Run the drizzlepac astrodrizzle routine using detector parameters.
   def run_astrodrizzle(self, obstable, output_name = None):
@@ -2154,13 +2161,28 @@ class hst123(object):
                 if h.name=='WCSCORR':
                     continue
 
-            if (rawhdu[i].data is not None and h.data is not None):
-                #h.name!='D2IMARR' and h.name!='WCSCORR'):
-                message = 'Copy extension {i},{ext}'
-                print(message.format(i=i, ext=h.name))
-                rawhdu[i].data = h.data
+            # Get the index of the corresponding extension in rawhdu.  This
+            # can be different from "i" if extensions were added or rearranged
+            ver = h.ver ; name = h.name
+            idx = -1
 
-            newhdu.append(copy.copy(rawhdu[i]))
+            for j,rawh in enumerate(rawhdu):
+                if rawh.name==name and rawh.ver == ver:
+                    idx = j
+
+            # If there is no corresponding extension, then continue
+            if idx < 0:
+                continue
+
+            # Skip extensions without data
+            if 'data' in dir(h) and 'data' in dir(rawhdu[idx]):
+                if (rawhdu[idx].data is not None and h.data is not None):
+                    message = 'Copy extension {i},{ext},{ver}'
+                    print(message.format(i=idx, ext=h.name, ver=h.ver))
+                    if rawhdu[idx].data.dtype==h.data.dtype:
+                        rawhdu[idx].data = h.data
+
+                newhdu.append(copy.copy(rawhdu[idx]))
 
         if 'wfpc2' in self.get_instrument(image).lower():
             # Adjust number of extensions to 4
@@ -2371,11 +2393,8 @@ if __name__ == '__main__':
         hst.options['detector_defaults'][det]['ny']=hst.options['args'].drizdim
 
     if hst.options['args'].archive:
-        # WARNING WARNING WARNING: hack to prevent bad archive option
-        default_archive = default['archive']
-        if hst.options['args'].archive != default_archive:
-            hst.options['args'].archive = default_archive
 
+        default_archive = hst.options['args'].archive
         hst.productlist = hst.get_productlist(hst.coord, default['radius'])
 
         # First download and then copy to working directory
@@ -2566,9 +2585,8 @@ if __name__ == '__main__':
         print(message.format(ref=hst.options['args'].reference))
         # Make sure reference is sanitized first
         hst.sanitize_reference(hst.options['args'].reference)
-        if hst.needs_to_calc_sky(hst.options['args'].reference):
-            hst.calc_sky(hst.options['args'].reference,
-                hst.options['detector_defaults'])
+        hst.calc_sky(hst.options['args'].reference,
+            hst.options['detector_defaults'])
 
     # Write out a list of the input images with metadata for easy reference
     if len(hst.input_images)>0:
