@@ -536,12 +536,43 @@ class hst123(object):
   def get_dolphot_data(self, row, colfile, key, image):
     # First get the column number from the start of the column file
     colnum = self.get_dolphot_column(colfile, key, image)
+    rdata = row.split()
 
     # Now grab that piece of data from the row and return
     if colnum:
-        return(row.split()[colnum])
+        if colnum < 0 or colnum > len(rdata)-1:
+            error = 'ERROR: tried to use bad column {n} in dolphot output'
+            print(error.format(n=colnum))
+            return(None)
+        else:
+            return(row.split()[colnum])
     else:
         return(None)
+
+  def print_final_phot(self, final_phot, dolphot, allphot=True):
+    for i,phot in enumerate(final_phot):
+        outfile = dolphot['final_phot']
+        base = dolphot['base']
+        if not allphot:
+            out = outfile
+        else:
+            num = str(i).zfill(len(str(len(hst.final_phot))))
+            out = outfile+num
+
+        message = 'Photometry for source {n} '
+        message = message.format(n=i)
+        keys = phot.meta.keys()
+        if 'x' in keys and 'y' in keys and 'sep' in keys:
+            message += 'at x,y={x},{y}.\n'
+            message += 'Separated from input coordinate by {sep}.'
+            message = message.format(x=phot.meta['x'], y=phot.meta['y'],
+                sep=phot.meta['sep'])
+
+        print(message)
+
+        with open(out, 'w') as f:
+            hst.show_photometry(phot, f=f)
+        print('\n')
 
   def show_data(self, phottable, form, header, units, f=None, avg=False):
 
@@ -566,8 +597,8 @@ class hst123(object):
         if 'wfc3' in inst and 'uvis' in inst: inst='WFC3/UVIS'
         if 'wfc3' in inst and 'ir' in inst: inst='WFC3/IR'
         if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
-        if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
-        if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
+        if 'acs' in inst and 'hrc' in inst: inst='ACS/HRC'
+        if 'acs' in inst and 'sbc' in inst: inst='ACS/SBC'
         if 'wfpc2' in inst: inst='WFPC2'
         if '_' in inst: inst.upper().replace('_full','').replace('_','/')
 
@@ -709,8 +740,8 @@ class hst123(object):
                     if 'wfc3' in inst and 'uvis' in inst: instname='WFC3/UVIS'
                     if 'wfc3' in inst and 'ir' in inst: instname='WFC3/IR'
                     if 'acs' in inst and 'wfc' in inst: instname='ACS/WFC'
-                    if 'acs' in inst and 'wfc' in inst: instname='ACS/WFC'
-                    if 'acs' in inst and 'wfc' in inst: instname='ACS/WFC'
+                    if 'acs' in inst and 'hrc' in inst: instname='ACS/HRC'
+                    if 'acs' in inst and 'sbc' in inst: instname='ACS/SBC'
                     if 'wfpc2' in inst: instname='WFPC2'
                     if '_' in instname:
                         instname=instname.upper()
@@ -756,9 +787,10 @@ class hst123(object):
   def scrapedolphot(self, coord, reference, images, dolphot, scrapeall=False):
 
     # Check input variables
-    if not os.path.isfile(dolphot['base']):
-        error = 'ERROR: dolphot output {dp} does not exist.  Run dolphot '
-        error += '(using hst123.py ra dec --rundolphot).'
+    base = dolphot['base'] ; colfile = dolphot['colfile']
+    if not os.path.isfile(base) or not os.path.isfile(colfile):
+        error = 'ERROR: dolphot output {dp} does not exist.  Use --rundolphot '
+        error += 'or check your dolphot output for errors'
         print(error.format(dp=dolphot['base']))
         return(None)
 
@@ -772,12 +804,9 @@ class hst123(object):
     message = 'Cutting bad sources from dolphot catalog.'
     print(message)
 
-    # Get colfile
-    colfile = dolphot['colfile']
-
     # Cut bad sources
     f = open('tmp', 'w')
-    numlines = sum(1 for line in open(dolphot['base']))
+    numlines = sum(1 for line in open(base))
     with open(dolphot['base']) as dolphot_file:
         message = 'There are {n} sources in dolphot file {dp}. '
         message += 'Cutting bad sources...'
@@ -1151,6 +1180,13 @@ class hst123(object):
   # Sanitizes reference header, gets rid of multiple extensions and only
   # preserves science data.
   def sanitize_reference(self, reference):
+
+    # If the reference image does not exist, print an error and return
+    if not os.path.exists(reference):
+        error = 'ERROR: reference {ref} does not exist!'
+        print(error.format(ref=reference))
+        return(None)
+
     hdu = fits.open(reference, mode='readonly')
 
     # Going to write out newhdu
@@ -1614,21 +1650,15 @@ class hst123(object):
 
   # Update image wcs using updatewcs routine
   def update_image_wcs(self, image, options):
+
     self.clear_downloads()
+    hdu = fits.open(image, mode='update')
 
     change_keys = self.options['global_defaults']['keys']
 
     inst = self.get_instrument(image).split('_')[0]
     ref_url = self.options['instrument_defaults'][inst]['env_ref']
     ref = ref_url.strip('.old')
-
-    hdu = fits.open(image)
-
-    # Skip this file if WCS is already modified
-    if 'WCSMOD' in hdu[0].header.keys():
-        if hdu[0].header['WCSMOD']==1:
-            hdu.close()
-            return(None)
 
     for i,h in enumerate(hdu):
         for key in change_keys:
@@ -1663,15 +1693,22 @@ class hst123(object):
 
             hdu[i].header[key] = ref_file
 
-    hdu[0].header['WCSMOD']=1
-
-    hdu.writeto(image, overwrite=True, output_verify='silentfix')
+    message = 'File info before updatewcs:'
+    print(message)
     hdu.info()
+    hdu.close()
 
     # Usually if updatewcs fails, that means it's already been done
     try:
-        updatewcs.updatewcs(image)
+        updatewcs.updatewcs(image, use_db=False)
+        hdu = fits.open(image)
+        message = 'updatewcs success.  New file info:'
+        print(message)
+        hdu.info()
+        return(True)
     except:
+        error = 'ERROR: failed to update WCS for image {file}'
+        print(error.format(file=image))
         return(None)
 
   # Run the drizzlepac astrodrizzle routine using detector parameters.
@@ -1698,9 +1735,18 @@ class hst123(object):
         print(error.format(det=','.join(map(str,inst))))
         return(False)
 
+    # Make a copy of each input image so drizzlepac doesn't edit base headers
+    tmp_input = []
+    for image in obstable['image']:
+        tmp = image.replace('.fits','.drztmp.fits')
+
+        # Copy the raw data into a temporary file
+        shutil.copyfile(image, tmp)
+        tmp_input.append(tmp)
+
     if self.updatewcs:
-        for image in obstable['image']:
-            print('Running updatewcs on: {0}'.format(image))
+        for image in tmp_input:
+            print('\n\nRunning updatewcs on: {0}'.format(image))
             self.update_image_wcs(image, options)
 
     ra = self.coord.ra.degree if self.coord else None
@@ -1716,17 +1762,8 @@ class hst123(object):
     else:
         pixscale = options['pixel_scale']
 
-    # Make a copy of each input image so drizzlepac doesn't edit their headers
-    tmp_input = []
-    for image in obstable['image']:
-        tmp = image.replace('.fits','rawtmp.fits')
-
-        # Copy the raw data into a temporary file
-        shutil.copyfile(image, tmp)
-        tmp_input.append(tmp)
-
-    if len(obstable)==1:
-        shutil.copy(obstable['image'][0], 'dummy.fits')
+    if len(tmp_input)==1:
+        shutil.copy(tmp_input[0], 'dummy.fits')
         tmp_input.append('dummy.fits')
 
     start_drizzle = time.time()
@@ -1823,6 +1860,11 @@ class hst123(object):
   # Prepare reference image for tweakreg.  Requires a specific organization of
   # data and header keys for tweakreg to parse
   def prepare_reference_tweakreg(self, reference):
+    if not os.path.exists(reference):
+        error = 'ERROR: tried to sanitize non-existence ref {ref}'
+        print(error.format(ref=reference))
+        return(False)
+
     hdu = fits.open(reference)
 
     # Summary is organized: EXTNAME, EXTVER, TYPE, CARDS, DIMENSIONS, FORMAT
@@ -1938,6 +1980,26 @@ class hst123(object):
 
     return(run_images)
 
+  # Returns the number of sources detected in an image at the thresh value
+  def get_nsources(self, image, thresh):
+    imghdu = fits.open(image)
+    nsources = 0
+    for i,h in enumerate(imghdu):
+        if h.name=='SCI':
+            filename="{:s}[{:d}]".format(image, i)
+            wcs = stwcs.wcsutil.HSTWCS(filename)
+            catalog_mode = 'automatic'
+            catalog = catalogs.generateCatalog(wcs, mode=catalog_mode,
+                catalog=filename, threshold=thresh,
+                **self.options['catalog'])
+            try:
+                catalog.buildCatalogs()
+                nsources += catalog.num_objects
+            except:
+                pass
+
+    return(nsources)
+
   # Given an input image, look for a matching catalog and estimate what the
   # threshold should be for this image.  If no catalog exists, generate one
   # on the fly and estimate threshold
@@ -1970,24 +2032,46 @@ class hst123(object):
 
     else:
         if runcat:
-            # Generate a catalog on the fly for an arbitrary input threshold
-            filename="{:s}[{:d}]".format(image, 1)
-            wcs = stwcs.wcsutil.HSTWCS(filename)
-            catalog_mode = 'automatic'
-            catalog = catalogs.generateCatalog(wcs, mode=catalog_mode,
-                catalog=filename, threshold=self.threshold,
-                **self.options['catalog'])
-            catalog.buildCatalogs()
-
-            data['nobjects'] = catalog.num_objects
+            data['nobjects'] = self.get_nsources(image, thresh)
         else:
             return(None)
 
     # Scale threshold to the image with the largest number of objects
     threshold = thresh * (data['nobjects']/8000.)**0.6
+
+    # Set minimum and maximum threshold
     if threshold<3.0: threshold=3.0
+    if threshold>5000.0: threshold=1000.0
 
     return(threshold)
+
+  # Check if images are too shallow for running with deep images in tweakreg
+  def get_shallow_param(self, image):
+    # Get filters and the pivot wavelength
+    filt = self.get_filter(image)
+    hdu = fits.open(image)
+
+    pivot = 0.0
+    for h in hdu:
+        if 'PHOTPLAM' in h.header.keys():
+            pivot = float(h.header['PHOTPLAM'])
+            break
+
+    exptime = 0.0
+    for h in hdu:
+        if 'EXPTIME' in h.header.keys():
+            exptime = float(h.header['EXPTIME'])
+            break
+
+    return(filt, pivot, exptime)
+
+  # Error message for tweakreg
+  def tweakreg_error(self, exception):
+    message = '\n\n' + '#'*80 + '\n'
+    message += 'WARNING: tweakreg failed: {e}\n'
+    message += '#'*80 + '\n'
+    message += 'Adjusting thresholds and images...'
+    print(message.format(e=exception.__class__.__name__))
 
   # Run tweakreg on all input images
   def run_tweakreg(self, obstable, reference):
@@ -2053,12 +2137,24 @@ class hst123(object):
     tweakreg_success = False
     tweak_img = copy.copy(tmp_images)
     ithresh = self.threshold ; rthresh = self.threshold
+    shallow_img = []
     tries = 0
 
     while (not tweakreg_success and tries < 7):
         try:
             tweak_img = self.check_images_for_tweakreg(tweak_img)
             if tweak_img:
+                # Remove images from tweak_img if they are too shallow
+                if shallow_img:
+                    for img in shallow_img:
+                        if img in tweak_img:
+                            tweak_img.remove(img)
+
+                if len(tweak_img)==0:
+                    shallow_img = []
+                    error = 'ERROR: removed all images as shallow'
+                    raise RuntimeError(error)
+
                 # This estimates what the input threshold should be and cuts
                 # out images based on number of detected sources from previous
                 # rounds of tweakreg
@@ -2069,12 +2165,14 @@ class hst123(object):
                 thresholds = np.array([self.get_tweakreg_thresholds(im, ithresh,
                     runcat=False) for im in tweak_img])
                 thresholds = [t for t in thresholds if t is not None]
+
                 if thresholds:
                     ithresh = np.max(thresholds)
                 else:
-                    deepest = sorted(tweak_img,
+                    deepest = self.pick_deepest_images(tweak_img)
+                    deepimg = sorted(deepest,
                         key=lambda im: fits.getval(im, 'EXPTIME'))[-1]
-                    ithresh = self.get_tweakreg_thresholds(deepest, ithresh)
+                    ithresh = self.get_tweakreg_thresholds(deepimg, ithresh)
 
                 rthresh = self.get_tweakreg_thresholds(reference, rthresh)
 
@@ -2123,6 +2221,10 @@ class hst123(object):
 
             # Check that everything made it through tweakreg
             remaining = self.check_images_for_tweakreg(tmp_images)
+
+            # Reset shallow_img list
+            shallow_img = []
+
             if not remaining:
                 tweakreg_success = True
             else:
@@ -2130,12 +2232,18 @@ class hst123(object):
                 error = 'ERROR: tweakreg did not align the images: {im}'
                 raise RuntimeError(error.format(im=','.join(tweak_img)))
 
+        except AssertionError as e:
+            self.tweakreg_error(e)
+
+            message = 'Re-running tweakreg with shallow images removed:'
+            print(message)
+            for img in tweak_img:
+                nsources = self.get_nsources(img, ithresh)
+                if nsources < 1000:
+                    shallow_img.append(img)
+
         except (MemoryError, TypeError, RuntimeError) as e:
-            message = '\n\n' + '#'*80 + '\n'
-            message += 'WARNING: tweakreg failed: {e}\n'
-            message += '#'*80 + '\n'
-            message += 'Adjusting thresholds...'
-            print(message.format(e=e.__class__.__name__))
+            self.tweakreg_error(e)
 
     message = 'Tweakreg took {time} seconds to execute.\n\n'
     print(message.format(time = time.time()-start_tweak))
@@ -2163,26 +2271,30 @@ class hst123(object):
 
             # Get the index of the corresponding extension in rawhdu.  This
             # can be different from "i" if extensions were added or rearranged
-            ver = h.ver ; name = h.name
+            ver = int(h.ver) ; name = str(h.name).strip()
             idx = -1
 
             for j,rawh in enumerate(rawhdu):
-                if rawh.name==name and rawh.ver == ver:
+                if str(rawh.name).strip()==name and int(rawh.ver)==ver:
                     idx = j
 
             # If there is no corresponding extension, then continue
             if idx < 0:
+                message = 'Skip extension {i},{ext},{ver} '
+                message += '- no match in {f}'
+                print(message.format(i=i, ext=name, ver=ver, f=rawtmp))
                 continue
 
-            # Skip extensions without data
+            # If we can access the data in both extensions, copy from orig file
             if 'data' in dir(h) and 'data' in dir(rawhdu[idx]):
                 if (rawhdu[idx].data is not None and h.data is not None):
-                    message = 'Copy extension {i},{ext},{ver}'
-                    print(message.format(i=idx, ext=h.name, ver=h.ver))
                     if rawhdu[idx].data.dtype==h.data.dtype:
                         rawhdu[idx].data = h.data
 
-                newhdu.append(copy.copy(rawhdu[idx]))
+            # Copy the rawtmp extension into the new file
+            message = 'Copy extension {i},{ext},{ver}'
+            print(message.format(i=idx, ext=name, ver=ver))
+            newhdu.append(copy.copy(rawhdu[idx]))
 
         if 'wfpc2' in self.get_instrument(image).lower():
             # Adjust number of extensions to 4
@@ -2265,7 +2377,7 @@ class hst123(object):
     for obs in obsTable:
         try:
             productList = Observations.get_product_list(obs)
-        except requests.exceptions.ConnectionError:
+        except:
             error = 'ERROR: MAST is not working currently working\n'
             error += 'Try again later...'
             print(error)
@@ -2760,39 +2872,29 @@ if __name__ == '__main__':
     if hst.options['args'].scrapedolphot:
         message = 'Starting scrape dolphot for: {ra} {dec}'
         hst.make_banner(message.format(ra=ra, dec=dec))
-        hst.final_phot = hst.scrapedolphot(hst.coord,
-            hst.options['args'].reference, hst.split_images, hst.dolphot,
-            scrapeall=hst.options['args'].scrapeall)
-        if hst.final_phot:
-            message = 'Printing out the final photometry for: {ra} {dec}\n'
-            message += 'There is photometry for {n} sources'
-            hst.make_banner(message.format(ra=ra, dec=dec,
-                n=len(hst.final_phot)))
-            for i,phot in enumerate(hst.final_phot):
-                outfile = hst.dolphot['final_phot']
-                base = hst.dolphot['base']
-                if not hst.options['args'].scrapeall:
-                    out = outfile
-                else:
-                    num = str(i).zfill(len(str(len(hst.final_phot))))
-                    out = outfile+num
+        if (os.path.exists(hst.dolphot['colfile']) and
+            os.path.exists(hst.dolphot['base']) and
+            os.stat(hst.dolphot['base']).st_size>0):
+            phot = hst.scrapedolphot(hst.coord,
+                hst.options['args'].reference, hst.split_images, hst.dolphot,
+                scrapeall=hst.options['args'].scrapeall)
+            hst.final_phot = phot
+            if phot:
+                message = 'Printing out the final photometry for: {ra} {dec}\n'
+                message += 'There is photometry for {n} sources'
+                message = message.format(ra=ra, dec=dec, n=len(phot))
+                hst.make_banner(message)
 
-                message = 'Photometry for source {n} '
-                message = message.format(n=i)
-                keys = phot.meta.keys()
-                if 'x' in keys and 'y' in keys and 'sep' in keys:
-                    message += 'at x,y={x},{y}.\n'
-                    message += 'Separated from input coordinate by {sep}.'
-                    message = message.format(x=phot.meta['x'], y=phot.meta['y'],
-                        sep=phot.meta['sep'])
-                print(message)
-
-                with open(out, 'w') as f:
-                    hst.show_photometry(phot, f=f)
-                print('\n')
+                allphot = hst.options['args'].scrapeall
+                hst.print_final_phot(phot, hst.dolphot, allphot=allphot)
+            else:
+                message = 'WARNING: did not find a source for: {ra} {dec}'
+                hst.make_banner(message.format(ra=ra, dec=dec))
         else:
-            message = 'WARNING: did not find a source for: {ra} {dec}'
-            hst.make_banner(message.format(ra=ra, dec=dec))
+            message = 'WARNING: dolphot did not run.  Use the --rundolphot flag'
+            message += ' or check your dolphot output for errors before using '
+            message += '--scrapedolphot'
+            print(message)
 
     # Clean up interstitial files in working directory
     if not hst.options['args'].nocleanup:
