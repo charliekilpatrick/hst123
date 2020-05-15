@@ -171,7 +171,7 @@ detector_defaults = {
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
     'wfpc2_wfpc2': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
-                    'input_files': '*_c0m.fits', 'pixel_scale': 0.05,
+                    'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
                     'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
@@ -1700,7 +1700,7 @@ class hst123(object):
 
     # Usually if updatewcs fails, that means it's already been done
     try:
-        updatewcs.updatewcs(image, use_db=False)
+        updatewcs.updatewcs(image)#, use_db=False)
         hdu = fits.open(image)
         message = 'updatewcs success.  New file info:'
         print(message)
@@ -1801,8 +1801,9 @@ class hst123(object):
     message = 'Astrodrizzle took {time} seconds to execute.\n\n'
     print(message.format(time = time.time()-start_drizzle))
 
-    for image in tmp_input:
-        os.remove(image)
+    if not self.options['args'].nocleanup:
+        for image in tmp_input:
+            os.remove(image)
 
     # Get rid of extra dummy files
     if os.path.exists('dummy.fits'):
@@ -2115,6 +2116,11 @@ class hst123(object):
         inst = self.get_instrument(image).split('_')[0]
         crpars = self.options['instrument_defaults'][inst]['crpars']
         self.run_cosmic(rawtmp, crpars)
+
+        det = '_'.join(self.get_instrument(rawtmp).split('_')[:2])
+        options = self.options['detector_defaults'][det]
+
+        self.update_image_wcs(rawtmp, options)
 
     modified = False
     ref_images = self.pick_deepest_images(list(obstable['image']))
@@ -2577,6 +2583,9 @@ if __name__ == '__main__':
 
         # If reference image was not provided then make one
         banner = 'Handling reference image: '
+        if hst.options['args'].reference:
+            if not os.path.exists(hst.options['args'].reference):
+                hst.options['args'].reference = None
         if not hst.options['args'].reference:
             banner += 'generating from input files.'
             hst.make_banner(banner)
@@ -2585,7 +2594,7 @@ if __name__ == '__main__':
             banner += '{ref}.'
             hst.make_banner(banner.format(ref=hst.options['args'].reference))
             # Check to make sure reference image file actually exists
-            if not os.path.isfile(hst.options['args'].reference):
+            if not os.path.exists(hst.options['args'].reference):
                 error = 'ERROR: input reference image {ref} does not exist. '
                 error += 'Exiting...'
                 print(error.format(ref=hst.options['args'].reference))
