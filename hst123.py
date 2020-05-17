@@ -56,7 +56,7 @@ global_defaults = {
     'cdbs': 'ftp://ftp.stsci.edu/cdbs/',
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
     'visit': 1,
-    'search_rad': 2.0, # for tweakreg
+    'search_rad': 4.0, # for tweakreg
     'radius': 5 * u.arcmin,
     'nbright': 5000,
     'minobj': 10,
@@ -238,7 +238,7 @@ class hst123(object):
     self.magsystem = 'abmag'
 
     # Detection threshold used for image alignment by tweakreg
-    self.threshold = 50.
+    self.threshold = 15.
 
     self.dolphot = {}
 
@@ -1539,8 +1539,9 @@ class hst123(object):
   # Given an input list of images, pick images from the same filter and
   # instrument in the best filter for a reference image (wide-band or LP, and
   # preferably in a sensitive filter like F606W or F814W), that has the
-  # longest cumulative exposure time
-  def pick_deepest_images(self, images, reffilter=None):
+  # longest cumulative exposure time.  Optional parameter to avoid images from
+  # WFPC2 if possible
+  def pick_deepest_images(self, images, reffilter=None, avoid_wfpc2=False):
     # Best possible filter for a dolphot reference image in the approximate
     # order I would want to use for a reference image.  You can also use
     # to force the script to pick a reference image from a specific filter.
@@ -1570,6 +1571,13 @@ class hst123(object):
         # remove all elements with hrc
         new = [val for val in unique_filter_inst if 'hrc' not in val]
         unique_filter_inst = new
+
+    # Do same for WFPC2 if avoid_wfpc2=True
+    if avoid_wfpc2:
+        if any(['wfpc2' not in val for val in unique_filter_inst]):
+            # remove elements with WFPC2
+            new = [val for val in unique_filter_inst if 'wfpc2' not in val]
+            unique_filter_inst = new
 
     total_exposure = []
     for val in unique_filter_inst:
@@ -1619,7 +1627,7 @@ class hst123(object):
     # If we haven't defined input images, catch error
 
     reference_images = self.pick_deepest_images(list(obstable['image']),
-        reffilter=self.options['args'].reffilter)
+        reffilter=self.options['args'].reffilter, avoid_wfpc2=True)
 
     if len(reference_images)==0:
         error = 'ERROR: could not pick a reference image'
@@ -1648,16 +1656,9 @@ class hst123(object):
     self.run_tweakreg(obstable, '')
     self.run_astrodrizzle(obstable, output_name=drizname)
 
-  # Update image wcs using updatewcs routine
-  def update_image_wcs(self, image, options):
+  def fix_hdu_wcs_keys(self, image, change_keys, ref_url):
 
-    self.clear_downloads()
     hdu = fits.open(image, mode='update')
-
-    change_keys = self.options['global_defaults']['keys']
-
-    inst = self.get_instrument(image).split('_')[0]
-    ref_url = self.options['instrument_defaults'][inst]['env_ref']
     ref = ref_url.strip('.old')
 
     for i,h in enumerate(hdu):
@@ -1691,20 +1692,35 @@ class hst123(object):
                     sys.stdout.write(message.format(url=url))
                     print(message.format(url=url))
 
+            message = 'Settings {im},{i} {key}={val}'
+            print(message.format(im=image, i=i, key=key, val=ref_file))
             hdu[i].header[key] = ref_file
 
-    message = 'File info before updatewcs:'
-    print(message)
-    hdu.info()
     hdu.close()
+
+  # Update image wcs using updatewcs routine
+  def update_image_wcs(self, image, options):
+
+    message = 'Updating WCS for {file}'
+    print(message.format(file=image))
+
+    self.clear_downloads()
+
+    change_keys = self.options['global_defaults']['keys']
+    inst = self.get_instrument(image).split('_')[0]
+    ref_url = self.options['instrument_defaults'][inst]['env_ref']
+
+    self.fix_hdu_wcs_keys(image, change_keys, ref_url)
 
     # Usually if updatewcs fails, that means it's already been done
     try:
-        updatewcs.updatewcs(image)#, use_db=False)
-        hdu = fits.open(image)
-        message = 'updatewcs success.  New file info:'
+        updatewcs.updatewcs(image)
+        hdu = fits.open(image, mode='update')
+        message = '\n\nupdatewcs success.  File info:'
         print(message)
         hdu.info()
+        hdu.close()
+        self.fix_hdu_wcs_keys(image, change_keys, ref_url)
         return(True)
     except:
         error = 'ERROR: failed to update WCS for image {file}'
@@ -1985,6 +2001,8 @@ class hst123(object):
   def get_nsources(self, image, thresh):
     imghdu = fits.open(image)
     nsources = 0
+    message = '\n\nGetting number of sources in {im} at threshold={thresh}'
+    print(message.format(im=image, thresh=thresh))
     for i,h in enumerate(imghdu):
         if h.name=='SCI':
             filename="{:s}[{:d}]".format(image, i)
@@ -1998,6 +2016,9 @@ class hst123(object):
                 nsources += catalog.num_objects
             except:
                 pass
+
+    message = 'Got {n} total sources'
+    print(message.format(n=nsources))
 
     return(nsources)
 
@@ -2098,6 +2119,8 @@ class hst123(object):
     for image in run_images:
         # wfc3_ir doesn't need cosmic clean and assume reference is cleaned
         if (image == reference or 'wfc3_ir' in self.get_instrument(image)):
+            message = 'Skipping adjustments for {file} as WFC3/IR or reference'
+            print(message.format(file=image))
             tmp_images.append(image)
             continue
 
@@ -2106,6 +2129,8 @@ class hst123(object):
 
         # Check if rawtmp already exists
         if os.path.exists(rawtmp):
+            message = '{file} exists.  Skipping...'
+            print(message.format(file=image))
             continue
 
         # Copy the raw data into a temporary file
@@ -2117,10 +2142,10 @@ class hst123(object):
         crpars = self.options['instrument_defaults'][inst]['crpars']
         self.run_cosmic(rawtmp, crpars)
 
-        det = '_'.join(self.get_instrument(rawtmp).split('_')[:2])
-        options = self.options['detector_defaults'][det]
-
-        self.update_image_wcs(rawtmp, options)
+        if self.updatewcs:
+            det = '_'.join(self.get_instrument(rawtmp).split('_')[:2])
+            wcsoptions = self.options['detector_defaults'][det]
+            self.update_image_wcs(rawtmp, wcsoptions)
 
     modified = False
     ref_images = self.pick_deepest_images(list(obstable['image']))
@@ -2197,6 +2222,7 @@ class hst123(object):
                     writecat=True, updatehdr=True, reusename=True,
                     rfluxunits='counts', minobj=minobj,
                     searchrad=search_rad, searchunits='arcseconds', runfile='',
+                    tolerance=0.5, nclip=5, sigma=2.0,
                     separation=0.5, residplot='No plot', see2dplot=False,
                     refnbright=nbright, nbright=nbright, wcsname='TWEAK',
                     imagefindcfg = {'threshold': ithresh,
@@ -2519,7 +2545,8 @@ if __name__ == '__main__':
         if hst.options['args'].download:
             banner = 'Downloading HST data from MAST for: {ra} {dec}'
             hst.make_banner(banner.format(ra=ra, dec=dec))
-            hst.download_files(hst.productlist, archivedir=default_archive)
+            hst.download_files(hst.productlist, archivedir=default_archive,
+                clobber=hst.options['args'].clobber)
 
         if hst.productlist:
             hst.make_banner('Copying raw data to working dir')
