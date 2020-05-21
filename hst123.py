@@ -56,7 +56,7 @@ global_defaults = {
     'cdbs': 'ftp://ftp.stsci.edu/cdbs/',
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
     'visit': 1,
-    'search_rad': 4.0, # for tweakreg
+    'search_rad': 3.0, # for tweakreg in arcsec
     'radius': 5 * u.arcmin,
     'nbright': 5000,
     'minobj': 10,
@@ -333,6 +333,10 @@ class hst123(object):
         '(default=2 pixels) and output to files dpXXX.phot where XXX is '+\
         'zero-padded integer for labeling sources in order of proximity to '+\
         'input coordinate.')
+    parser.add_argument('--username', default=None, type=str,
+        help='Input a username for logged in astroquery.mast.Observations.')
+    parser.add_argument('--password', default=None, type=str,
+        help='Input a password for logged in astroquery.mast.Observations')
     parser.add_argument('--scraperadius', default=None, type=float,
         help='Override the dolphot scrape radius (units are arcsec).')
     return(parser)
@@ -350,7 +354,7 @@ class hst123(object):
             if os.path.exists(astropy_cache):
                 clear_download_cache()
     except RuntimeError:
-        warning = 'WARNING: Runetime Error in clear_download_cache().\n'
+        warning = 'WARNING: Runtime Error in clear_download_cache().\n'
         warning += 'Passing...'
         pass
     except FileNotFoundError:
@@ -1545,12 +1549,12 @@ class hst123(object):
     # Best possible filter for a dolphot reference image in the approximate
     # order I would want to use for a reference image.  You can also use
     # to force the script to pick a reference image from a specific filter.
-    best_filters = ['f606w','f555w','f814w','f350lp']
+    best_filters = ['f606w','f555w','f814w','f350lp','f110w','f105w']
 
     # If we gave an input filter for reference, override best_filters
     if reffilter:
         if reffilter.upper() in self.options['acceptable_filters']:
-        # Automatically set the best filter to only this value
+            # Automatically set the best filter to only this value
             best_filters = [reffilter.lower()]
 
     # Best filter suffixes in the approximate order we would want to use to
@@ -1759,11 +1763,6 @@ class hst123(object):
         # Copy the raw data into a temporary file
         shutil.copyfile(image, tmp)
         tmp_input.append(tmp)
-
-    if self.updatewcs:
-        for image in tmp_input:
-            print('\n\nRunning updatewcs on: {0}'.format(image))
-            self.update_image_wcs(image, options)
 
     ra = self.coord.ra.degree if self.coord else None
     dec = self.coord.dec.degree if self.coord else None
@@ -2029,7 +2028,6 @@ class hst123(object):
 
     # Analyze the input images
     cat_str = '_sci*_xy_catalog.coo'
-    names=('x','y','flux','id','sharp','round1','round2')
 
     # Look at all science images
     data={'name':image, 'nobjects':0, 'threshold': []}
@@ -2041,7 +2039,7 @@ class hst123(object):
                 if (line and 'threshold=' in line):
                     threshold = float(line.split('=')[1])
                     data['threshold'].append(threshold)
-            table = Table.read(catfile, format='ascii', names=names)
+            table = Table.read(catfile, format='ascii')
             data['nobjects']=data['nobjects']+len(table)
 
         best_thresh = list(set(data['threshold']))
@@ -2122,6 +2120,10 @@ class hst123(object):
             message = 'Skipping adjustments for {file} as WFC3/IR or reference'
             print(message.format(file=image))
             tmp_images.append(image)
+            if self.updatewcs:
+                det = '_'.join(self.get_instrument(image).split('_')[:2])
+                wcsoptions = self.options['detector_defaults'][det]
+                self.update_image_wcs(image, wcsoptions)
             continue
 
         rawtmp = image.replace('.fits','rawtmp.fits')
@@ -2141,11 +2143,6 @@ class hst123(object):
         inst = self.get_instrument(image).split('_')[0]
         crpars = self.options['instrument_defaults'][inst]['crpars']
         self.run_cosmic(rawtmp, crpars)
-
-        if self.updatewcs:
-            det = '_'.join(self.get_instrument(rawtmp).split('_')[:2])
-            wcsoptions = self.options['detector_defaults'][det]
-            self.update_image_wcs(rawtmp, wcsoptions)
 
     modified = False
     ref_images = self.pick_deepest_images(list(obstable['image']))
@@ -2217,18 +2214,25 @@ class hst123(object):
                 message += 'Image threshold={ithresh}\n'
                 print(message.format(ithresh=ithresh, rthresh=rthresh))
 
+                rconv = 3.5 ; iconv = 3.5 ; tol = 0.5
+                if 'wfc3_ir' in self.get_instrument(reference):
+                    rconv = 2.5
+                if all(['wfc3_ir' in self.get_instrument(i)
+                    for i in tweak_img]): iconv = 2.5 ; tol = 1.2
+
                 tweakreg.TweakReg(files=tweak_img, refimage=reference,
                     verbose=False, interactive=False, clean=True,
                     writecat=True, updatehdr=True, reusename=True,
-                    rfluxunits='counts', minobj=minobj,
+                    rfluxunits='counts', minobj=minobj, wcsname='TWEAK',
                     searchrad=search_rad, searchunits='arcseconds', runfile='',
-                    tolerance=0.5, nclip=5, sigma=2.0,
+                    tolerance=tol, refnbright=nbright, nbright=nbright,
                     separation=0.5, residplot='No plot', see2dplot=False,
-                    refnbright=nbright, nbright=nbright, wcsname='TWEAK',
                     imagefindcfg = {'threshold': ithresh,
-                        'use_sharp_round': True},
+                        'conv_width': iconv},
+                    #    'use_sharp_round': True},
                     refimagefindcfg = {'threshold': rthresh,
-                        'use_sharp_round': True})
+                        'conv_width': rconv})
+                    #    'use_sharp_round': True}, updatewcs=True)
 
                 cat_str = '_sci*_xy_catalog.coo'
                 # Tag cat files with the threshold so we can reference it later
@@ -2371,6 +2375,14 @@ class hst123(object):
 
     # Define search params and grab all files from MAST
     try:
+        if self.options['args'].username and self.options['args'].password:
+            Observations.login(username=self.options['args'].username,
+                password=self.options['args'].password)
+    except:
+        warning = 'WARNING: could not log in with input username/password'
+        print(warning)
+
+    try:
         obsTable = Observations.query_region(coord, radius=search_radius)
     except astroquery.exceptions.RemoteServiceError:
         error = 'ERROR: MAST is not working currently working\n'
@@ -2388,7 +2400,6 @@ class hst123(object):
     masks.append([any(l) for l in list(map(list,zip(*[[det in inst.upper()
                 for inst in obsTable['instrument_name']]
                 for det in ['ACS','WFC','WFPC2']])))])
-    masks.append([str(r).upper()=='PUBLIC' for r in obsTable['dataRights']])
 
     # Time constraint masks (before and after MJD)
     if self.before:
