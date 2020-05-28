@@ -23,8 +23,11 @@ import warnings
 warnings.filterwarnings('ignore')
 import stwcs
 import glob, sys, os, shutil, time, filecmp, astroquery, progressbar, copy
+import smtplib, datetime
 import astropy.wcs as wcs
 import numpy as np
+from contextlib import contextmanager
+from scipy import interpolate
 from astropy import units as u
 from astropy.utils.data import clear_download_cache,download_file
 from astropy.coordinates import SkyCoord
@@ -37,6 +40,8 @@ from dateutil.parser import parse
 from drizzlepac import tweakreg,astrodrizzle,catalogs
 from stwcs import updatewcs
 from shapely.geometry import Polygon, Point
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Color strings for download messages
 green = '\033[1;32;40m'
@@ -46,6 +51,7 @@ end = '\033[0;0m'
 # Dictionaries with all options for instruments, detectors, and filters
 global_defaults = {
     'archive': '/data2/ckilpatrick/hst/archive',
+    'astropath': '/.astropy/cache/download/py3/urlmap.dir',
     'keys': ['IDCTAB','DGEOFILE','NPOLEXT',
              'NPOLFILE','D2IMFILE', 'D2IMEXT','OFFTAB'],
     'badkeys': ['ATODFILE','WF4TFILE','BLEVFILE','BLEVDFIL','BIASFILE',
@@ -206,6 +212,16 @@ For reference, see the WFPC2, ACS, and WFC3 zero point pages:
           photometric-calibration
 """
 
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+
 class hst123(object):
 
   def __init__(self):
@@ -222,6 +238,7 @@ class hst123(object):
     self.summary_file = 'exposure_summary.out'
 
     self.usagestring = 'hst123.py ra dec'
+    self.command = ''
 
     self.before = None
     self.after = None
@@ -239,6 +256,9 @@ class hst123(object):
 
     # Detection threshold used for image alignment by tweakreg
     self.threshold = 15.
+
+    # S/N limit for calculating limiting magnitude
+    self.snr_limit = 3.0
 
     self.dolphot = {}
 
@@ -333,22 +353,27 @@ class hst123(object):
         '(default=2 pixels) and output to files dpXXX.phot where XXX is '+\
         'zero-padded integer for labeling sources in order of proximity to '+\
         'input coordinate.')
-    parser.add_argument('--username', default=None, type=str,
-        help='Input a username for logged in astroquery.mast.Observations.')
-    parser.add_argument('--password', default=None, type=str,
-        help='Input a password for logged in astroquery.mast.Observations')
+    parser.add_argument('--token', default=None, type=str,
+        help='Input a token for astroquery.mast.Observations.')
     parser.add_argument('--scraperadius', default=None, type=float,
         help='Override the dolphot scrape radius (units are arcsec).')
+    parser.add_argument('--alert', default=None, type=str,
+        help='Include a configuration file to send an alert via email '+\
+        'once the script has finished.')
+    parser.add_argument('--nocuts', default=False, action='store_true',
+        help='Skip cuts to dolphot output file.')
+    parser.add_argument('--onlywide', default=False, action='store_true',
+        help='Only reduce wide-band filters.')
     return(parser)
 
-  def clear_downloads(self):
+  def clear_downloads(self, options):
     print('Trying to clear downloads')
     try:
         # utils.data.download_file can get buggy if the cache is
         # full.  Clear the cache even though we aren't using caching
         # to prevent download method from choking
         if 'HOME' in os.environ.keys():
-            astropath = '/.astropy/cache/download/py3/urlmap.dir'
+            astropath = options['astropath']
             astropy_cache = os.environ['HOME'] + astropath
             print('Clearing cache: {0}'.format(astropy_cache))
             if os.path.exists(astropy_cache):
@@ -499,8 +524,6 @@ class hst123(object):
     exptimes = np.array([float(e) for e in exptimes])[idx]
     zpt = np.array([float(z) for z in zpt])[idx]
 
-    print(magerrs, counts, exptimes, zpt)
-
     # Normalize flux and fluxerr to a common zero point
     flux = counts / exptimes * 10**(0.4 * (27.5 - zpt))
     fluxerr = 1./1.086 * magerrs * flux
@@ -609,9 +632,14 @@ class hst123(object):
         date='%7.5f'% row['MJD']
         if row['MJD']==99999.0: date='-----------'
 
-        line=form.format(date=date, inst=inst, filt=row['FILTER'].upper(),
-            exp='%7.4f' % row['EXPTIME'], mag='%3.4f' % row['MAGNITUDE'],
-            err='%3.4f' % row['MAGNITUDE_ERROR'])
+        datakeys = {'date':date, 'inst':inst, 'filt':row['FILTER'].upper(),
+            'exp':'%7.4f' % row['EXPTIME'], 'mag':'%3.4f' % row['MAGNITUDE'],
+            'err':'%3.4f' % row['MAGNITUDE_ERROR']}
+
+        if 'lim' in form:
+            datakeys['lim'] = '%3.4f' % row['LIMIT']
+
+        line=form.format(**datakeys)
 
         print(line)
         if f: f.write(line+'\n')
@@ -631,10 +659,9 @@ class hst123(object):
        return(None)
 
     # Split photometry table into the average photometry and everything else
-    avg_photometry = final_photometry[final_photometry['MJD']==99999.0]
+    avg_photometry = final_photometry[final_photometry['IS_AVG']==1]
     if len(avg_photometry)>0:
-        # The 99999.0 data are average magnitudes.  Split this off
-        final_photometry=final_photometry[final_photometry['MJD']!=99999.0]
+        final_photometry=final_photometry[final_photometry['IS_AVG']==0]
 
     if latex:
 
@@ -653,9 +680,16 @@ class hst123(object):
     if show:
 
         form = '{date: <12} {inst: <10} {filt: <8} '
-        form += '{exp: <14} {mag: <9} {err: <9}'
-        header = form.format(date='# MJD', inst='Instrument', filt='Filter',
-            exp='Exposure', mag='Magnitude', err='Uncertainty')
+        form += '{exp: <14} {mag: <9} {err: <11}'
+
+        headkeys = {'date':'# MJD', 'inst':'Instrument','filt':'Filter',
+            'exp':'Exposure','mag':'Magnitude','err':'Uncertainty'}
+
+        if 'LIMIT' in keys:
+            form += ' {lim: <10}'
+            headkeys['lim']='Limit'
+
+        header = form.format(**headkeys)
 
         if final_photometry:
             self.show_data(final_photometry, form, header, '', f=f)
@@ -786,9 +820,12 @@ class hst123(object):
              'log': dolphot+'.output', 'total_objs': 0,
              'colfile': dolphot+'.columns', 'fake': dolphot+'.fake' ,
              'fakelist': dolphot+'.fakelist', 'fakelog': dolphot+'.fake.output',
-             'radius': 2, 'final_phot': dolphot+'.phot'})
+             'radius': 2, 'final_phot': dolphot+'.phot',
+             'limit_radius': 10.0,
+             'original': dolphot+'.orig'})
 
-  def scrapedolphot(self, coord, reference, images, dolphot, scrapeall=False):
+  def scrapedolphot(self, coord, reference, images, dolphot, scrapeall=False,
+    get_limits=False):
 
     # Check input variables
     base = dolphot['base'] ; colfile = dolphot['colfile']
@@ -805,38 +842,50 @@ class hst123(object):
         print(error)
         return(None)
 
-    message = 'Cutting bad sources from dolphot catalog.'
-    print(message)
+    # Copy dolphot catalog into a file if it doesn't exist already
+    if not os.path.exists(dolphot['original']):
+        shutil.copyfile(dolphot['base'], dolphot['original'])
 
-    # Cut bad sources
-    f = open('tmp', 'w')
-    numlines = sum(1 for line in open(base))
-    with open(dolphot['base']) as dolphot_file:
-        message = 'There are {n} sources in dolphot file {dp}. '
-        message += 'Cutting bad sources...'
-        print(message.format(n=numlines, dp=dolphot['base']))
+    if not self.options['args'].nocuts:
 
-        bar = progressbar.ProgressBar(maxval=numlines).start()
-        typecol = self.get_dolphot_column(colfile, 'Object type', '')
-        for i,line in enumerate(dolphot_file):
-            bar.update(i)
-            if (int(line.split()[typecol])==1): # Obj type
-                f.write(line)
-        bar.finish()
+        message = 'Cutting bad sources from dolphot catalog.'
+        print(message)
 
-    f.close()
+        # Cut bad sources
+        f = open('tmp', 'w')
+        numlines = sum(1 for line in open(base))
 
-    message = 'Done cutting bad sources'
-    print(message)
+        with open(dolphot['base']) as dolphot_file:
+            message = 'There are {n} sources in dolphot file {dp}. '
+            message += 'Cutting bad sources...'
+            print(message.format(n=numlines, dp=dolphot['base']))
 
-    if filecmp.cmp(dolphot['base'], 'tmp'):
-        message = 'No changes to dolphot file {dp}.'
-        print(message.format(dp=dolphot['base']))
-        os.remove('tmp')
+            bar = progressbar.ProgressBar(maxval=numlines).start()
+            typecol = self.get_dolphot_column(colfile, 'Object type', '')
+            for i,line in enumerate(dolphot_file):
+                bar.update(i)
+                if (int(line.split()[typecol])==1): # Obj type
+                    f.write(line)
+            bar.finish()
+
+        f.close()
+
+        message = 'Done cutting bad sources'
+        print(message)
+
+        if filecmp.cmp(dolphot['base'], 'tmp'):
+            message = 'No changes to dolphot file {dp}.'
+            print(message.format(dp=dolphot['base']))
+            os.remove('tmp')
+        else:
+            message = 'Updating dolphot file {dp}.'
+            print(message.format(dp=dolphot['base']))
+            shutil.move('tmp', dolphot['base'])
+
     else:
-        message = 'Updating dolphot file {dp}.'
-        print(message.format(dp=dolphot['base']))
-        shutil.move('tmp', dolphot['base'])
+        # Copy original file back over if it already exists
+        if os.path.exists(dolphot['original']):
+            shutil.copyfile(dolphot['original'], dolphot['base'])
 
     # Get x,y coordinate from reference image of potential source
     hdu = fits.open(reference)
@@ -875,6 +924,12 @@ class hst123(object):
             if (dist < radius):
                 data.append([dist, line])
 
+    limit_data = []
+    if get_limits:
+        limit_radius = dolphot['limit_radius']
+        limit_data = self.get_limit_data(dolphot, coord, w, x, y, colfile,
+            limit_radius)
+
     message = 'Done looking for sources in dolphot file {dp}. '
     message += 'hst123 found {n} sources around: {ra} {dec}'
     print(message.format(dp=dolphot['base'], n=len(data), ra=ra, dec=dec))
@@ -895,8 +950,25 @@ class hst123(object):
 
     # Now get the final photometry for the source and sort
     final_phot=[]
+    finished = False
     for i,dat in enumerate(data):
-        source_phot = hst.parse_phot(obstable, dat[1], colfile)
+
+        while not finished:
+            source_phot = self.parse_phot(obstable, dat[1], colfile,
+                limit_data=limit_data)
+
+            finished = True
+
+            if 'LIMIT' in source_phot.keys():
+                if any([np.isnan(row['LIMIT']) for row in source_phot]):
+                    if limit_radius < 80:
+                        # Re-try with larger radius
+                        limit_radius = 2 * limit_radius
+                        finished = False
+
+                        limit_data = self.get_limit_data(dolphot, coord, w, x,
+                            y, colfile, limit_radius)
+
 
         source_phot.meta['separation'] = dat[0]
         source_phot.meta['magsystem']=self.magsystem
@@ -911,9 +983,36 @@ class hst123(object):
             source_phot.meta['dec']=coord.dec.degree
 
         source_phot.sort(['MJD','FILTER'])
+
         final_phot.append(source_phot)
 
     return(final_phot)
+
+  def get_limit_data(self, dolphot, coord, w, x, y, colfile, limit_radius):
+    # limit radius in arcseconds
+    limit_data = []
+
+    # Get limit radius in pixels
+    if coord.dec.degree < 89:
+        dec1 = coord.dec.degree + limit_radius/3600.
+    else:
+        dec1 = coord.dec.degree - limit_radius/3600.
+
+    coord1 = SkyCoord(coord.ra.degree, dec1, unit='deg')
+    x1,y1 = wcs.utils.skycoord_to_pixel(coord1, w, origin=1)
+    radius = np.sqrt((x-x1)**2+(y-y1)**2)
+
+    with open(dolphot['base']) as dp:
+        for line in dp:
+            xcol = self.get_dolphot_column(colfile, 'Object X', '')
+            ycol = self.get_dolphot_column(colfile, 'Object Y', '')
+            xline = float(line.split()[xcol]) + 0.5
+            yline = float(line.split()[ycol]) + 0.5
+            dist = np.sqrt((xline-x)**2 + (yline-y)**2)
+            if (dist < radius):
+                limit_data.append([dist, line])
+
+    return(limit_data)
 
   # Copy raw data into raw data dir
   def copy_raw_data(self, rawdir, reverse=False, check_for_coord=False):
@@ -1133,12 +1232,18 @@ class hst123(object):
   # Given an input dictionary of files sorted by visits, a row from a dolphot
   # output file, and a column file corresponding to that dolphot file, parse the
   # output into a photometry table
-  def parse_phot(self, obstable, row, cfile):
+  def parse_phot(self, obstable, row, cfile, limit_data=[]):
     # Names for the final output photometry table
     fnames = ['MJD', 'INSTRUMENT', 'FILTER',
-              'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR']
+              'EXPTIME', 'MAGNITUDE', 'MAGNITUDE_ERROR', 'IS_AVG']
+    init_row = [[0.],['X'*24],['X'*12],[0.],[0.],[0.], [0]]
+
+    if limit_data:
+        fnames += ['LIMIT']
+        init_row += [[0.]]
+
     # Make an empty table with above column names for output photometry table
-    final_phot = Table([[0.],['X'*24],['X'*12],[0.],[0.],[0.]], names=fnames)
+    final_phot = Table(init_row, names=fnames)
     final_phot = final_phot[:0].copy()
 
     # Get general object statistics to put in final_phot metadata
@@ -1152,6 +1257,10 @@ class hst123(object):
     final_phot.meta['sharpness']=sharpness
     final_phot.meta['roundness']=roundness
 
+    if limit_data:
+        limit_message = '{0}-sigma estimate'.format(int(self.snr_limit))
+        final_phot.meta['limit']=limit_message
+
     # Iterate through the dictionary to get all photometry from files
     for inst in list(set(obstable['instrument'])):
         insttable = obstable[obstable['instrument'] == inst]
@@ -1161,7 +1270,26 @@ class hst123(object):
                 ftable = visittable[visittable['filter'] == filt]
 
                 mjd, mag, err, exptime = self.calc_avg_stats(ftable, row, cfile)
-                new_row = (mjd, inst, filt, exptime, mag, err)
+                new_row = (mjd, inst, filt, exptime, mag, err, 0)
+
+                if limit_data:
+                    mags = [] ; errs = []
+                    for data in limit_data:
+                        mjd, limmag, limerr, exp = self.calc_avg_stats(ftable,
+                            data[1], cfile)
+
+                        if not np.isnan(limmag) and not np.isnan(limerr):
+                            mags.append(limmag)
+                            errs.append(limerr)
+
+                    if len(mags)>30:
+                        limit = self.snr_limit
+                        maglimit = self.estimate_mag_limit(mags, errs,
+                            limit=limit)
+                    else:
+                        maglimit = np.nan
+
+                    new_row = (mjd, inst, filt, exptime, mag, err, 0, maglimit)
 
                 final_phot.add_row(new_row)
 
@@ -1175,11 +1303,58 @@ class hst123(object):
             mjd, mag, err, exptime = self.calc_avg_stats(ftable, row, cfile)
 
             # Give this row a dummy MJD variable so it will show up last
-            new_row = (99999.0, inst, filt, exptime, mag, err)
+            new_row = (mjd, inst, filt, exptime, mag, err, 1)
+
+            if limit_data:
+                mags = [] ; errs = []
+                for data in limit_data:
+                    mjd, limmag, limerr, exptime = self.calc_avg_stats(ftable,
+                        data[1], cfile)
+
+                    if not np.isnan(limmag) and not np.isnan(limerr):
+                        mags.append(limmag)
+                        errs.append(limerr)
+
+
+                if len(mags)>30:
+                    limit = self.snr_limit
+                    maglimit = self.estimate_mag_limit(mags, errs,
+                        limit=limit)
+                else:
+                    maglimit = np.nan
+
+                limit = self.snr_limit
+                maglimit = self.estimate_mag_limit(mags, errs, limit=limit)
+                new_row = (mjd, inst, filt, exptime, mag, err, 1, maglimit)
 
             final_phot.add_row(new_row)
 
     return(final_phot)
+
+  # Estimate the limiting magnitude given an input list of magnitudes and
+  # errors.  Default is 3-sigma limit.
+  def estimate_mag_limit(self, mags, errs, limit=3.0):
+
+    # First bin signal-to-noise in magnitude, then extrapolate to get 3-sigma
+    mags = np.array(mags) ; errs = np.array(errs)
+    bin_mag = np.linspace(np.min(mags), np.max(mags), 100)
+    snr = np.zeros(100)
+
+    for i in np.arange(100):
+        if i==99:
+            snr[i]=snr[i-1]
+        else:
+            idx = np.where((mags > bin_mag[i]) & (mags < bin_mag[i+1]))
+            snr[i] = np.median(1./errs[idx])
+
+    mask = np.array([np.isnan(val) for val in snr])
+    bin_mag = bin_mag[~mask]
+    snr = snr[~mask]
+
+    snr_func = interpolate.interp1d(snr, bin_mag, fill_value='extrapolate',
+        bounds_error=False)
+
+    return(snr_func(limit))
 
   # Sanitizes reference header, gets rid of multiple extensions and only
   # preserves science data.
@@ -1372,17 +1547,41 @@ class hst123(object):
     if save_c1m:
         if (instrument.upper() == 'WFPC2' and 'c1m.fits' in image):
             is_not_hst_image = True
+
     return(warning.format(img=image, inst=instrument, det=detector),
         is_not_hst_image)
 
   def needs_to_split_groups(self,image):
     return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
 
-  def needs_to_calc_sky(self, image):
+  def needs_to_calc_sky(self, image, check_wcs=False):
     print('Checking for',image.replace('.fits','.sky.fits'))
     files = glob.glob(image.replace('.fits','.sky.fits'))
     if (len(files) == 0):
         return(True)
+    else:
+        if check_wcs:
+            # Look at the image and sky wcs and check that they are the same
+            imhdu = fits.open(image)
+            skhdu = fits.open(files[0])
+
+            if len(imhdu)!=len(skhdu):
+                return(False)
+
+            check_keys = ['CRVAL1','CRVAL2','CRPIX1','CRPIX2','CD1_1','CD1_2',
+                'CD2_1','CD2_2','NAXIS1','NAXIS2']
+
+            for imh,skh in zip(imhdu,skhdu):
+                for key in check_keys:
+                    if key in list(imh.header.keys()):
+                        if key not in list(skh.header.keys()):
+                            return(False)
+                        if imh.header[key]!=skh.header[key]:
+                            return(False)
+
+            return(True)
+        else:
+            return(False)
 
   # Check if the image contains input coordinate.  This is somewhat complicated
   # as an image might cover input coordinates, but they land on a bad part of
@@ -1708,7 +1907,7 @@ class hst123(object):
     message = 'Updating WCS for {file}'
     print(message.format(file=image))
 
-    self.clear_downloads()
+    self.clear_downloads(self.options['global_defaults'])
 
     change_keys = self.options['global_defaults']['keys']
     inst = self.get_instrument(image).split('_')[0]
@@ -1809,7 +2008,7 @@ class hst123(object):
         except FileNotFoundError:
             # Usually happens because of a file missing in astropy cache.
             # Try clearing the download cache and then re-try
-            self.clear_downloads()
+            self.clear_downloads(self.options['global_defaults'])
             tries += 1
 
 
@@ -2131,8 +2330,8 @@ class hst123(object):
 
         # Check if rawtmp already exists
         if os.path.exists(rawtmp):
-            message = '{file} exists.  Skipping...'
-            print(message.format(file=image))
+            message = '{file} exists. Skipping...'
+            print(message.format(file=rawtmp))
             continue
 
         # Copy the raw data into a temporary file
@@ -2228,11 +2427,9 @@ class hst123(object):
                     tolerance=tol, refnbright=nbright, nbright=nbright,
                     separation=0.5, residplot='No plot', see2dplot=False,
                     imagefindcfg = {'threshold': ithresh,
-                        'conv_width': iconv},
-                    #    'use_sharp_round': True},
+                        'conv_width': iconv, 'use_sharp_round': True},
                     refimagefindcfg = {'threshold': rthresh,
-                        'conv_width': rconv})
-                    #    'use_sharp_round': True}, updatewcs=True)
+                        'conv_width': rconv, 'use_sharp_round': True})
 
                 cat_str = '_sci*_xy_catalog.coo'
                 # Tag cat files with the threshold so we can reference it later
@@ -2278,7 +2475,7 @@ class hst123(object):
                 if nsources < 1000:
                     shallow_img.append(img)
 
-        except (MemoryError, TypeError, RuntimeError) as e:
+        except (MemoryError, TypeError, UnboundLocalError, RuntimeError) as e:
             self.tweakreg_error(e)
 
     message = 'Tweakreg took {time} seconds to execute.\n\n'
@@ -2364,7 +2561,7 @@ class hst123(object):
   # Construct a product list from the input coordinate
   def get_productlist(self, coord, search_radius):
 
-    self.clear_downloads()
+    self.clear_downloads(self.options['global_defaults'])
 
     productlist = None
 
@@ -2375,9 +2572,8 @@ class hst123(object):
 
     # Define search params and grab all files from MAST
     try:
-        if self.options['args'].username and self.options['args'].password:
-            Observations.login(username=self.options['args'].username,
-                password=self.options['args'].password)
+        if self.options['args'].token:
+            Observations.login(token=self.options['args'].token)
     except:
         warning = 'WARNING: could not log in with input username/password'
         print(warning)
@@ -2463,13 +2659,16 @@ class hst123(object):
     for prod in productlist:
         filename = prod['productFilename']
 
+        outdir = ''
         if dest:
+            outdir = dest
             filename = dest + '/' + filename
 
         # Check if we enabled the archive option
         if archivedir:
             check, fullfile = self.check_archive(prod, archivedir=archivedir)
             filename = fullfile
+            outdir, basefile = os.path.split(fullfile)
             if check and not clobber:
                 message = '{file} exists. Skipping...'
                 print(message.format(file=filename))
@@ -2480,16 +2679,22 @@ class hst123(object):
             continue
 
         obsid = prod['obsID']
-        uri = prod['dataURI']
 
         message = 'Trying to download {image}'
         sys.stdout.write(message.format(image=filename))
         sys.stdout.flush()
 
-        url = self.options['global_defaults']['mast'] + uri
         try:
-            dat = download_file(url, cache=False, show_progress=False)
-            shutil.move(dat, filename)
+            if 'HOME' in list(os.environ.keys()):
+                options = self.options['global_defaults']
+                astropath = options['astropath']
+                cache = os.environ['HOME'] + astropath
+            else:
+                cache = '.'
+            with suppress_stdout():
+                download = Observations.download_products(Table(prod),
+                    download_dir=cache)
+            shutil.move(download['Local Path'][0], outdir)
             message = '\r' + message
             message += green+' [SUCCESS]'+end+'\n'
             sys.stdout.write(message.format(image=filename))
@@ -2499,6 +2704,56 @@ class hst123(object):
             sys.stdout.write(message.format(image=filename))
 
     return(True)
+
+  def sendEmail(self, alert, outfile=None):
+
+    try:
+        to_addr = alert['to_addr'][0]
+        login = alert['login'][0]
+        password = alert['password'][0]
+        smtpserver = alert['smtpserver'][0]
+    except:
+        return(False)
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = 'hst123.py has finished'
+    msg['From'] = 'Supernova Alerts: hst123.py'
+    msg['To'] = to_addr
+
+    kwargs = {'cmd': self.command, 'dir': os.getcwd(),
+        'time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+    message = '''<html><body><p>Finished with hst123.py!</p>
+                <p>Command: {cmd}</p>
+                <p>Directory: {dir}</p>
+                <p>Time finished: {time}</p>
+                <p>{text}</p>
+                <p>CDK</p>
+                </body></html>'''
+
+    kwargs['text']=''
+    if outfile:
+        with open(outfile) as f:
+            for line in f:
+                kwargs['text']+=line+'<br>'
+
+    if not kwargs['text']: kwargs['text']='No sources detected by dolphot!'
+
+    message = message.format(**kwargs)
+
+    payload = MIMEText(message, 'html')
+    msg.attach(payload)
+
+    with smtplib.SMTP(smtpserver) as server:
+        try:
+            server.starttls()
+            server.login(login, password)
+            resp = server.sendmail(msg['From'], [to_addr], msg.as_string())
+            return(True)
+        except:
+            return(False)
+
+    return(False)
 
 if __name__ == '__main__':
     # Start timer, create hst123 class obj, parse args
@@ -2527,7 +2782,8 @@ if __name__ == '__main__':
 
     # Starting banner
     banner = 'Starting: {cmd}'
-    hst.make_banner(banner.format(cmd=' '.join(sys.argv)))
+    hst.command = ' '.join(sys.argv)
+    hst.make_banner(banner.format(cmd=hst.command))
 
     # If we're cleaning up a previous run, execute that here then exit
     if hst.options['args'].makeclean:
@@ -2589,6 +2845,14 @@ if __name__ == '__main__':
 
     # Check which are HST images that need to be reduced
     hst.make_banner('Checking which images need to be reduced')
+
+    # If only wide-band, modify acceptable_filters to filters that end with
+    # W, X, or LP
+    if hst.options['args'].onlywide:
+        hst.options['acceptable_filters'] = [filt for filt in
+            hst.options['acceptable_filters'] if (filt.upper().endswith('X')
+                or filt.upper().endswith('W') or filt.upper().endswith('LP'))]
+
     for file in list(hst.input_images):
         warning, needs_reduce = hst.needs_to_be_reduced(file)
         if not needs_reduce:
@@ -2740,12 +3004,13 @@ if __name__ == '__main__':
     # Always re-calculate reference sky image as sanitizing the image can mess
     # up the properties of the reference image (don't want to re-use old one)
     if os.path.exists(hst.options['args'].reference):
-        message = 'Running calcsky for reference image: {ref}'
-        print(message.format(ref=hst.options['args'].reference))
         # Make sure reference is sanitized first
         hst.sanitize_reference(hst.options['args'].reference)
-        hst.calc_sky(hst.options['args'].reference,
-            hst.options['detector_defaults'])
+        if hst.needs_to_calc_sky(hst.options['args'].reference, check_wcs=True):
+            message = 'Running calcsky for reference image: {ref}'
+            print(message.format(ref=hst.options['args'].reference))
+            hst.calc_sky(hst.options['args'].reference,
+                hst.options['detector_defaults'])
 
     # Write out a list of the input images with metadata for easy reference
     if len(hst.input_images)>0:
@@ -2922,10 +3187,13 @@ if __name__ == '__main__':
         if (os.path.exists(hst.dolphot['colfile']) and
             os.path.exists(hst.dolphot['base']) and
             os.stat(hst.dolphot['base']).st_size>0):
+
             phot = hst.scrapedolphot(hst.coord,
                 hst.options['args'].reference, hst.split_images, hst.dolphot,
-                scrapeall=hst.options['args'].scrapeall)
+                scrapeall=hst.options['args'].scrapeall, get_limits=True)
+
             hst.final_phot = phot
+
             if phot:
                 message = 'Printing out the final photometry for: {ra} {dec}\n'
                 message += 'There is photometry for {n} sources'
@@ -2934,6 +3202,7 @@ if __name__ == '__main__':
 
                 allphot = hst.options['args'].scrapeall
                 hst.print_final_phot(phot, hst.dolphot, allphot=allphot)
+
             else:
                 message = 'WARNING: did not find a source for: {ra} {dec}'
                 hst.make_banner(message.format(ra=ra, dec=dec))
@@ -2953,6 +3222,24 @@ if __name__ == '__main__':
             if os.path.isfile(image):
                 os.remove(image)
 
-    message = 'Finished with hst123.py {ra} {dec}\n'
+    if hst.options['args'].alert:
+        message = 'Sending alert about completed hst123.py script'
+        hst.make_banner(message)
+
+        alert = Table.read(hst.options['args'].alert, format='ascii')
+        files = glob.glob('dp.phot*')
+        files = sorted(files)
+
+        outfile = None
+        if len(files)>0: outfile = files[0]
+
+        if hst.sendEmail(alert, outfile=outfile):
+            message = 'Successfully sent email alert'
+        else:
+            message = 'Failed to send email alert'
+
+        hst.make_banner(message)
+
+    message = 'Finished with: {cmd}\n'
     message += 'It took {time} seconds to complete this script.'
-    hst.make_banner(message.format(ra=ra, dec=dec, time=time.time()-start))
+    hst.make_banner(message.format(cmd=hst.command, time=time.time()-start))
