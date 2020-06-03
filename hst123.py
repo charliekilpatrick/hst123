@@ -23,7 +23,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import stwcs
 import glob, sys, os, shutil, time, filecmp, astroquery, progressbar, copy
-import smtplib, datetime
+import smtplib, datetime, requests
 import astropy.wcs as wcs
 import numpy as np
 from contextlib import contextmanager
@@ -214,13 +214,16 @@ For reference, see the WFPC2, ACS, and WFC3 zero point pages:
 
 @contextmanager
 def suppress_stdout():
-    with open(os.devnull, "w") as devnull:
+    with open(os.devnull, 'w') as devnull:
         old_stdout = sys.stdout
+        old_stderr = sys.stderr
         sys.stdout = devnull
+        sys.stderr = devnull
         try:
             yield
         finally:
             sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 class hst123(object):
 
@@ -377,7 +380,8 @@ class hst123(object):
             astropy_cache = os.environ['HOME'] + astropath
             print('Clearing cache: {0}'.format(astropy_cache))
             if os.path.exists(astropy_cache):
-                clear_download_cache()
+                with suppress_stdout():
+                    clear_download_cache()
     except RuntimeError:
         warning = 'WARNING: Runtime Error in clear_download_cache().\n'
         warning += 'Passing...'
@@ -2580,7 +2584,8 @@ class hst123(object):
 
     try:
         obsTable = Observations.query_region(coord, radius=search_radius)
-    except astroquery.exceptions.RemoteServiceError:
+    except (astroquery.exceptions.RemoteServiceError,
+        requests.exceptions.ConnectionError):
         error = 'ERROR: MAST is not working currently working\n'
         error += 'Try again later...'
         print(error)
