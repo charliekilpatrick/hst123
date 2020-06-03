@@ -1340,10 +1340,17 @@ class hst123(object):
   # errors.  Default is 3-sigma limit.
   def estimate_mag_limit(self, mags, errs, limit=3.0):
 
+    warning = 'WARNING: cannot sample a wide enough range of magnitudes '
+    warning += 'to estimate a limit'
+
     # First bin signal-to-noise in magnitude, then extrapolate to get 3-sigma
-    mags = np.array(mags) ; errs = np.array(errs)
-    bin_mag = np.linspace(np.min(mags), np.max(mags), 100)
-    snr = np.zeros(100)
+    try:
+        mags = np.array(mags) ; errs = np.array(errs)
+        bin_mag = np.linspace(np.min(mags), np.max(mags), 100)
+        snr = np.zeros(100)
+    except ValueError:
+        print(warning)
+        return(np.nan)
 
     for i in np.arange(100):
         if i==99:
