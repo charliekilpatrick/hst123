@@ -1355,10 +1355,12 @@ class hst123(object):
     bin_mag = bin_mag[~mask]
     snr = snr[~mask]
 
-    snr_func = interpolate.interp1d(snr, bin_mag, fill_value='extrapolate',
-        bounds_error=False)
-
-    return(snr_func(limit))
+    if len(snr)>10:
+        snr_func = interpolate.interp1d(snr, bin_mag, fill_value='extrapolate',
+            bounds_error=False)
+        return(snr_func(limit))
+    else:
+        return(np.nan)
 
   # Sanitizes reference header, gets rid of multiple extensions and only
   # preserves science data.
