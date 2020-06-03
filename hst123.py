@@ -1282,7 +1282,8 @@ class hst123(object):
                         mjd, limmag, limerr, exp = self.calc_avg_stats(ftable,
                             data[1], cfile)
 
-                        if not np.isnan(limmag) and not np.isnan(limerr):
+                        if (not np.isnan(limmag) and not np.isnan(limerr)
+                            and limmag < 99):
                             mags.append(limmag)
                             errs.append(limerr)
 
@@ -2991,10 +2992,11 @@ if __name__ == '__main__':
         if hst.needs_to_calc_sky(split):
             hst.calc_sky(split, hst.options['detector_defaults'])
 
-    if not hst.options['args'].reference:
+    if (not hst.options['args'].reference or
+        not os.path.exists(hst.options['args'].reference)):
         # We got to this point from a warm start, but the reference image was
         # not identified.  In this case, try to guess which image is the ref
-        ref_pattern = '*.ref.drz.fits'
+        ref_pattern = '*.drz.fits'
         images = glob.glob(ref_pattern)
         if len(images)==0:
             error = 'ERROR: no reference image can be found!\n'
