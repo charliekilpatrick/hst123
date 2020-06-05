@@ -156,7 +156,7 @@ detector_defaults = {
                               'RPSF': 13, 'RSky': '15 35',
                               'RSky2': '4 10'}},
     'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'ny': 5200,
-                'input_files': '*_flt.fits', 'pixel_scale': 0.09,
+                'input_files': '*_flt.fits', 'pixel_scale': 0.064,
                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
                 'dolphot': {'apsky': '8 20', 'RAper': 2, 'RChi': 1.5,
@@ -1776,7 +1776,8 @@ class hst123(object):
 
     # First group images together by filter/instrument
     filts = [self.get_filter(im) for im in images]
-    insts = [self.get_instrument(im).split('_')[0] for im in images]
+    insts = [self.get_instrument(im).replace('_full','').replace('_sub','')
+        for im in images]
 
     # Group images together by unique instrument/filter pairs and then
     # calculate the total exposure time for all pairs.
@@ -1832,8 +1833,9 @@ class hst123(object):
     # Now get list of images with best_filt_inst.
     reference_images = []
     for im in images:
-        if (self.get_filter(im)+'_'+
-            self.get_instrument(im).split('_')[0] == best_filt_inst):
+        filt = self.get_filter(im)
+        inst = self.get_instrument(im).replace('_full','').replace('_sub','')
+        if (filt+'_'+inst == best_filt_inst):
             reference_images.append(im)
 
     return(reference_images)
@@ -1863,12 +1865,12 @@ class hst123(object):
         drizname = '{inst}.{filt}.ref.drz.fits'
         drizname = drizname.format(inst=best_inst, filt=best_filt)
 
-    message = 'Reference image name will be: {reference}. '
-    message += 'Generating from input files {files}.'
-    print(message.format(reference=drizname, files=reference_images))
+    message = 'Reference image name will be: {reference}.\n'
+    message += 'Generating from input files:\n\n'
+    print(message.format(reference=drizname))
     self.options['args'].reference=drizname
 
-    obstable = self.input_list(reference_images, show=False, save=False)
+    obstable = self.input_list(reference_images, show=True, save=False)
 
     self.run_tweakreg(obstable, '')
     self.run_astrodrizzle(obstable, output_name=drizname)
@@ -2464,8 +2466,6 @@ class hst123(object):
                             newline='#threshold={t}'.format(t=rthresh)
                             f.write(newline + '\n' + content)
 
-                tries += 1
-
             # Check that everything made it through tweakreg
             remaining = self.check_images_for_tweakreg(tmp_images)
 
@@ -2479,7 +2479,10 @@ class hst123(object):
                 error = 'ERROR: tweakreg did not align the images: {im}'
                 raise RuntimeError(error.format(im=','.join(tweak_img)))
 
+            tries += 1
+
         except AssertionError as e:
+            tries += 1
             self.tweakreg_error(e)
 
             message = 'Re-running tweakreg with shallow images removed:'
@@ -2490,6 +2493,7 @@ class hst123(object):
                     shallow_img.append(img)
 
         except (MemoryError, TypeError, UnboundLocalError, RuntimeError) as e:
+            tries += 1
             self.tweakreg_error(e)
 
     message = 'Tweakreg took {time} seconds to execute.\n\n'
