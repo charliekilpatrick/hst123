@@ -3,7 +3,7 @@
 """
 By C. D. Kilpatrick 2019-02-07
 
-v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
+v1.00: 2019-02-07. Base hst123 downloa d, tweakreg, drizzle, dolphot param
 v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
 v1.02: 2019-02-22. Added fake star injection
 v1.03: 2019-06-02. Added drizzleall options and cleaned up options/syntax
@@ -23,7 +23,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import stwcs
 import glob, sys, os, shutil, time, filecmp, astroquery, progressbar, copy
-import smtplib, datetime, requests
+import smtplib, datetime, requests, random
 import astropy.wcs as wcs
 import numpy as np
 from contextlib import contextmanager
@@ -367,6 +367,8 @@ class hst123(object):
         help='Skip cuts to dolphot output file.')
     parser.add_argument('--onlywide', default=False, action='store_true',
         help='Only reduce wide-band filters.')
+    parser.add_argument('--sort_brightest', default=False, action='store_true',
+        help='Sort output source files by signal-to-noise in reference image.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -943,6 +945,12 @@ class hst123(object):
         return(None)
     else:
         data = sorted(data, key=lambda obj: obj[0])
+        if self.options['args'].sort_brightest:
+            sn=[self.get_dolphot_data(dat[0], colfile, 'Signal-to-noise',
+                '', avoid=',') for dat in data]
+            all_data = list(zip(data, sn))
+            all_data = sorted(all_data, key=lambda obj: obj[1])
+            data = [a[0] for a in all_data]
         if not scrapeall:
             warning = 'WARNING: found more than one source. '
             warning += 'Picking object closest to: {ra} {dec}'
@@ -972,7 +980,6 @@ class hst123(object):
 
                         limit_data = self.get_limit_data(dolphot, coord, w, x,
                             y, colfile, limit_radius)
-
 
         source_phot.meta['separation'] = dat[0]
         source_phot.meta['magsystem']=self.magsystem
@@ -1543,8 +1550,10 @@ class hst123(object):
     # types and images whose extensions don't match the allowed type for those
     # instrument/detector types
     is_not_hst_image = False
-    warning = 'WARNING: {img} with INSTRUME={inst}, DETECTOR={det} is bad.'
-    if (instrument.upper() == 'WFPC2' and 'c0m.fits' in image):
+    warning = 'WARNING: {img} with INSTRUME={inst}, DETECTOR={det}, '
+    warning += 'NEXTEND={N} is bad.'
+    nextend = hdu[0].header['NEXTEND']
+    if (instrument.upper() == 'WFPC2' and 'c0m.fits' in image and nextend==4):
         is_not_hst_image = True
     if (instrument.upper() == 'ACS' and
         detector.upper() == 'WFC' and 'flc.fits' in image):
@@ -1562,8 +1571,8 @@ class hst123(object):
         if (instrument.upper() == 'WFPC2' and 'c1m.fits' in image):
             is_not_hst_image = True
 
-    return(warning.format(img=image, inst=instrument, det=detector),
-        is_not_hst_image)
+    return(warning.format(img=image, inst=instrument, det=detector,
+        N=nextend), is_not_hst_image)
 
   def needs_to_split_groups(self,image):
     return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
@@ -1881,6 +1890,9 @@ class hst123(object):
     ref = ref_url.strip('.old')
 
     for i,h in enumerate(hdu):
+        for key in hdu[i].header.keys():
+            if 'WCSNAME' in key:
+                hdu[i].header[key] = hdu[i].header[key].strip()
         for key in change_keys:
             if key in list(hdu[i].header.keys()):
                 val = hdu[i].header[key]
@@ -1915,10 +1927,11 @@ class hst123(object):
             print(message.format(im=image, i=i, key=key, val=ref_file))
             hdu[i].header[key] = ref_file
 
+    hdu.writeto(image, overwrite=True, output_verify='silentfix')
     hdu.close()
 
   # Update image wcs using updatewcs routine
-  def update_image_wcs(self, image, options):
+  def update_image_wcs(self, image, options, use_db=True):
 
     message = 'Updating WCS for {file}'
     print(message.format(file=image))
@@ -1933,7 +1946,7 @@ class hst123(object):
 
     # Usually if updatewcs fails, that means it's already been done
     try:
-        updatewcs.updatewcs(image)
+        updatewcs.updatewcs(image, use_db=use_db)
         hdu = fits.open(image, mode='update')
         message = '\n\nupdatewcs success.  File info:'
         print(message)
@@ -1978,6 +1991,12 @@ class hst123(object):
         # Copy the raw data into a temporary file
         shutil.copyfile(image, tmp)
         tmp_input.append(tmp)
+
+    if self.updatewcs:
+        for image in tmp_input:
+            det = '_'.join(self.get_instrument(image).split('_')[:2])
+            wcsoptions = self.options['detector_defaults'][det]
+            self.update_image_wcs(image, wcsoptions, use_db=False)
 
     ra = self.coord.ra.degree if self.coord else None
     dec = self.coord.dec.degree if self.coord else None
@@ -2191,7 +2210,12 @@ class hst123(object):
   # Check each image in the list to see if tweakreg has been run
   def check_images_for_tweakreg(self, run_images):
 
-    for file in list(run_images):
+    if not run_images:
+        return(None)
+
+    images = copy.copy(run_images)
+
+    for file in list(images):
         print('Checking {0} for WCSNAME=TWEAK'.format(file))
         hdu = fits.open(file, mode='readonly')
         remove_image = False
@@ -2203,13 +2227,13 @@ class hst123(object):
                         remove_image = True
 
         if remove_image:
-            run_images.remove(file)
+            images.remove(file)
 
     # If run_images is now empty, return None instead
-    if len(run_images)==0:
+    if len(images)==0:
         return(None)
 
-    return(run_images)
+    return(images)
 
   # Returns the number of sources detected in an image at the thresh value
   def get_nsources(self, image, thresh):
@@ -2313,32 +2337,30 @@ class hst123(object):
 
     # Get options from object
     options = self.options['global_defaults']
-
-    # Make a copy of the input image list
-    run_images = list(obstable['image'])
-
     # Check if tweakreg has already been run on each image
-    run_images = self.check_images_for_tweakreg(run_images)
+    run_images = self.check_images_for_tweakreg(list(obstable['image']))
 
     # Check if we just removed all of the images
-    if run_images is None:
+    if not run_images:
         warning = 'WARNING: All images have been run through tweakreg.'
         print(warning)
         return(True)
 
-    print('Need to run tweakreg for images:',','.join(run_images))
+    print('Need to run tweakreg for images:')
+    self.input_list(obstable['image'], show=True, save=False)
 
     tmp_images = []
     for image in run_images:
+        if self.updatewcs:
+            det = '_'.join(self.get_instrument(image).split('_')[:2])
+            wcsoptions = self.options['detector_defaults'][det]
+            self.update_image_wcs(image, wcsoptions)
+
         # wfc3_ir doesn't need cosmic clean and assume reference is cleaned
         if (image == reference or 'wfc3_ir' in self.get_instrument(image)):
             message = 'Skipping adjustments for {file} as WFC3/IR or reference'
             print(message.format(file=image))
             tmp_images.append(image)
-            if self.updatewcs:
-                det = '_'.join(self.get_instrument(image).split('_')[:2])
-                wcsoptions = self.options['detector_defaults'][det]
-                self.update_image_wcs(image, wcsoptions)
             continue
 
         rawtmp = image.replace('.fits','rawtmp.fits')
@@ -2353,8 +2375,7 @@ class hst123(object):
         # Copy the raw data into a temporary file
         shutil.copyfile(image, rawtmp)
 
-        # Clean cosmic rays on the image in place. We do this so we don't
-        # accidentally pick cosmic rays for alignment
+        # Clean cosmic rays so they aren't used for alignment
         inst = self.get_instrument(image).split('_')[0]
         crpars = self.options['instrument_defaults'][inst]['crpars']
         self.run_cosmic(rawtmp, crpars)
@@ -2384,57 +2405,68 @@ class hst123(object):
     tries = 0
 
     while (not tweakreg_success and tries < 7):
-        try:
-            tweak_img = self.check_images_for_tweakreg(tweak_img)
-            if tweak_img:
-                # Remove images from tweak_img if they are too shallow
-                if shallow_img:
-                    for img in shallow_img:
-                        if img in tweak_img:
-                            tweak_img.remove(img)
+        tweak_img = self.check_images_for_tweakreg(tweak_img)
+        if not tweak_img: break
+        if tweak_img:
+            # Remove images from tweak_img if they are too shallow
+            if shallow_img:
+                for img in shallow_img:
+                    if img in tweak_img:
+                        tweak_img.remove(img)
 
-                if len(tweak_img)==0:
-                    shallow_img = []
-                    error = 'ERROR: removed all images as shallow'
-                    raise RuntimeError(error)
+            if len(tweak_img)==0:
+                error = 'ERROR: removed all images as shallow'
+                print(error)
+                tweak_img = copy.copy(tmp_images)
+                tweak_img = self.check_images_for_tweakreg(tweak_img)
 
-                # This estimates what the input threshold should be and cuts
-                # out images based on number of detected sources from previous
-                # rounds of tweakreg
-                message = '\n\nReference image: {ref} \n'
-                message += 'Images: {im}'
-                print(message.format(ref=reference, im=','.join(tweak_img)))
+            # If we've tried multiple runs and there are images in input
+            # list with TWEAK and reference image=dummy.fits, we might need
+            # to try a different reference image
+            success = list(set(tmp_images) ^ set(tweak_img))
+            if tries > 1 and reference=='dummy.fits' and len(success)>0:
+                # Make random success image new dummy image
+                n = len(success)-1
+                shutil.copyfile(success[random.randint(0,n)],'dummy.fits')
 
-                thresholds = np.array([self.get_tweakreg_thresholds(im, ithresh,
-                    runcat=False) for im in tweak_img])
-                thresholds = [t for t in thresholds if t is not None]
+            # This estimates what the input threshold should be and cuts
+            # out images based on number of detected sources from previous
+            # rounds of tweakreg
+            message = '\n\nReference image: {ref} \n'
+            message += 'Images: {im}'
+            print(message.format(ref=reference, im=','.join(tweak_img)))
 
-                if thresholds:
-                    ithresh = np.max(thresholds)
-                else:
-                    deepest = self.pick_deepest_images(tweak_img)
-                    deepimg = sorted(deepest,
-                        key=lambda im: fits.getval(im, 'EXPTIME'))[-1]
-                    ithresh = self.get_tweakreg_thresholds(deepimg, ithresh)
+            thresholds = np.array([self.get_tweakreg_thresholds(im, ithresh,
+                runcat=False) for im in tweak_img])
+            thresholds = [t for t in thresholds if t is not None]
 
-                rthresh = self.get_tweakreg_thresholds(reference, rthresh)
+            if thresholds:
+                ithresh = np.max(thresholds)
+            else:
+                deepest = self.pick_deepest_images(tweak_img)
+                deepimg = sorted(deepest,
+                    key=lambda im: fits.getval(im, 'EXPTIME'))[-1]
+                ithresh = self.get_tweakreg_thresholds(deepimg, ithresh)
 
-                # Other input options
-                nbright = options['nbright']
-                minobj = options['minobj']
-                search_rad = int(np.round(options['search_rad']))
+            rthresh = self.get_tweakreg_thresholds(reference, rthresh)
 
-                message = '\nAdjusting thresholds:\n'
-                message += 'Reference threshold={rthresh}\n'
-                message += 'Image threshold={ithresh}\n'
-                print(message.format(ithresh=ithresh, rthresh=rthresh))
+            # Other input options
+            nbright = options['nbright']
+            minobj = options['minobj']
+            search_rad = int(np.round(options['search_rad']))
 
-                rconv = 3.5 ; iconv = 3.5 ; tol = 0.5
-                if 'wfc3_ir' in self.get_instrument(reference):
-                    rconv = 2.5
-                if all(['wfc3_ir' in self.get_instrument(i)
-                    for i in tweak_img]): iconv = 2.5 ; tol = 1.2
+            message = '\nAdjusting thresholds:\n'
+            message += 'Reference threshold={rthresh}\n'
+            message += 'Image threshold={ithresh}\n'
+            print(message.format(ithresh=ithresh, rthresh=rthresh))
 
+            rconv = 3.5 ; iconv = 3.5 ; tol = 0.5
+            if 'wfc3_ir' in self.get_instrument(reference):
+                rconv = 2.5
+            if all(['wfc3_ir' in self.get_instrument(i)
+                for i in tweak_img]): iconv = 2.5 ; tol = 1.2
+
+            try:
                 tweakreg.TweakReg(files=tweak_img, refimage=reference,
                     verbose=False, interactive=False, clean=True,
                     writecat=True, updatehdr=True, reusename=True,
@@ -2466,35 +2498,35 @@ class hst123(object):
                             newline='#threshold={t}'.format(t=rthresh)
                             f.write(newline + '\n' + content)
 
-            # Check that everything made it through tweakreg
-            remaining = self.check_images_for_tweakreg(tmp_images)
+                # Check that everything made it through tweakreg
+                remaining = self.check_images_for_tweakreg(tmp_images)
 
-            # Reset shallow_img list
-            shallow_img = []
+                # Reset shallow_img list
+                shallow_img = []
 
-            if not remaining:
-                tweakreg_success = True
-            else:
-                tweak_img = copy.copy(remaining)
-                error = 'ERROR: tweakreg did not align the images: {im}'
-                raise RuntimeError(error.format(im=','.join(tweak_img)))
+                if not remaining:
+                    tweakreg_success = True
+                else:
+                    tweak_img = copy.copy(remaining)
+                    error = 'ERROR: tweakreg did not align the images: {im}'
+                    raise RuntimeError(error.format(im=','.join(tweak_img)))
 
-            tries += 1
+                tries += 1
 
-        except AssertionError as e:
-            tries += 1
-            self.tweakreg_error(e)
+            except AssertionError as e:
+                tries += 1
+                self.tweakreg_error(e)
 
-            message = 'Re-running tweakreg with shallow images removed:'
-            print(message)
-            for img in tweak_img:
-                nsources = self.get_nsources(img, ithresh)
-                if nsources < 1000:
-                    shallow_img.append(img)
+                message = 'Re-running tweakreg with shallow images removed:'
+                print(message)
+                for img in tweak_img:
+                    nsources = self.get_nsources(img, ithresh)
+                    if nsources < 1000:
+                        shallow_img.append(img)
 
-        except (MemoryError, TypeError, UnboundLocalError, RuntimeError) as e:
-            tries += 1
-            self.tweakreg_error(e)
+            except (MemoryError,TypeError,UnboundLocalError,RuntimeError) as e:
+                tries += 1
+                self.tweakreg_error(e)
 
     message = 'Tweakreg took {time} seconds to execute.\n\n'
     print(message.format(time = time.time()-start_tweak))
