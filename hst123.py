@@ -154,14 +154,16 @@ detector_defaults = {
                                   'sigma_low': 2.25, 'sigma_high': 2.00},
                   'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2.0,
                               'RPSF': 13, 'RSky': '15 35',
-                              'RSky2': '4 10'}},
+                              'RSky2': '4 10'},
+                   'idcscale': 0.03962000086903572},
     'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flt.fits', 'pixel_scale': 0.064,
                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
                 'dolphot': {'apsky': '8 20', 'RAper': 2, 'RChi': 1.5,
                             'RPSF': 15, 'RSky': '8 20',
-                            'RSky2': '3 10'}},
+                            'RSky2': '3 10'},
+                   'idcscale': 0.1282500028610229},
     'acs_wfc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
@@ -263,6 +265,9 @@ class hst123(object):
     # S/N limit for calculating limiting magnitude
     self.snr_limit = 3.0
 
+    # Limit for large reduction to quit if input list size is large
+    self.large_reduction = 300
+
     self.dolphot = {}
 
     # Names for input image table
@@ -292,6 +297,8 @@ class hst123(object):
                               '*d2im.fits', '*d2i.fits', '*npl.fits',
                               'dp*', '*.log', '*.output','*sci?.fits',
                               '*wht.fits','*sci.fits','*StaticMask.fits']
+
+    self.pipeline_images = ['*flc.fits','*flt.fits','*c0m.fits','*c1m.fits']
 
   def add_options(self, parser=None, usage=None):
     import argparse
@@ -369,6 +376,8 @@ class hst123(object):
         help='Only reduce wide-band filters.')
     parser.add_argument('--sort_brightest', default=False, action='store_true',
         help='Sort output source files by signal-to-noise in reference image.')
+    parser.add_argument('--no_large_reduction', default=False,
+        action='store_true', help='Exit if input list is >300 images.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1884,6 +1893,19 @@ class hst123(object):
     self.run_tweakreg(obstable, '')
     self.run_astrodrizzle(obstable, output_name=drizname)
 
+  def fix_idcscale(self, image):
+
+    det = '_'.join(self.get_instrument(image).split('_')[:2])
+
+    if 'wfc3' in det:
+        hdu = fits.open(image)
+        idcscale = self.options['detector_defaults'][det]['idcscale']
+        for i,h in enumerate(hdu):
+            if 'IDCSCALE' not in hdu[i].header.keys():
+                hdu[i].header['IDCSCALE']=idcscale
+
+        hdu.writeto(image, overwrite=True, output_verify='silentfix')
+
   def fix_hdu_wcs_keys(self, image, change_keys, ref_url):
 
     hdu = fits.open(image, mode='update')
@@ -1923,7 +1945,7 @@ class hst123(object):
                     sys.stdout.write(message.format(url=url))
                     print(message.format(url=url))
 
-            message = 'Settings {im},{i} {key}={val}'
+            message = 'Setting {im},{i} {key}={val}'
             print(message.format(im=image, i=i, key=key, val=ref_file))
             hdu[i].header[key] = ref_file
 
@@ -1953,6 +1975,7 @@ class hst123(object):
         hdu.info()
         hdu.close()
         self.fix_hdu_wcs_keys(image, change_keys, ref_url)
+        self.fix_idcscale(image)
         return(True)
     except:
         error = 'ERROR: failed to update WCS for image {file}'
@@ -2260,10 +2283,23 @@ class hst123(object):
 
     return(nsources)
 
+  def count_nsources(self, image):
+    cat_str = '_sci*_xy_catalog.coo'
+    # Tag cat files with the threshold so we can reference it later
+    n = 0
+    for image in images:
+        for catalog in glob.glob(image.replace('.fits',cat_str)):
+            with open(catalog, 'r+') as f:
+                for line in f:
+                    if 'threshold' not in line:
+                        n += 1
+
+    return(n)
+
   # Given an input image, look for a matching catalog and estimate what the
   # threshold should be for this image.  If no catalog exists, generate one
   # on the fly and estimate threshold
-  def get_tweakreg_thresholds(self, image, thresh, runcat=True):
+  def get_tweakreg_thresholds(self, image, thresh, runcat=True, inp_data=[]):
 
     # Analyze the input images
     cat_str = '_sci*_xy_catalog.coo'
@@ -2295,8 +2331,21 @@ class hst123(object):
         else:
             return(None)
 
+    def thresh_func(x, p):
+        threshold = (x/p[0])**p[1]
+        return(threshold)
+
     # Scale threshold to the image with the largest number of objects
-    threshold = thresh * (data['nobjects']/8000.)**0.6
+    if len(inp_data)<2:
+        threshold = thresh * thresh_func(data['nobjects'],(8000,0.4))
+    else:
+        try:
+            popt, pcov = curve_fit(thresh_func, [d[0] for d in inp_data],
+                [d[1] for d in inp_data], p0=(8000, 0.4))
+            threshold = thresh_func(8000, *popt)
+            return(threshold)
+        except:
+            threshold = thresh * thresh_func(data['nobjects'],(8000,0.6))
 
     # Set minimum and maximum threshold
     if threshold<3.0: threshold=3.0
@@ -2331,6 +2380,18 @@ class hst123(object):
     message += '#'*80 + '\n'
     message += 'Adjusting thresholds and images...'
     print(message.format(e=exception.__class__.__name__))
+
+  def add_thresholds(self, images, thresh):
+    cat_str = '_sci*_xy_catalog.coo'
+    # Tag cat files with the threshold so we can reference it later
+    for image in images:
+        for catalog in glob.glob(image.replace('.fits',cat_str)):
+            with open(catalog, 'r+') as f:
+                line = f.readline()
+                if 'threshold' not in line:
+                    f.seek(0,0) ; content = f.read() ; f.seek(0, 0)
+                    newline='#threshold={t}'.format(t=thresh)
+                    f.write(newline + '\n' + content)
 
   # Run tweakreg on all input images
   def run_tweakreg(self, obstable, reference):
@@ -2479,42 +2540,10 @@ class hst123(object):
                     refimagefindcfg = {'threshold': rthresh,
                         'conv_width': rconv, 'use_sharp_round': True})
 
-                cat_str = '_sci*_xy_catalog.coo'
-                # Tag cat files with the threshold so we can reference it later
-                for image in tweak_img:
-                    for catalog in glob.glob(image.replace('.fits',cat_str)):
-                        with open(catalog, 'r+') as f:
-                            line = f.readline()
-                            if 'threshold' not in line:
-                                f.seek(0,0) ; content = f.read() ; f.seek(0, 0)
-                                newline='#threshold={t}'.format(t=ithresh)
-                                f.write(newline + '\n' + content)
-
-                for catalog in glob.glob(reference.replace('.fits',cat_str)):
-                    with open(catalog, 'r+') as f:
-                        line = f.readline()
-                        if 'threshold' not in line:
-                            f.seek(0,0) ; content = f.read() ; f.seek(0, 0)
-                            newline='#threshold={t}'.format(t=rthresh)
-                            f.write(newline + '\n' + content)
-
-                # Check that everything made it through tweakreg
-                remaining = self.check_images_for_tweakreg(tmp_images)
-
                 # Reset shallow_img list
                 shallow_img = []
 
-                if not remaining:
-                    tweakreg_success = True
-                else:
-                    tweak_img = copy.copy(remaining)
-                    error = 'ERROR: tweakreg did not align the images: {im}'
-                    raise RuntimeError(error.format(im=','.join(tweak_img)))
-
-                tries += 1
-
             except AssertionError as e:
-                tries += 1
                 self.tweakreg_error(e)
 
                 message = 'Re-running tweakreg with shallow images removed:'
@@ -2525,8 +2554,16 @@ class hst123(object):
                         shallow_img.append(img)
 
             except (MemoryError,TypeError,UnboundLocalError,RuntimeError) as e:
-                tries += 1
                 self.tweakreg_error(e)
+
+            self.add_thresholds(tweak_img, ithresh)
+            self.add_thresholds([reference], rthresh)
+
+            # Check that everything made it through tweakreg
+            if not self.check_images_for_tweakreg(tmp_images):
+                tweakreg_success = True
+
+            tries += 1
 
     message = 'Tweakreg took {time} seconds to execute.\n\n'
     print(message.format(time = time.time()-start_tweak))
@@ -2917,6 +2954,18 @@ if __name__ == '__main__':
             warning += 'does not have an acceptable filter.'
             print(warning.format(img=file, filt=filt))
             hst.input_images.remove(file)
+
+    if hst.options['args'].no_large_reduction:
+        if len(hst.input_images)>hst.large_reduction:
+            error = 'ERROR: exiting because --no_large_reduction and input list'
+            error += ' size={n}>{m}'
+            print(error.format(n=len(hst.input_images), m=hst.large_reduction))
+
+            # Clean up any files in directory
+            for pattern in self.pipeline_products+self.pipeline_images:
+                for file in glob.glob(pattern):
+                    if os.path.isfile(file):
+                        os.remove(file)
 
     # Check there are still images that need to be reduced
     if len(hst.input_images)>0:
