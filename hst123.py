@@ -378,6 +378,8 @@ class hst123(object):
         help='Sort output source files by signal-to-noise in reference image.')
     parser.add_argument('--no_large_reduction', default=False,
         action='store_true', help='Exit if input list is >300 images.')
+    parser.add_argument('--combine_type', default=None, type=str,
+        help='Override astrodrizzle combine_type with input.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1995,6 +1997,9 @@ class hst123(object):
     else:
         combine_type = 'median'
 
+    if self.options['args'].combine_type:
+        combine_type = self.options['args'].combine_type
+
     wcskey = 'TWEAK'
 
     inst = list(set(obstable['instrument']))
@@ -2037,6 +2042,9 @@ class hst123(object):
     if len(tmp_input)==1:
         shutil.copy(tmp_input[0], 'dummy.fits')
         tmp_input.append('dummy.fits')
+
+    print('Need to run astrodrizzle for images:')
+    self.input_list(obstable['image'], show=True, save=False)
 
     start_drizzle = time.time()
 
