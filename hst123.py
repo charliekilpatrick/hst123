@@ -380,6 +380,17 @@ class hst123(object):
         action='store_true', help='Exit if input list is >300 images.')
     parser.add_argument('--combine_type', default=None, type=str,
         help='Override astrodrizzle combine_type with input.')
+    parser.add_argument('--sky_sub', default=False, action='store_true',
+        help='Use sky subtraction in astrodrizzle.')
+    parser.add_argument('--wht_type', default='EXP', type=str,
+        help='final_wht_type parameter for astrodrizzle.')
+    parser.add_argument('--drizadd', default=None, type=str,
+        help='Comma-separated list of images to add to the drizzled reference'+\
+        ' image.  Use this to inject data from other instruments, filters, '+\
+        'etc. if they would not be selected by pick_best_reference.')
+    parser.add_argument('--drizmask', default=None, type=str,
+        help='Mask out pixels in a box around input mask coordinate in '+\
+        'drizzled images but outside box in images from drizadd.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1890,6 +1901,12 @@ class hst123(object):
     print(message.format(reference=drizname))
     self.options['args'].reference=drizname
 
+    if self.options['args'].drizadd:
+        add_images = list(str(self.options['args'].drizadd).split(','))
+        for image in add_images:
+            if os.path.exists(image) and image not in reference_images:
+                reference_images.append(image)
+
     obstable = self.input_list(reference_images, show=True, save=False)
 
     self.run_tweakreg(obstable, '')
@@ -1985,17 +2002,21 @@ class hst123(object):
         return(None)
 
   # Run the drizzlepac astrodrizzle routine using detector parameters.
-  def run_astrodrizzle(self, obstable, output_name = None):
+  def run_astrodrizzle(self, obstable, output_name = None, ra=None, dec=None):
 
     print('Starting astrodrizzle')
+
+    n = len(obstable)
 
     if output_name is None:
         output_name = 'drizzled.fits'
 
-    if len(obstable) < 7:
+    if n < 7:
         combine_type = 'minmed'
+        combine_nhigh = 0
     else:
         combine_type = 'median'
+        combine_nhigh = np.max(int((n-4)/2), 0)
 
     if self.options['args'].combine_type:
         combine_type = self.options['args'].combine_type
@@ -2005,7 +2026,7 @@ class hst123(object):
     inst = list(set(obstable['instrument']))
     det = '_'.join(self.get_instrument(obstable[0]['image']).split('_')[:2])
     options = self.options['detector_defaults'][det]
-    if len(inst) > 1:
+    if len(inst) > 1 and not self.options['args'].drizadd:
         error = 'ERROR: Cannot drizzle together images from detectors: {det}.'
         error += 'Exiting...'
         print(error.format(det=','.join(map(str,inst))))
@@ -2026,10 +2047,11 @@ class hst123(object):
             wcsoptions = self.options['detector_defaults'][det]
             self.update_image_wcs(image, wcsoptions, use_db=False)
 
-    ra = self.coord.ra.degree if self.coord else None
-    dec = self.coord.dec.degree if self.coord else None
+    if not ra or not dec:
+        ra = self.coord.ra.degree if self.coord else None
+        dec = self.coord.dec.degree if self.coord else None
 
-    if self.options['args'].keepshort:
+    if self.options['args'].keepshort and not self.options['args'].sky_sub:
         skysub = False
     else:
         skysub = True
@@ -2039,12 +2061,70 @@ class hst123(object):
     else:
         pixscale = options['pixel_scale']
 
+    wht_type = self.options['args'].wht_type
+
+    clean = not self.options['args'].nocleanup
+
     if len(tmp_input)==1:
         shutil.copy(tmp_input[0], 'dummy.fits')
         tmp_input.append('dummy.fits')
 
     print('Need to run astrodrizzle for images:')
     self.input_list(obstable['image'], show=True, save=False)
+
+    # If drizmask, then edit tmp_input masks for everything except for drizadd
+    # files
+    if self.options['args'].drizmask and self.options['args'].drizadd:
+        add_im_base = [im.split('.')[0]
+            for im in self.options['args'].drizadd.split(',')]
+
+        if ',' in self.options['args'].drizmask:
+            ramask, decmask = self.options['args'].drizmask.split(',')
+        else:
+            ramask, decmask = self.options['args'].drizmask.split()
+        maskcoord = self.parse_coord(ramask, decmask)
+
+        for image in tmp_input:
+            imhdu = fits.open(image)
+            added = any([base in image for base in add_im_base])
+
+            for i,h in enumerate(imhdu):
+                if not h.name=='DQ':
+                    continue
+
+                w = wcs.WCS(h.header)
+                y,x = wcs.utils.skycoord_to_pixel(maskcoord, w, origin=1)
+
+                size=200
+                naxis1,naxis2 = h.data.shape
+
+                outside_im = False
+                if ((x+size < 0 or x-size > naxis1-1 or
+                    y+size < 0 or y-size > naxis2-1)):
+                    if not added:
+                        continue
+                    else:
+                        outside_im = True
+
+                xmin = int(np.max([x-size, 0]))
+                ymin = int(np.max([y-size, 0]))
+                xmax = int(np.min([x+size, naxis2-1]))
+                ymax = int(np.min([y+size, naxis1-1]))
+
+                imhdu[i].data[xmin:xmax, ymin:ymax]
+
+                if any([base in image for base in add_im_base]):
+                    print('Making outside drizmask:',image)
+                    if outside_im: imhdu[i].data[:,:]=128
+                    else:
+                        data = copy.copy(imhdu[i].data[xmin:xmax,ymin:ymax])
+                        imhdu[i].data[:,:]=128
+                        imhdu[i].data[xmin:xmax,ymin:ymax]=data
+                else:
+                    print('Making inside drizmask:',image)
+                    imhdu[i].data[xmin:xmax,ymin:ymax]=128
+
+            imhdu.writeto(image, overwrite=True, output_verify='silentfix')
 
     start_drizzle = time.time()
 
@@ -2053,21 +2133,23 @@ class hst123(object):
         try:
             astrodrizzle.AstroDrizzle(tmp_input, output=output_name, runfile='',
                 wcskey=wcskey, context=True, group='', build=False,
-                num_cores=8, preserve=False, clean=True, skysub=skysub,
+                num_cores=8, preserve=False, clean=clean, skysub=skysub,
+                skymethod='globalmin+match',
                 skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
                 driz_sep_fillval=-50000, driz_sep_bits=0, driz_sep_wcs=True,
                 driz_sep_rot=0.0, driz_sep_scale=None,
                 driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
                 driz_sep_ra=ra, driz_sep_dec=dec,
                 combine_maskpt=0.2, combine_type=combine_type,
-                combine_nlow=0, combine_nhigh=0, combine_lthresh=-10000,
-                combine_hthresh=None, combine_nsigma='4 3',
+                combine_nlow=0, combine_nhigh=combine_nhigh,
+                combine_lthresh=-10000, combine_hthresh=None,
+                combine_nsigma='4 3',
                 driz_cr=True, driz_cr_snr='3.5 3.0', driz_cr_grow=1,
                 driz_cr_ctegrow=0, driz_cr_scale='1.2 0.7',
                 final_pixfrac=1.0, final_fillval=-50000,
                 final_bits=options['driz_bits'], final_units='counts',
                 final_wcs=True, final_refimage=None,
-                final_rot=0.0, final_scale=pixscale,
+                final_rot=0.0, final_scale=pixscale, final_wht_type=wht_type,
                 final_outnx=options['nx'], final_outny=options['ny'],
                 final_ra=ra, final_dec=dec)
             break
@@ -2335,7 +2417,10 @@ class hst123(object):
 
     else:
         if runcat:
-            data['nobjects'] = self.get_nsources(image, thresh)
+            try:
+                data['nobjects'] = self.get_nsources(image, thresh)
+            except:
+                return(None)
         else:
             return(None)
 
@@ -3050,9 +3135,20 @@ if __name__ == '__main__':
                         drizname = drizname.format(inst=inst, filt=filt, n=n,
                             date=date_str)
 
+                    # RA/Dec can be different from input.  Grab from ref image
+                    ref_ra = ra ; ref_dec = dec
+                    if (hst.options['args'].reference and
+                        os.path.exists(hst.options['args'].reference)):
+
+                        hdu = fits.open(hst.options['args'].reference)
+                        ref_ra = hdu[0].header['CRVAL1']
+                        ref_dec = hdu[0].header['CRVAL2']
+                        hdu.close()
+
                     message = 'Constructing drizzled image: {im}'
                     print(message.format(im=drizname))
-                    hst.run_astrodrizzle(driztable, output_name=drizname)
+                    hst.run_astrodrizzle(driztable, output_name=drizname,
+                        ra=ref_ra, dec=ref_dec)
                     hst.sanitize_reference(drizname)
 
                     # Make a sky file for the drizzled image and rename 'noise'
