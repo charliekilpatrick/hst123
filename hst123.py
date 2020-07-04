@@ -266,7 +266,7 @@ class hst123(object):
     self.snr_limit = 3.0
 
     # Limit for large reduction to quit if input list size is large
-    self.large_reduction = 300
+    self.large_reduction = 200
 
     self.dolphot = {}
 
@@ -2126,6 +2126,24 @@ class hst123(object):
 
             imhdu.writeto(image, overwrite=True, output_verify='silentfix')
 
+    # Check for TWEAK key in hdu.  If WCSNAME in header but not TWEAK
+    # then rename WCSNAME to TWEAK
+    for image in tmp_input:
+        imhdu = fits.open(image)
+        for i,h in enumerate(imhdu):
+            head = h.header
+            tweak = False ; wcsname = False
+            print('Checking for tweak keys in header...')
+            for key in head.keys():
+                if 'WCSNAME' in key: wcsname = True
+                if 'WCSNAME' in key and head[key].strip()=='TWEAK': tweak = True
+
+            if wcsname and not tweak:
+                # Rename 'WCSNAME' to 'TWEAK' in rawhdu
+                imhdu[i].header['WCSNAME']='TWEAK'
+
+        imhdu.writeto(image, overwrite=True, output_verify='silentfix')
+
     start_drizzle = time.time()
 
     tries = 0
@@ -2662,6 +2680,7 @@ class hst123(object):
     print(message.format(time = time.time()-start_tweak))
 
     for image in run_images:
+        # Copy image over now to perform other image header updates
         if (image == reference or 'wfc3_ir' in self.get_instrument(image)):
             continue
 
