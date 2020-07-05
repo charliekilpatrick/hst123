@@ -3074,7 +3074,7 @@ if __name__ == '__main__':
             print(error.format(n=len(hst.input_images), m=hst.large_reduction))
 
             # Clean up any files in directory
-            for pattern in self.pipeline_products+self.pipeline_images:
+            for pattern in hst.pipeline_products+hst.pipeline_images:
                 for file in glob.glob(pattern):
                     if os.path.isfile(file):
                         os.remove(file)
