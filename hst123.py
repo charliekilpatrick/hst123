@@ -157,7 +157,7 @@ detector_defaults = {
                               'RSky2': '4 10'},
                    'idcscale': 0.03962000086903572},
     'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'ny': 5200,
-                'input_files': '*_flt.fits', 'pixel_scale': 0.064,
+                'input_files': '*_flt.fits', 'pixel_scale': 0.0642,
                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
                 'dolphot': {'apsky': '8 20', 'RAper': 2, 'RChi': 1.5,
@@ -264,9 +264,6 @@ class hst123(object):
 
     # S/N limit for calculating limiting magnitude
     self.snr_limit = 3.0
-
-    # Limit for large reduction to quit if input list size is large
-    self.large_reduction = 200
 
     self.dolphot = {}
 
@@ -377,7 +374,9 @@ class hst123(object):
     parser.add_argument('--sort_brightest', default=False, action='store_true',
         help='Sort output source files by signal-to-noise in reference image.')
     parser.add_argument('--no_large_reduction', default=False,
-        action='store_true', help='Exit if input list is >300 images.')
+        action='store_true', help='Exit if input list is >large_num images.')
+    parser.add_argument('--large_num', default=200, type=int,
+        help='Large number of images to skip when --no_large_reduction used.')
     parser.add_argument('--combine_type', default=None, type=str,
         help='Override astrodrizzle combine_type with input.')
     parser.add_argument('--sky_sub', default=False, action='store_true',
@@ -3068,10 +3067,11 @@ if __name__ == '__main__':
             hst.input_images.remove(file)
 
     if hst.options['args'].no_large_reduction:
-        if len(hst.input_images)>hst.large_reduction:
+        if len(hst.input_images)>hst.options['args'].large_num:
             error = 'ERROR: exiting because --no_large_reduction and input list'
             error += ' size={n}>{m}'
-            print(error.format(n=len(hst.input_images), m=hst.large_reduction))
+            print(error.format(n=len(hst.input_images),
+                m=hst.options['args'].large_num))
 
             # Clean up any files in directory
             for pattern in hst.pipeline_products+hst.pipeline_images:
