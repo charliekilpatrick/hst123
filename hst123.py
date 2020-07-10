@@ -2779,7 +2779,8 @@ class hst123(object):
     try:
         obsTable = Observations.query_region(coord, radius=search_radius)
     except (astroquery.exceptions.RemoteServiceError,
-        requests.exceptions.ConnectionError):
+        requests.exceptions.ConnectionError,
+        astroquery.exceptions.TimeoutError):
         error = 'ERROR: MAST is not working currently working\n'
         error += 'Try again later...'
         print(error)
