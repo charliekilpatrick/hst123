@@ -782,7 +782,7 @@ class hst123(object):
     # To prevent FileNotFoundError - make sure all images exist and if not then
     # try to download them
     good = []
-    for img in image:
+    for image in img:
         if not os.path.exists(image):
             success = self.try_to_get_image(image)
             if success:
