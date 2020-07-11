@@ -767,7 +767,7 @@ class hst123(object):
 
     data['instrument_name']=inst
 
-    success, fullfile = self.check_archive(image)
+    success, fullfile = self.check_archive(data)
 
     if success:
         shutil.copyfile(fullfile, image)
