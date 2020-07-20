@@ -783,10 +783,11 @@ class hst123(object):
     # try to download them
     good = []
     for image in img:
+        success = True
         if not os.path.exists(image):
             success = self.try_to_get_image(image)
-            if success:
-                good.append(image)
+        if success:
+            good.append(image)
 
     if not good:
         return(None)
