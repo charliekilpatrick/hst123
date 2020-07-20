@@ -1501,7 +1501,7 @@ class hst123(object):
         print(error.format(ra=ra,dec=dec))
         return(None)
 
-  def needs_to_be_reduced(self, image, save_c1m=False):
+  def needs_to_be_reduced(self, image, save_c1m=False, keep_indt=False):
     hdu = fits.open(image, mode='readonly')
     is_not_hst_image = False
     warning = ''
@@ -1514,6 +1514,13 @@ class hst123(object):
 
     if ('DETECTOR' in hdu[0].header.keys()):
         detector = hdu[0].header['DETECTOR'].lower()
+
+    # Check for EXPFLAG=='INDETERMINATE', usually indicating a bad exposure
+    if not keep_indt:
+        if 'EXPFLAG' in hdu[0].header.keys():
+            if hdu[0].header['EXPFLAG']=='INDETERMINATE':
+                warning = 'WARNING: {img} has EXPFLAG=INDETERMINATE.'
+                return(warning.format(img=image), False)
 
     # Get rid of exposures with exptime < 20s
     if not self.options['args'].keepshort:
@@ -2163,8 +2170,8 @@ class hst123(object):
                 combine_nsigma='4 3',
                 driz_cr=True, driz_cr_snr='3.5 3.0', driz_cr_grow=1,
                 driz_cr_ctegrow=0, driz_cr_scale='1.2 0.7',
-                final_pixfrac=1.0, final_fillval=-50000,
-                final_bits=options['driz_bits'], final_units='counts',
+                final_pixfrac=0.8, final_fillval=-50000,
+                final_bits=options['driz_bits'], final_units='cps',
                 final_wcs=True, final_refimage=None,
                 final_rot=0.0, final_scale=pixscale, final_wht_type=wht_type,
                 final_outnx=options['nx'], final_outny=options['ny'],
