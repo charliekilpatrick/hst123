@@ -741,9 +741,57 @@ class hst123(object):
 
     return(chip)
 
+  def try_to_get_image(self, image):
+
+    image = image.lower()
+
+    if not self.coord:
+        return(False)
+
+    # Need to guess image properties from input data and image name
+    data = {'productFilename': image, 'ra': self.coord.ra.degree}
+
+    inst = ''
+    if image.startswith('i') and image.endswith('flc.fits'):
+        inst = 'WFC3/UVIS'
+    elif image.startswith('i') and image.endswith('flt.fits'):
+        inst = 'WFC3/IR'
+    elif image.startswith('j') and image.endswith('flt.fits'):
+        inst = 'ACS/HRC'
+    elif image.startswith('j') and image.endswith('flc.fits'):
+        inst = 'ACS/WFC'
+    elif image.startswith('u'):
+        inst = 'WFPC2'
+    else:
+        return(False)
+
+    data['instrument_name']=inst
+
+    success, fullfile = self.check_archive(data)
+
+    if success:
+        shutil.copyfile(fullfile, image)
+    else:
+        return(False)
+
+
   def input_list(self, img, show=True, save=False, file=None, image_number=[]):
     # Input variables
     zptype = self.magsystem
+
+    # To prevent FileNotFoundError - make sure all images exist and if not then
+    # try to download them
+    good = []
+    for image in img:
+        if not os.path.exists(image):
+            success = self.try_to_get_image(image)
+            if success:
+                good.append(image)
+
+    if not good:
+        return(None)
+    else:
+        img = copy.copy(good)
 
     # Make a table with all of the metadata for each image.
     exp = [fits.getval(image,'EXPTIME') for image in img]
@@ -980,6 +1028,9 @@ class hst123(object):
 
     # Now make an obstable out of images and sort into visits
     obstable = self.input_list(images, show=False, save=False)
+
+    if not obstable:
+        return(None)
 
     # Now get the final photometry for the source and sort
     final_phot=[]
@@ -1915,6 +1966,9 @@ class hst123(object):
 
     obstable = self.input_list(reference_images, show=True, save=False)
 
+    if not obstable:
+        return(None)
+
     self.run_tweakreg(obstable, '')
     self.run_astrodrizzle(obstable, output_name=drizname)
 
@@ -2786,7 +2840,8 @@ class hst123(object):
     try:
         obsTable = Observations.query_region(coord, radius=search_radius)
     except (astroquery.exceptions.RemoteServiceError,
-        requests.exceptions.ConnectionError):
+        requests.exceptions.ConnectionError,
+        astroquery.exceptions.TimeoutError):
         error = 'ERROR: MAST is not working currently working\n'
         error += 'Try again later...'
         print(error)
@@ -3094,6 +3149,10 @@ if __name__ == '__main__':
         # Going forward, we'll refer everything to obstable for imgs + metadata
         hst.obstable = hst.input_list(hst.input_images, show=True)
 
+        if not hst.obstable:
+            print('WARNING: no input images.  Exiting...')
+            sys.exit(1)
+
         # Update object name if it is passed as an argument
         if hst.options['args'].object:
             for file in hst.obstable['image']:
@@ -3321,6 +3380,10 @@ if __name__ == '__main__':
                     imgnums.append(imgnum)
 
         hst.obstable = hst.input_list(images, image_number=imgnums, show=False)
+        if not hst.obstable:
+            print('WARNING: no input images.  Exiting...')
+            sys.exit(1)
+
         hst.obstable.sort('imagenumber') # Need to keep track of order in dp
 
         # Get x,y coordinates of ra,dec
