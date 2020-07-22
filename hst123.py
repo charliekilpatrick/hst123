@@ -256,6 +256,7 @@ class hst123(object):
     self.updatewcs = True
     self.archive = False
     self.keep_objfile = False
+    self.clear_downloads_flag = True
 
     self.magsystem = 'abmag'
 
@@ -390,6 +391,8 @@ class hst123(object):
     parser.add_argument('--drizmask', default=None, type=str,
         help='Mask out pixels in a box around input mask coordinate in '+\
         'drizzled images but outside box in images from drizadd.')
+    parser.add_argument('--no_clear_downloads', default=False,
+        action='store_true', help='Suppress the clear_downloads method.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1554,6 +1557,12 @@ class hst123(object):
         return(None)
 
   def needs_to_be_reduced(self, image, save_c1m=False, keep_indt=False):
+    if not os.path.exists(image):
+        success = self.try_to_get_image(image)
+        if not success:
+            warning = 'WARNING: {image} does not exist'
+            return(warning.format(img=image), False)
+
     hdu = fits.open(image, mode='readonly')
     is_not_hst_image = False
     warning = ''
@@ -2038,7 +2047,8 @@ class hst123(object):
     message = 'Updating WCS for {file}'
     print(message.format(file=image))
 
-    self.clear_downloads(self.options['global_defaults'])
+    if self.clear_downloads_flag:
+        self.clear_downloads(self.options['global_defaults'])
 
     change_keys = self.options['global_defaults']['keys']
     inst = self.get_instrument(image).split('_')[0]
@@ -2235,7 +2245,8 @@ class hst123(object):
         except FileNotFoundError:
             # Usually happens because of a file missing in astropy cache.
             # Try clearing the download cache and then re-try
-            self.clear_downloads(self.options['global_defaults'])
+            if self.clear_downloads_flag:
+                self.clear_downloads(self.options['global_defaults'])
             tries += 1
 
 
@@ -2821,7 +2832,8 @@ class hst123(object):
   # Construct a product list from the input coordinate
   def get_productlist(self, coord, search_radius):
 
-    self.clear_downloads(self.options['global_defaults'])
+    if self.clear_downloads_flag:
+        self.clear_downloads(self.options['global_defaults'])
 
     productlist = None
 
@@ -3041,6 +3053,8 @@ if __name__ == '__main__':
     parser = hst.add_options(usage=hst.usagestring)
     hst.options['args'] = parser.parse_args()
     default = hst.options['global_defaults']
+
+    if hst.options['args'].no_clear_downloads: hst.clear_downloads_flag=False
 
     # Starting banner
     banner = 'Starting: {cmd}'
