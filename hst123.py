@@ -1563,7 +1563,48 @@ class hst123(object):
             warning = 'WARNING: {image} does not exist'
             return(warning.format(img=image), False)
 
-    hdu = fits.open(image, mode='readonly')
+    try:
+        hdu = fits.open(image, mode='readonly')
+        check = False
+        for h in hdu:
+            if h.data is not None and h.name.upper()=='SCI':
+                check = True
+    except (OSError, TypeError):
+        warning = 'WARNING: {img} is empty or corrupted.  '
+        warning += 'Trying to download again...'
+        print(warning.format(img=image))
+
+        success = False
+        if not self.productlist:
+            warning = 'WARNING: could not find or download {img}'
+            return(warning.format(img=image), False)
+
+        mask = self.productlist['productFilename']==image
+        if self.productlist[mask]==0:
+            warning = 'WARNING: could not find or download {img}'
+            return(warning.format(img=image), False)
+
+        archivedir = self.options['args'].archive
+        workdir = self.options['args'].workdir
+
+        self.download_files(hst.productlist,
+            archivedir=hst.options['args'].archive, clobber=True)
+
+        for product in self.productlist[mask]:
+            self.copy_raw_data_archive(product, archivedir=archivedir,
+                workdir=workdir, check_for_coord=True)
+
+        if os.path.exists(image):
+            try:
+                hdu = fits.open(image, mode='readonly')
+                check = False
+                for h in hdu:
+                    if h.data is not None and h.name.upper()=='SCI':
+                        check = True
+            except (OSError, TypeError):
+                warning = 'WARNING: could not find or download {img}'
+                return(warning.format(img=image), False)
+
     is_not_hst_image = False
     warning = ''
     detector = ''
