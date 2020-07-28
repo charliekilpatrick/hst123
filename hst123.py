@@ -1569,7 +1569,7 @@ class hst123(object):
         for h in hdu:
             if h.data is not None and h.name.upper()=='SCI':
                 check = True
-    except (OSError, TypeError):
+    except (OSError, TypeError, AttributeError):
         warning = 'WARNING: {img} is empty or corrupted.  '
         warning += 'Trying to download again...'
         print(warning.format(img=image))
@@ -1601,7 +1601,7 @@ class hst123(object):
                 for h in hdu:
                     if h.data is not None and h.name.upper()=='SCI':
                         check = True
-            except (OSError, TypeError):
+            except (OSError, TypeError, AttributeError):
                 warning = 'WARNING: could not find or download {img}'
                 return(warning.format(img=image), False)
 
