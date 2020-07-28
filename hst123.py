@@ -148,7 +148,7 @@ instrument_defaults = {
                          'obj_lim': 6.0}}}
 
 detector_defaults = {
-    'wfc3_uvis': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+    'wfc3_uvis': {'driz_bits': 96, 'nx': 5200, 'ny': 5200,
                   'input_files': '*_flc.fits', 'pixel_scale': 0.04,
                   'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                   'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -156,7 +156,7 @@ detector_defaults = {
                               'RPSF': 13, 'RSky': '15 35',
                               'RSky2': '4 10'},
                    'idcscale': 0.03962000086903572},
-    'wfc3_ir': {'driz_bits': 512, 'nx': 5200, 'ny': 5200,
+    'wfc3_ir': {'driz_bits': 576, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flt.fits', 'pixel_scale': 0.0642,
                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -164,7 +164,7 @@ detector_defaults = {
                             'RPSF': 15, 'RSky': '8 20',
                             'RSky2': '3 10'},
                    'idcscale': 0.1282500028610229},
-    'acs_wfc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+    'acs_wfc': {'driz_bits': 4192, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -178,7 +178,7 @@ detector_defaults = {
                 'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
-    'wfpc2_wfpc2': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+    'wfpc2_wfpc2': {'driz_bits': 5128, 'nx': 5200, 'ny': 5200,
                     'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -1620,8 +1620,8 @@ class hst123(object):
     # Check for EXPFLAG=='INDETERMINATE', usually indicating a bad exposure
     if not keep_indt:
         if 'EXPFLAG' in hdu[0].header.keys():
-            if hdu[0].header['EXPFLAG']=='INDETERMINATE':
-                warning = 'WARNING: {img} has EXPFLAG=INDETERMINATE.'
+            if hdu[0].header['EXPFLAG']!='NORMAL':
+                warning = 'WARNING: {img} has EXPFLAG!=NORMAL.'
                 return(warning.format(img=image), False)
 
     # Get rid of exposures with exptime < 20s
@@ -2266,10 +2266,10 @@ class hst123(object):
                 num_cores=8, preserve=False, clean=clean, skysub=skysub,
                 skymethod='globalmin+match',
                 skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
-                driz_sep_fillval=-50000, driz_sep_bits=0, driz_sep_wcs=True,
-                driz_sep_rot=0.0, driz_sep_scale=None,
+                driz_sep_fillval=-50000, driz_sep_bits=options['driz_bits'],
+                driz_sep_wcs=True, driz_sep_rot=0.0, driz_sep_scale=None,
                 driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
-                driz_sep_ra=ra, driz_sep_dec=dec,
+                driz_sep_ra=ra, driz_sep_dec=dec, driz_sep_pixfrac=1.0,
                 combine_maskpt=0.2, combine_type=combine_type,
                 combine_nlow=0, combine_nhigh=combine_nhigh,
                 combine_lthresh=-10000, combine_hthresh=None,
