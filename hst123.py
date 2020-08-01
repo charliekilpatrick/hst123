@@ -396,6 +396,8 @@ class hst123(object):
     return(parser)
 
   def clear_downloads(self, options):
+    if not self.clear_downloads_flag:
+        return(None)
     print('Trying to clear downloads')
     try:
         # utils.data.download_file can get buggy if the cache is
@@ -1611,6 +1613,15 @@ class hst123(object):
     is_not_hst_image = False
     warning = ''
     detector = ''
+
+    # Check for header keys that we need
+    for key in ['INSTRUME','DETECTOR','EXPFLAG','EXPTIME',
+        'DATE-OBS','TIME-OBS']:
+        if key not in hdu[0].header.keys():
+            warning = 'WARNINGS: {key} not in {img} header'
+            warning = warnings.format(key=key, img=image)
+            return(warning, False)
+
     instrument = hdu[0].header['INSTRUME'].lower()
     if 'c1m.fits' in image and not save_c1m:
         # We need the c1m.fits files, but they aren't reduced as science data
@@ -3106,15 +3117,10 @@ class hst123(object):
         sys.stdout.flush()
 
         try:
-            if 'HOME' in list(os.environ.keys()):
-                options = self.options['global_defaults']
-                astropath = options['astropath']
-                cache = os.environ['HOME'] + astropath
-            else:
-                cache = '.'
             with suppress_stdout():
+                cache = '.'
                 download = Observations.download_products(Table(prod),
-                    download_dir=cache)
+                    download_dir=cache, cache=False)
             shutil.move(download['Local Path'][0], outdir)
             message = '\r' + message
             message += green+' [SUCCESS]'+end+'\n'
