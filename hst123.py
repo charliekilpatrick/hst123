@@ -37,7 +37,7 @@ from astropy.time import Time
 from astroquery.mast import Observations
 from astroscrappy import detect_cosmics
 from dateutil.parser import parse
-from drizzlepac import tweakreg,astrodrizzle,catalogs
+from drizzlepac import tweakreg,astrodrizzle,catalogs,photeq
 from stwcs import updatewcs
 from shapely.geometry import Polygon, Point
 from email.mime.text import MIMEText
@@ -164,7 +164,7 @@ detector_defaults = {
                             'RPSF': 15, 'RSky': '8 20',
                             'RSky2': '3 10'},
                    'idcscale': 0.1282500028610229},
-    'acs_wfc': {'driz_bits': 4192, 'nx': 5200, 'ny': 5200,
+    'acs_wfc': {'driz_bits': 96, 'nx': 5200, 'ny': 5200,
                 'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -178,7 +178,7 @@ detector_defaults = {
                 'dolphot': {'apsky': '15 25', 'RAper': 2, 'RChi': 1.5,
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
-    'wfpc2_wfpc2': {'driz_bits': 5128, 'nx': 5200, 'ny': 5200,
+    'wfpc2_wfpc2': {'driz_bits': 1032, 'nx': 5200, 'ny': 5200,
                     'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -1507,6 +1507,9 @@ class hst123(object):
             else:
                 newmask = mask == 0
 
+            minmask = newhdu[0].data < -5000.0
+            newmask = newmask | minmask
+
             newhdu[0].data[np.where(newmask)] = float('NaN')
 
     # Mark as SANITIZE
@@ -2015,10 +2018,45 @@ class hst123(object):
             if os.path.exists(image) and image not in reference_images:
                 reference_images.append(image)
 
+    reference_images = glob.glob('u*c0m.fits')
     obstable = self.input_list(reference_images, show=True, save=False)
 
-    if not obstable:
+    if not obstable or len(obstable)==0:
         return(None)
+
+    # If number of images is small, try to use imaging from the same instrument
+    # and detector for masking
+    if len(obstable)<3:
+        inst = obstable['instrument'][0]
+        det = obstable['detector'][0]
+        mask = (hst.obstable['instrument']==inst) &\
+               (hst.obstable['detector']==det)
+
+        outimage = '{inst}.ref.drz.fits'.format(inst=inst)
+
+        self.run_tweakreg(hst.obstable[mask], '')
+        self.run_astrodrizzle(hst.obstable[mask], output_name=outimage,
+            clean=False)
+
+        # Add cosmic ray mask to static image mask
+        for row in hst.obstable[mask]:
+            file = row['image']
+            crmasks = glob.glob(file.replace('.fits','*crmask.fits'))
+
+            for i,crmaskfile in enumerate(sorted(crmasks)):
+                crmaskhdu = fits.open(crmaskfile)
+                crmask = crmaskhdu[0].data==0
+                if 'c0m' in file:
+                    maskfile = file.split('_')[0]+'_c1m.fits'
+                    if os.path.exists(maskfile):
+                        maskhdu = fits.open(maskfile)
+                        maskhdu[i+1].data[crmask]=4096
+                        maskhdu.writeto(maskfile, overwrite=True)
+                else:
+                    maskhdu = fits.open(file)
+                    if maskhdu[3*i+1].name=='DQ':
+                        maskhdu[3*i+1].data[crmask]=4096
+                    maskhdu.writeto(maskfile, overwrite=True)
 
     self.run_tweakreg(obstable, '')
     self.run_astrodrizzle(obstable, output_name=drizname)
@@ -2114,7 +2152,8 @@ class hst123(object):
         return(None)
 
   # Run the drizzlepac astrodrizzle routine using detector parameters.
-  def run_astrodrizzle(self, obstable, output_name = None, ra=None, dec=None):
+  def run_astrodrizzle(self, obstable, output_name = None, ra=None, dec=None,
+    clean=None):
 
     print('Starting astrodrizzle')
 
@@ -2175,7 +2214,8 @@ class hst123(object):
 
     wht_type = self.options['args'].wht_type
 
-    clean = not self.options['args'].nocleanup
+    if clean is not None:
+        clean = not self.options['args'].nocleanup
 
     if len(tmp_input)==1:
         shutil.copy(tmp_input[0], 'dummy.fits')
@@ -2258,26 +2298,65 @@ class hst123(object):
 
     start_drizzle = time.time()
 
+    # Make astrodrizzle use c1m masks when drizzling c0m files
+    skymask_cat = None
+    with open('skymask_cat','w') as f:
+        for file in tmp_input:
+            if 'c0m' in file:
+                maskfile = file.split('_')[0]+'_c1m.fits'
+                if os.path.exists(maskfile):
+                    hdu = fits.open(maskfile)
+                    for i,h in enumerate(hdu):
+                        if h.name=='SCI':
+                            # Reset DQ mask for bad columns
+                            hdu[i].data[np.where(hdu[i].data==258)]=256
+                    hdu.writeto(maskfile, overwrite=True)
+
+                    skymask_cat='skymask_cat'
+
+                    hdu = fits.open(file)
+                    exts = []
+                    for i,h in enumerate(hdu):
+                        if h.name=='SCI':
+                            exts.append(str(i))
+                    line = file+'{'+','.join(exts)+'},'
+                    line += ','.join([maskfile+'['+ext+']' for ext in exts])
+
+                    f.write(line+' \n')
+
+    # Equalize sensitivities for WFPC2 data
+    hdu = fits.open(tmp_input[0])
+    photflam = None
+    for h in hdu:
+        if h.name=='SCI' and 'PHOTFLAM' in h.header.keys():
+            photflam = h.header['PHOTFLAM']
+
+    for image in tmp_input:
+        if 'c0m' in image:
+            photeq.photeq(files=image, readonly=False, ref_phot=photflam,
+                phot_kwd='PHOTFLAM')
+
+
     tries = 0
     while tries < 3:
         try:
             astrodrizzle.AstroDrizzle(tmp_input, output=output_name, runfile='',
                 wcskey=wcskey, context=True, group='', build=False,
                 num_cores=8, preserve=False, clean=clean, skysub=skysub,
-                skymethod='globalmin+match',
+                skymethod='globalmin+match', skymask_cat=skymask_cat,
                 skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
-                driz_sep_fillval=-50000, driz_sep_bits=options['driz_bits'],
+                driz_sep_fillval=None, driz_sep_bits=options['driz_bits'],
                 driz_sep_wcs=True, driz_sep_rot=0.0, driz_sep_scale=None,
                 driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
                 driz_sep_ra=ra, driz_sep_dec=dec, driz_sep_pixfrac=1.0,
                 combine_maskpt=0.2, combine_type=combine_type,
                 combine_nlow=0, combine_nhigh=combine_nhigh,
                 combine_lthresh=-10000, combine_hthresh=None,
-                combine_nsigma='4 3',
+                combine_nsigma='4 3', driz_cr_corr=True,
                 driz_cr=True, driz_cr_snr='3.5 3.0', driz_cr_grow=1,
                 driz_cr_ctegrow=0, driz_cr_scale='1.2 0.7',
-                final_pixfrac=0.8, final_fillval=-50000,
-                final_bits=options['driz_bits'], final_units='cps',
+                final_pixfrac=1.0, final_fillval=None,
+                final_bits=options['driz_bits'], final_units='counts',
                 final_wcs=True, final_refimage=None,
                 final_rot=0.0, final_scale=pixscale, final_wht_type=wht_type,
                 final_outnx=options['nx'], final_outny=options['ny'],
@@ -2336,16 +2415,28 @@ class hst123(object):
     if output is None:
         output = image
 
-    for hdu in hdulist:
+    for i,hdu in enumerate(hdulist):
         if hdu.name=='SCI':
             mask = np.zeros(hdu.data.shape, dtype=np.bool)
 
-            _crmask, crclean = detect_cosmics(hdu.data.copy().astype('<f4'),
+            crmask, crclean = detect_cosmics(hdu.data.copy().astype('<f4'),
                 inmask=mask, readnoise=options['rdnoise'], gain=options['gain'],
                 satlevel=options['saturation'], sigclip=options['sig_clip'],
                 sigfrac=options['sig_frac'], objlim=options['obj_lim'])
 
-            hdu.data[:,:] = crclean[:,:]
+            hdulist[i].data[:,:] = crclean[:,:]
+
+            # Add crmask data to DQ array or DQ image
+            if 'flc' in image or 'flt' in image:
+                # Assume this hdu is corresponding DQ array
+                if len(hdulist)>=i+2 and hdulist[i+2].name=='DQ':
+                    hdulist[i+2].data[np.where(crmask)]=4096
+            elif 'c0m' in image:
+                maskfile = image.split('_')[0]+'_c1m.fits'
+                if os.path.exists(maskfile):
+                    maskhdu = fits.open(maskfile)
+                    maskhdu[i].data[np.where(crmask)]=4096
+                    maskhdu.writeto(maskfile, overwrite=True)
 
     # This writes in place
     hdulist.writeto(output, overwrite=True, output_verify='silentfix')
@@ -2809,6 +2900,17 @@ class hst123(object):
         hdu.info()
 
         for i, h in enumerate(hdu):
+            if h.name=='SCI':
+                if 'flc' in image or 'flt' in image:
+                    if len(rawhdu)>=i+2 and rawhdu[i+2].name=='DQ':
+                        self.copy_wcs_keys(rawhdu[i], rawhdu[i+2])
+                elif 'c0m' in image:
+                    maskfile = image.split('_')[0]+'_c1m.fits'
+                    if os.path.exists(maskfile):
+                        maskhdu = fits.open(maskfile)
+                        self.copy_wcs_keys(rawhdu[i], maskhdu[i])
+                        maskhdu.writeto(maskfile, overwrite=True)
+
             # Skip WCSCORR for WFPC2 as non-standard hdu
             if 'wfpc2' in self.get_instrument(image).lower():
                 if h.name=='WCSCORR':
@@ -2831,10 +2933,11 @@ class hst123(object):
                 continue
 
             # If we can access the data in both extensions, copy from orig file
-            if 'data' in dir(h) and 'data' in dir(rawhdu[idx]):
-                if (rawhdu[idx].data is not None and h.data is not None):
-                    if rawhdu[idx].data.dtype==h.data.dtype:
-                        rawhdu[idx].data = h.data
+            if h.name!='DQ':
+                if 'data' in dir(h) and 'data' in dir(rawhdu[idx]):
+                    if (rawhdu[idx].data is not None and h.data is not None):
+                        if rawhdu[idx].data.dtype==h.data.dtype:
+                            rawhdu[idx].data = h.data
 
             # Copy the rawtmp extension into the new file
             message = 'Copy extension {i},{ext},{ver}'
@@ -2847,9 +2950,6 @@ class hst123(object):
 
         print('\n\nNew image info:')
         newhdu.info()
-
-        hdu.close()
-        rawhdu.close()
 
         newhdu.writeto(image, output_verify='silentfix', overwrite=True)
 
@@ -2869,6 +2969,12 @@ class hst123(object):
         self.sanitize_reference(reference)
 
     return(tweakreg_success)
+
+  def copy_wcs_keys(self, from_hdu, to_hdu):
+    for key in ['CRPIX1','CRPIX2','CRVAL1','CRVAL2','CD1_1','CD1_2','CD2_1',
+        'CD2_2']:
+        if key in from_hdu.header.keys():
+            to_hdu.header[key]=from_hdu.header[key]
 
   # Construct a product list from the input coordinate
   def get_productlist(self, coord, search_radius):
