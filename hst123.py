@@ -30,18 +30,33 @@ from contextlib import contextmanager
 from scipy import interpolate
 from astropy import units as u
 from astropy.utils.data import clear_download_cache,download_file
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
-from astroquery.mast import Observations
 from astroscrappy import detect_cosmics
 from dateutil.parser import parse
-from drizzlepac import tweakreg,astrodrizzle,catalogs,photeq
 from stwcs import updatewcs
 from shapely.geometry import Polygon, Point
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, 'w') as devnull:
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = devnull
+        sys.stderr = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+
+with suppress_stdout():
+    from drizzlepac import tweakreg,astrodrizzle,catalogs,photeq
+    from astroquery.mast import Observations
+    from astropy.coordinates import SkyCoord
 
 # Color strings for download messages
 green = '\033[1;32;40m'
@@ -213,19 +228,6 @@ For reference, see the WFPC2, ACS, and WFC3 zero point pages:
     WFC3: http://www.stsci.edu/hst/instrumentation/wfc3/data-analysis/
           photometric-calibration
 """
-
-@contextmanager
-def suppress_stdout():
-    with open(os.devnull, 'w') as devnull:
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        sys.stdout = devnull
-        sys.stderr = devnull
-        try:
-            yield
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
 
 class hst123(object):
 
