@@ -1621,7 +1621,7 @@ class hst123(object):
         'DATE-OBS','TIME-OBS']:
         if key not in hdu[0].header.keys():
             warning = 'WARNINGS: {key} not in {img} header'
-            warning = warnings.format(key=key, img=image)
+            warning = warning.format(key=key, img=image)
             return(warning, False)
 
     instrument = hdu[0].header['INSTRUME'].lower()
@@ -3454,7 +3454,7 @@ if __name__ == '__main__':
             error += 'Exiting...'
             print(error)
             sys.exit()
-        elif len(candidate_ref_images)==1:
+        elif len(images)==1:
             hst.options['args'].reference=images[0]
         else:
             # Pick the deepest reference image
