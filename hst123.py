@@ -3014,7 +3014,8 @@ class hst123(object):
         obsTable = Observations.query_region(coord, radius=search_radius)
     except (astroquery.exceptions.RemoteServiceError,
         requests.exceptions.ConnectionError,
-        astroquery.exceptions.TimeoutError):
+        astroquery.exceptions.TimeoutError,
+        requests.exceptions.ChunkedEncodingError):
         error = 'ERROR: MAST is not working currently working\n'
         error += 'Try again later...'
         print(error)
@@ -3459,7 +3460,7 @@ if __name__ == '__main__':
         else:
             # Pick the deepest reference image
             exptimes = [fits.getval(im,'EXPTIME') for im in images]
-            hst.options['args'].reference=images[np.argmax[exptimes]]
+            hst.options['args'].reference=images[np.argmax(exptimes)]
 
     # Always re-calculate reference sky image as sanitizing the image can mess
     # up the properties of the reference image (don't want to re-use old one)
