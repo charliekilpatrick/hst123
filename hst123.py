@@ -2031,8 +2031,9 @@ class hst123(object):
             if os.path.exists(image) and image not in reference_images:
                 reference_images.append(image)
 
-    reference_images = glob.glob('u*c0m.fits')
-    obstable = self.input_list(reference_images, show=True, save=False)
+    if 'wfpc2' in best_inst and len(obstable)<3:
+        reference_images = glob.glob('u*c0m.fits')
+        obstable = self.input_list(reference_images, show=True, save=False)
 
     if not obstable or len(obstable)==0:
         return(None)
@@ -3338,7 +3339,7 @@ if __name__ == '__main__':
         if hst.options['args'].reference:
             if not os.path.exists(hst.options['args'].reference):
                 hst.options['args'].reference = None
-        if not hst.options['args'].reference:
+        elif not hst.options['args'].reference:
             banner += 'generating from input files.'
             hst.make_banner(banner)
             hst.pick_reference(hst.obstable)
