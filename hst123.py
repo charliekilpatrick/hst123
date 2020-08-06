@@ -2708,7 +2708,7 @@ class hst123(object):
     message += 'WARNING: tweakreg failed: {e}\n'
     message += '#'*80 + '\n'
     print(message.format(e=exception.__class__.__name__))
-    print('Error:',e)
+    print('Error:', exception)
     print('Adjusting thresholds and images...')
 
   def add_thresholds(self, images, thresh):
