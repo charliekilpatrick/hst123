@@ -618,7 +618,9 @@ class hst123(object):
             out = outfile
         else:
             num = str(i).zfill(len(str(len(hst.final_phot))))
-            out = outfile+num
+            out = outfile.replace('.phot', num+'.phot')
+
+        snana = out.replace('.phot', '.snana')
 
         message = 'Photometry for source {n} '
         message = message.format(n=i)
@@ -632,7 +634,9 @@ class hst123(object):
         print(message)
 
         with open(out, 'w') as f:
-            hst.show_photometry(phot, f=f)
+            self.show_photometry(phot, f=f)
+        with open(snana, 'w') as f:
+            self.show_photometry(phot, f=f, snana=True, show=False)
         print('\n')
 
   def show_data(self, phottable, form, header, units, f=None, avg=False):
@@ -681,7 +685,51 @@ class hst123(object):
     print('\n')
     f.write('\n')
 
-  def show_photometry(self, final_photometry, latex=False, show=True, f=None):
+  def snana(self, phottable, file):
+
+    objname = 'dummy'
+    if self.options['args'].object:
+        objname = self.options['args'].object
+
+    header = 'SNID: {obj} \nRA: {ra} \nDECL: {dec} \n\n'
+    header = header.format(obj=objname, ra=self.coord.ra.degree,
+        dec=self.coord.dec.degree)
+
+    file.write(header)
+    file.write('VARLIST: MJD FLT FLUXCAL MAG MAGERR \n')
+
+    form = 'OBS: {date: <16} {instfilt: < 20} {flux: <16} {fluxerr: <16} '
+    form += '{mag: <16} {magerr: <6} \n'
+    zpt = 27.5
+
+    for row in phottable:
+
+        # Format instrument name
+        inst = row['INSTRUMENT'].lower()
+        if 'wfc3' in inst and 'uvis' in inst: inst='WFC3/UVIS'
+        if 'wfc3' in inst and 'ir' in inst: inst='WFC3/IR'
+        if 'acs' in inst and 'wfc' in inst: inst='ACS/WFC'
+        if 'acs' in inst and 'hrc' in inst: inst='ACS/HRC'
+        if 'acs' in inst and 'sbc' in inst: inst='ACS/SBC'
+        if 'wfpc2' in inst: inst='WFPC2'
+        if '_' in inst: inst.upper().replace('_full','').replace('_','/')
+
+        date='%7.5f'% row['MJD']
+        mag = row['MAGNITUDE']
+        magerr = row['MAGNITUDE_ERROR']
+        flux = 10**(0.4 * (zpt - mag))
+        fluxerr = 1./1.086 * magerr * flux
+
+        datakeys = {'date':date, 'instfilt':inst+'-'+row['FILTER'].upper(),
+            'flux': flux, 'fluxerr': fluxerr, 'mag': mag, 'magerr': magerr}
+
+        line=form.format(**datakeys)
+        file.write(line)
+
+    file.write('\n')
+
+  def show_photometry(self, final_photometry, latex=False, show=True, f=None,
+    snana=False):
 
     # Check to make sure dictionary is set up properly
     keys = final_photometry.keys()
@@ -696,6 +744,8 @@ class hst123(object):
     avg_photometry = final_photometry[final_photometry['IS_AVG']==1]
     if len(avg_photometry)>0:
         final_photometry=final_photometry[final_photometry['IS_AVG']==0]
+
+    if snana: self.snana(avg_photometry, f)
 
     if latex:
 
@@ -1617,7 +1667,7 @@ class hst123(object):
     detector = ''
 
     # Check for header keys that we need
-    for key in ['INSTRUME','DETECTOR','EXPFLAG','EXPTIME',
+    for key in ['INSTRUME','EXPFLAG','EXPTIME',
         'DATE-OBS','TIME-OBS']:
         if key not in hdu[0].header.keys():
             warning = 'WARNINGS: {key} not in {img} header'
