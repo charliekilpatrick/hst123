@@ -3,7 +3,7 @@
 """
 By C. D. Kilpatrick 2019-02-07
 
-v1.00: 2019-02-07. Base hst123 downloa d, tweakreg, drizzle, dolphot param
+v1.00: 2019-02-07. Base hst123 download, tweakreg, drizzle, dolphot param
 v1.01: 2019-02-15. Added running dolphot, scraping dolphot output
 v1.02: 2019-02-22. Added fake star injection
 v1.03: 2019-06-02. Added drizzleall options and cleaned up options/syntax
