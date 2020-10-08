@@ -3180,7 +3180,7 @@ class hst123(object):
             message = '\r' + message
             message += green+' [SUCCESS]'+end+'\n'
             sys.stdout.write(message.format(image=filename))
-        except as e:
+        except Exception as e:
             message = '\r' + message
             message += red+' [FAILURE]'+end+'\n'
             sys.stdout.write(message.format(image=filename))
