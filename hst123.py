@@ -395,6 +395,8 @@ class hst123(object):
         'drizzled images but outside box in images from drizadd.')
     parser.add_argument('--no_clear_downloads', default=False,
         action='store_true', help='Suppress the clear_downloads method.')
+    parser.add_argument('--fixzpt', default=None, type=float,
+        help='Fix the zero point of drizzled images to input value.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1572,6 +1574,37 @@ class hst123(object):
     # Write out to same file w/ overwrite
     newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
 
+  # Compresses reference image into single extension file
+  def compress_reference(self, reference):
+
+    # If the reference image does not exist, print an error and return
+    if not os.path.exists(reference):
+        error = 'ERROR: reference {ref} does not exist!'
+        print(error.format(ref=reference))
+        return(None)
+
+    hdu = fits.open(reference)
+
+    # Going to write out newhdu
+    # Only want science extension from orig reference
+    newhdu = fits.HDUList()
+
+    hdr = hdu[0].header
+    newhdu.append(hdu[0])
+    newhdu[0].name='PRIMARY'
+
+    if len(hdu)==1:
+        newhdu[0] = hdu[0]
+    elif len(hdu)==2:
+        newhdu[0] = hdu[1]
+        # Add header keys from hdu[0] to newhdu[0]
+        for key in hdu[0].header.keys():
+            if key not in newhdu[0].header.keys():
+                newhdu[0].header[key] = hdu[0].header[key]
+
+    newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+
+
   # Sanitizes wfpc2 data by getting rid of extensions and changing variables.
   def sanitize_wfpc2(self, image):
     hdu = fits.open(image, mode='readonly')
@@ -2466,6 +2499,13 @@ class hst123(object):
     if self.options['args'].object:
         hdu[0].header['TARGNAME'] = self.options['args'].object
         hdu[0].header['OBJECT'] = self.options['args'].object
+
+    if self.options['args'].fixzpt:
+        # Get current zeropoint of drizzled image
+        zpt = self.get_zpt(output_name)
+        data = hdu[0].data * 10**(0.4*(self.options['args'].fixzpt-zpt))
+        hdu[0].data = data
+
     hdu.close()
 
     return(True)
@@ -3462,6 +3502,7 @@ if __name__ == '__main__':
 
                     # Make a sky file for the drizzled image and rename 'noise'
                     if (hst.needs_to_calc_sky(drizname)):
+                        hst.compress_reference(drizname)
                         hst.calc_sky(drizname, hst.options['detector_defaults'])
                         sky_image = drizname.replace('.fits', '.sky.fits')
                         noise_name = drizname.replace('.fits', '.noise.fits')
@@ -3497,8 +3538,8 @@ if __name__ == '__main__':
         if hst.needs_to_calc_sky(split):
             hst.calc_sky(split, hst.options['detector_defaults'])
 
-    if (not hst.options['args'].reference or
-        not os.path.exists(hst.options['args'].reference)):
+    rimg = hst.options['args'].reference
+    if (not rimg or not os.path.exists(rimg)):
         # We got to this point from a warm start, but the reference image was
         # not identified.  In this case, try to guess which image is the ref
         ref_pattern = '*.drz.fits'
@@ -3517,14 +3558,15 @@ if __name__ == '__main__':
 
     # Always re-calculate reference sky image as sanitizing the image can mess
     # up the properties of the reference image (don't want to re-use old one)
-    if os.path.exists(hst.options['args'].reference):
+    rimg = hst.options['args'].reference
+    if os.path.exists(rimg):
         # Make sure reference is sanitized first
-        hst.sanitize_reference(hst.options['args'].reference)
-        if hst.needs_to_calc_sky(hst.options['args'].reference, check_wcs=True):
+        hst.sanitize_reference(rimg)
+        if hst.needs_to_calc_sky(rimg, check_wcs=True):
             message = 'Running calcsky for reference image: {ref}'
-            print(message.format(ref=hst.options['args'].reference))
-            hst.calc_sky(hst.options['args'].reference,
-                hst.options['detector_defaults'])
+            print(message.format(ref=rimg))
+            hst.compress_reference(rimg)
+            hst.calc_sky(rimg, hst.options['detector_defaults'])
 
     # Write out a list of the input images with metadata for easy reference
     if len(hst.input_images)>0:
