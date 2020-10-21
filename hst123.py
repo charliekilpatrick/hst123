@@ -143,21 +143,21 @@ instrument_defaults = {
     'wfc3': {'env_ref': 'iref.old',
              'crpars': {'rdnoise': 6.5,
                         'gain': 1.0,
-                        'saturation': 70000.0,
+                        'saturate': 70000.0,
                         'sig_clip': 4.0,
                         'sig_frac': 0.2,
                         'obj_lim': 6.0}},
     'acs': {'env_ref': 'jref.old',
             'crpars': {'rdnoise': 6.5,
                        'gain': 1.0,
-                       'saturation': 70000.0,
+                       'saturate': 70000.0,
                        'sig_clip': 3.0,
                        'sig_frac': 0.1,
                        'obj_lim': 5.0}},
     'wfpc2': {'env_ref': 'uref',
               'crpars': {'rdnoise': 10.0,
                          'gain': 7.0,
-                         'saturation': 27000.0,
+                         'saturate': 27000.0,
                          'sig_clip': 4.0,
                          'sig_frac': 0.3,
                          'obj_lim': 6.0}}}
@@ -396,7 +396,10 @@ class hst123(object):
     parser.add_argument('--no_clear_downloads', default=False,
         action='store_true', help='Suppress the clear_downloads method.')
     parser.add_argument('--fixzpt', default=None, type=float,
-        help='Fix the zero point of drizzled images to input value.')
+        help='Fix the zero point of drizzled images to input value '+\
+        '(accounting for combined EXPTIME in header).')
+    parser.add_argument('--no_nan', default=False, action='store_true',
+        help='Set nan values in drizzled images to median pixel value.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1546,11 +1549,11 @@ class hst123(object):
     # Add header variables that dolphot needs: GAIN, RDNOISE, SATURATE
     inst = newhdu[0].header['INSTRUME'].lower()
     opt  = self.options['instrument_defaults'][inst]['crpars']
-    newhdu[0].header['SATURATE'] = opt['saturation']
-    newhdu[0].header['RDNOISE']  = opt['rdnoise']
-    newhdu[0].header['GAIN']     = opt['gain']
+    for key in ['saturate','rdnoise','gain']:
+        if key not in newhdu[0].header.keys():
+            newhdu[0].header[key.upper()] = opt[key]
 
-    # Adjust the value of masked pixels to NaN
+    # Adjust the value of masked pixels to NaN or median pixel value
     maskfile = reference.replace('.fits', '.mask.fits')
     if os.path.exists(maskfile):
         maskhdu = fits.open(maskfile)
@@ -1566,7 +1569,12 @@ class hst123(object):
             minmask = newhdu[0].data < -5000.0
             newmask = newmask | minmask
 
-            newhdu[0].data[np.where(newmask)] = float('NaN')
+            if not self.options['args'].no_nan:
+                newhdu[0].data[newmask] = float('NaN')
+            # Otherwise set to median pixel value
+            else:
+                medpix = np.median(newhdu[0].data[~newmask])
+                newhdu[0].data[newmask] = medpix
 
     # Mark as SANITIZE
     newhdu[0].header['SANITIZE']=1
@@ -2502,8 +2510,25 @@ class hst123(object):
 
     if self.options['args'].fixzpt:
         # Get current zeropoint of drizzled image
+        fixzpt = self.options['args'].fixzpt
         zpt = self.get_zpt(output_name)
-        data = hdu[0].data * 10**(0.4*(self.options['args'].fixzpt-zpt))
+        exptime = hdu[0].header['EXPTIME']
+        effzpt = zpt + 2.5*np.log10(exptime)
+        fixscale = 10**(0.4 * (fixzpt - effzpt))
+        fluxscale = 3631e-3 * 10**(-0.4 * fixzpt) # mJy/pix scale
+
+        # Adjust header values for context
+        instopt = self.options['detector_defaults'][inst]
+        hdu[0].header['FIXZPT']  = fixzpt
+        hdu[0].header['FIXFLUX'] = fluxscale
+        hdu[0].header['EFFZPT'] = effzpt
+        hdu[0].header['ORIGZPT'] = zpt
+        hdu[0].header['FIXSCALE'] = fixscale
+        hdu[0].header['BUNIT'] = 'cps' # rescaled by EXPTIME, so essentially cps
+        hdu[0].header['SATURATE'] = instopt['SATURATE'] * fixscale
+
+        # Finally do data scaling
+        data = hdu[0].data * fixscale
         hdu[0].data = data
 
     hdu.close()
@@ -2525,7 +2550,7 @@ class hst123(object):
 
             crmask, crclean = detect_cosmics(hdu.data.copy().astype('<f4'),
                 inmask=mask, readnoise=options['rdnoise'], gain=options['gain'],
-                satlevel=options['saturation'], sigclip=options['sig_clip'],
+                satlevel=options['saturate'], sigclip=options['sig_clip'],
                 sigfrac=options['sig_frac'], objlim=options['obj_lim'])
 
             hdulist[i].data[:,:] = crclean[:,:]
