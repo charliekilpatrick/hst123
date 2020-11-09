@@ -885,6 +885,7 @@ class hst123(object):
     if show:
         header = form.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
                              exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
+        print('\n\n')
         print(header)
 
         for row in obstable:
@@ -895,6 +896,8 @@ class hst123(object):
                     date=Time(row['datetime']).datetime.strftime('%Y-%m-%d'),
                     time=Time(row['datetime']).datetime.strftime('%H:%M:%S'))
             print(line)
+
+        print('\n\n')
 
     if file:
         form = '{inst: <10} {filt: <10} {exp: <12} {date: <16}'
@@ -2008,7 +2011,8 @@ class hst123(object):
     # Best possible filter for a dolphot reference image in the approximate
     # order I would want to use for a reference image.  You can also use
     # to force the script to pick a reference image from a specific filter.
-    best_filters = ['f606w','f555w','f814w','f350lp','f110w','f105w']
+    best_filters = ['f606w','f555w','f814w','f350lp','f110w','f105w',
+        'f336w']
 
     # If we gave an input filter for reference, override best_filters
     if reffilter:
@@ -2112,8 +2116,9 @@ class hst123(object):
         drizname = drizname.format(inst=best_inst, filt=best_filt)
 
     message = 'Reference image name will be: {reference}.\n'
-    message += 'Generating from input files:\n\n'
-    print(message.format(reference=drizname))
+    message += 'Generating from input files: {img}\n\n'
+    print(message.format(reference=drizname, img=reference_images))
+
     self.options['args'].reference=drizname
 
     if self.options['args'].drizadd:
@@ -2124,14 +2129,16 @@ class hst123(object):
 
     if 'wfpc2' in best_inst and len(obstable)<3:
         reference_images = glob.glob('u*c0m.fits')
-        obstable = self.input_list(reference_images, show=True, save=False)
 
+    obstable = self.input_list(reference_images, show=True, save=False)
     if not obstable or len(obstable)==0:
         return(None)
 
     # If number of images is small, try to use imaging from the same instrument
     # and detector for masking
     if len(obstable)<3:
+        print('Masking')
+        sys.exit()
         inst = obstable['instrument'][0]
         det = obstable['detector'][0]
         mask = (hst.obstable['instrument']==inst) &\
