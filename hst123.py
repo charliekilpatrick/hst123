@@ -76,6 +76,7 @@ global_defaults = {
         'SHADCORR','DOSATMAP','DOPHOTOM','DOHISTOS','DRIZCORR','OUTDTYPE'],
     'cdbs': 'ftp://ftp.stsci.edu/cdbs/',
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
+    'crds': 'https://hst-crds.stsci.edu/unchecked_get/references/hst/',
     'visit': 1,
     'search_rad': 3.0, # for tweakreg in arcsec
     'radius': 5 * u.arcmin,
@@ -412,6 +413,8 @@ class hst123(object):
         help='List of filters that will be used to update acceptable filters.')
     parser.add_argument('--fitsky', default=None, type=int,
         help='Change the dolphot FitSky parameter to something other than 2.')
+    parser.add_argument('--no_mask', default=False, action='store_true',
+        help='Do not add extra masking based on other input files.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -2220,7 +2223,7 @@ class hst123(object):
 
     # If number of images is small, try to use imaging from the same instrument
     # and detector for masking
-    if len(obstable)<3:
+    if len(obstable)<3 and not self.options['args'].no_mask:
         inst = obstable['instrument'][0]
         det = obstable['detector'][0]
         mask = (obstable['instrument']==inst) & (obstable['detector']==det)
@@ -2290,24 +2293,30 @@ class hst123(object):
             else:
                 ref_file = val
             if not os.path.exists(ref_file):
-                # Updating to new HST cdbs database
-                url = 'https://hst-crds.stsci.edu/unchecked_get/references/hst/'
-                url += ref_file
-                message = 'Downloading file: {url}'
-                sys.stdout.write(message.format(url=url))
-                sys.stdout.flush()
-                try:
-                    dat = download_file(url, cache=False,
-                        show_progress=False, timeout=120)
-                    shutil.move(dat, ref_file)
-                    message = '\r' + message
-                    message += green+' [SUCCESS]'+end+'\n'
+                # Try using both old cdbs database and new crds link
+                urls = []
+                url = self.options['global_defaults']['cdbs']
+                urls.append(url+ref_url+'/'+ref_file)
+
+                url = self.options['global_defaults']['crds']
+                urls.append(url+ref_file)
+                for url in urls:
+                    message = 'Downloading file: {url}'
                     sys.stdout.write(message.format(url=url))
-                except:
-                    message = '\r' + message
-                    message += red+' [FAILURE]'+end+'\n'
-                    sys.stdout.write(message.format(url=url))
-                    print(message.format(url=url))
+                    sys.stdout.flush()
+                    try:
+                        dat = download_file(url, cache=False,
+                            show_progress=False, timeout=120)
+                        shutil.move(dat, ref_file)
+                        message = '\r' + message
+                        message += green+' [SUCCESS]'+end+'\n'
+                        sys.stdout.write(message.format(url=url))
+                        break
+                    except:
+                        message = '\r' + message
+                        message += red+' [FAILURE]'+end+'\n'
+                        sys.stdout.write(message.format(url=url))
+                        print(message.format(url=url))
 
             message = 'Setting {im},{i} {key}={val}'
             print(message.format(im=image, i=i, key=key, val=ref_file))
