@@ -3750,7 +3750,10 @@ if __name__ == '__main__':
     if opt.download:
         banner = 'Downloading HST data from MAST for: {ra} {dec}'
         hst.make_banner(banner.format(ra=ra, dec=dec))
-        if opt.archive: hst.dest=None
+        if opt.archive:
+            hst.dest=None
+        else:
+            hst.dest = hst.rawdir
         if hst.rawdir and not os.path.exists(hst.rawdir):
             os.makedirs(hst.rawdir)
         hst.download_files(hst.productlist, archivedir=opt.archive,
