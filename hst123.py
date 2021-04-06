@@ -1794,12 +1794,14 @@ class hst123(object):
     # Check for EXPFLAG=='INDETERMINATE', usually indicating a bad exposure
     if 'EXPFLAG' in hdu[0].header.keys():
         flag = hdu[0].header['EXPFLAG']
-        if flag=='INDETERMINATE' and not keep_indt:
-            warning = 'WARNING: {img} has EXPFLAG==INDETERMINATE'
-            return(warning.format(img=image), False)
-        elif 'TDF-DOWN' in flag and not keep_tdf_down:
-            warning = 'WARNING: {img} has EXPFLAG==TDF-DOWN AT EXPSTART'
-            return(warning.format(img=image), False)
+        if flag=='INDETERMINATE':
+            if not keep_indt:
+                warning = 'WARNING: {img} has EXPFLAG==INDETERMINATE'
+                return(warning.format(img=image), False)
+        elif 'TDF-DOWN' in flag
+            if not keep_tdf_down:
+                warning = 'WARNING: {img} has EXPFLAG==TDF-DOWN AT EXPSTART'
+                return(warning.format(img=image), False)
         elif flag!='NORMAL':
             warning = 'WARNING: {img} has EXPFLAG!=NORMAL.'
             return(warning.format(img=image), False)
