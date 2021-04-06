@@ -165,7 +165,7 @@ instrument_defaults = {
 
 detector_defaults = {
     'wfc3_uvis': {'driz_bits': 96, 'nx': 5200, 'ny': 5200,
-                  'input_files': '*_flc.fits', 'pixel_scale': 0.04,
+                  'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                   'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                   'sigma_low': 2.25, 'sigma_high': 2.00},
                   'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2.0,
@@ -263,7 +263,7 @@ class hst123(object):
     self.magsystem = 'abmag'
 
     # Detection threshold used for image alignment by tweakreg
-    self.threshold = 15.
+    self.threshold = 40.
 
     # S/N limit for calculating limiting magnitude
     self.snr_limit = 3.0
@@ -3540,6 +3540,7 @@ class hst123(object):
 
     opt = self.options['args']
     dp = self.dolphot
+    print(dp['colfile'], dp['base'])
     if (os.path.exists(dp['colfile']) and
         os.path.exists(dp['base']) and
         os.stat(dp['base']).st_size>0):
