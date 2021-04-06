@@ -2175,7 +2175,7 @@ class hst123(object):
     best_inst = self.get_instrument(reference_images[0]).split('_')[0]
 
     vnum = np.min(obstable['visit'].data)
-    vnum = str(vnum).zfill(3)
+    vnum = str(vnum).zfill(4)
 
     # Generate photpipe-like output name for the drizzled image
     if self.options['args'].object:
@@ -2230,7 +2230,8 @@ class hst123(object):
 
         outimage = '{inst}.ref.drz.fits'.format(inst=inst)
 
-        self.run_tweakreg(obstable[mask], '')
+        if not opt.skip_tweakreg:
+            error = self.run_tweakreg(obstable[mask], '')
         self.run_astrodrizzle(obstable[mask], output_name=outimage,
             clean=False)
 
@@ -2254,7 +2255,8 @@ class hst123(object):
                         maskhdu[3*i+1].data[crmask]=4096
                     maskhdu.writeto(file, overwrite=True)
 
-    self.run_tweakreg(obstable, '')
+    if not opt.skip_tweakreg:
+        error = self.run_tweakreg(obstable, '')
     self.run_astrodrizzle(obstable, output_name=drizname)
 
     return(drizname)
@@ -3582,6 +3584,7 @@ class hst123(object):
     if opt.alignonly: default['dolphot']['AlignOnly']=1
     if opt.before: self.before=parse(self.options['args'].before)
     if opt.after: self.after=parse(self.options['args'].after)
+    if opt.skip_tweakreg: self.updatewcs = False
 
     # Override drizzled image dimensions
     dim = opt.drizdim
@@ -3795,7 +3798,7 @@ if __name__ == '__main__':
 
         for i,obstable in enumerate(tables):
 
-            vnum = str(i).zfill(3)
+            vnum = str(i).zfill(4)
             hst.dolphot = hst.make_dolphot_dict(opt.dolphot+vnum)
 
             hst.reference = hst.handle_reference(obstable, opt.reference)
