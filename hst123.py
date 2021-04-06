@@ -1798,7 +1798,7 @@ class hst123(object):
             if not keep_indt:
                 warning = 'WARNING: {img} has EXPFLAG==INDETERMINATE'
                 return(warning.format(img=image), False)
-        elif 'TDF-DOWN' in flag
+        elif 'TDF-DOWN' in flag:
             if not keep_tdf_down:
                 warning = 'WARNING: {img} has EXPFLAG==TDF-DOWN AT EXPSTART'
                 return(warning.format(img=image), False)
