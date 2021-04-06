@@ -415,6 +415,10 @@ class hst123(object):
         help='Change the dolphot FitSky parameter to something other than 2.')
     parser.add_argument('--no_mask', default=False, action='store_true',
         help='Do not add extra masking based on other input files.')
+    parser.add_argument('--keep_indt', default=False, action='store_true',
+        help='Keep images with EXPFLAG==INDETERMINATE.')
+    parser.add_argument('--keep_tdf_down', default=False, action='store_true',
+        help='Keep images with EXPFLAG==TDF-DOWN AT START.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1229,7 +1233,10 @@ class hst123(object):
         for file in glob.glob(rawdir+'/*.fits'):
             # If check_for_coord, only copy files that have target coord
             if check_for_coord:
-                warning, check = self.needs_to_be_reduced(file, save_c1m=True)
+                keep_tdf_down = self.options['args'].keep_tdf_down
+                keep_indt = self.options['args'].keep_indt
+                warning, check = self.needs_to_be_reduced(file, save_c1m=True,
+                    keep_indt=keep_indt, keep_tdf_down=keep_tdf_down)
                 if not check:
                     print(warning)
                     continue
@@ -1334,7 +1341,10 @@ class hst123(object):
         return(None)
     else:
         if check_for_coord:
-            warning, check = self.needs_to_be_reduced(fullfile, save_c1m=True)
+            keep_tdf_down = self.options['args'].keep_tdf_down
+            keep_indt = self.options['args'].keep_indt
+            warning, check = self.needs_to_be_reduced(fullfile, save_c1m=True,
+                keep_indt=keep_indt, keep_tdf_down=keep_tdf_down)
             if not check:
                 print(warning)
                 return(None)
@@ -1710,7 +1720,8 @@ class hst123(object):
         print(error.format(ra=ra,dec=dec))
         return(None)
 
-  def needs_to_be_reduced(self, image, save_c1m=False, keep_indt=False):
+  def needs_to_be_reduced(self, image, save_c1m=False, keep_indt=False,
+    keep_tdf_down=False):
     if not os.path.exists(image):
         success = self.try_to_get_image(image)
         if not success:
@@ -1781,11 +1792,17 @@ class hst123(object):
         detector = hdu[0].header['DETECTOR'].lower()
 
     # Check for EXPFLAG=='INDETERMINATE', usually indicating a bad exposure
-    if not keep_indt:
-        if 'EXPFLAG' in hdu[0].header.keys():
-            if hdu[0].header['EXPFLAG']!='NORMAL':
-                warning = 'WARNING: {img} has EXPFLAG!=NORMAL.'
-                return(warning.format(img=image), False)
+    if 'EXPFLAG' in hdu[0].header.keys():
+        flag = hdu[0].header['EXPFLAG']
+        if flag=='INDETERMINATE' and not keep_indt:
+            warning = 'WARNING: {img} has EXPFLAG==INDETERMINATE'
+            return(warning.format(img=image), False)
+        elif 'TDF-DOWN' in flag and not keep_tdf_down:
+            warning = 'WARNING: {img} has EXPFLAG==TDF-DOWN AT EXPSTART'
+            return(warning.format(img=image), False)
+        elif flag!='NORMAL':
+            warning = 'WARNING: {img} has EXPFLAG!=NORMAL.'
+            return(warning.format(img=image), False)
 
     # Get rid of exposures with exptime < 20s
     if not self.options['args'].keepshort:
@@ -3779,7 +3796,10 @@ if __name__ == '__main__':
     # Check which are HST images that need to be reduced
     hst.make_banner('Checking which images need to be reduced')
     for file in list(hst.input_images):
-        warning, needs_reduce = hst.needs_to_be_reduced(file)
+        keep_tdf_down = hst.options['args'].keep_tdf_down
+        keep_indt = hst.options['args'].keep_indt
+        warning, needs_reduce = hst.needs_to_be_reduced(file,
+            keep_indt=keep_indt, keep_tdf_down=keep_tdf_down)
         if not needs_reduce:
             print(warning)
             hst.input_images.remove(file)
