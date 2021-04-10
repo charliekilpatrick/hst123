@@ -78,7 +78,7 @@ global_defaults = {
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
     'crds': 'https://hst-crds.stsci.edu/unchecked_get/references/hst/',
     'visit': 1,
-    'search_rad': 3.0, # for tweakreg in arcsec
+    'search_rad': 0.5, # for tweakreg in arcsec
     'radius': 5 * u.arcmin,
     'nbright': 5000,
     'minobj': 10,
@@ -263,7 +263,7 @@ class hst123(object):
     self.magsystem = 'abmag'
 
     # Detection threshold used for image alignment by tweakreg
-    self.threshold = 40.
+    self.threshold = 50.
 
     # S/N limit for calculating limiting magnitude
     self.snr_limit = 3.0
@@ -419,6 +419,8 @@ class hst123(object):
         help='Keep images with EXPFLAG==INDETERMINATE.')
     parser.add_argument('--keep_tdf_down', default=False, action='store_true',
         help='Keep images with EXPFLAG==TDF-DOWN AT START.')
+    parser.add_argument('--tweak_thresh', default=None, type=float,
+        help='Initial threshold for finding sources in tweakreg.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -2929,7 +2931,7 @@ class hst123(object):
 
     # Set minimum and maximum threshold
     if threshold<3.0: threshold=3.0
-    if threshold>5000.0: threshold=1000.0
+    if threshold>1000.0: threshold=1000.0
 
     return(threshold)
 
@@ -3102,11 +3104,11 @@ class hst123(object):
             message += 'Image threshold={ithresh}\n'
             print(message.format(ithresh=ithresh, rthresh=rthresh))
 
-            rconv = 3.5 ; iconv = 3.5 ; tol = 0.5
+            rconv = 3.5 ; iconv = 3.5 ; tol = 0.25
             if 'wfc3_ir' in self.get_instrument(reference):
                 rconv = 2.5
             if all(['wfc3_ir' in self.get_instrument(i)
-                for i in tweak_img]): iconv = 2.5 ; tol = 1.2
+                for i in tweak_img]): iconv = 2.5 ; tol = 0.6
 
             try:
                 tweakreg.TweakReg(files=tweak_img, refimage=reference,
@@ -3115,7 +3117,7 @@ class hst123(object):
                     rfluxunits='counts', minobj=minobj, wcsname='TWEAK',
                     searchrad=search_rad, searchunits='arcseconds', runfile='',
                     tolerance=tol, refnbright=nbright, nbright=nbright,
-                    separation=0.5, residplot='No plot', see2dplot=False,
+                    separation=1.0, residplot='No plot', see2dplot=False,
                     imagefindcfg = {'threshold': ithresh,
                         'conv_width': iconv, 'use_sharp_round': True},
                     refimagefindcfg = {'threshold': rthresh,
@@ -3628,6 +3630,9 @@ class hst123(object):
         else:
             warning = 'WARNING: --fitsky {0} not allowed.  Setting fitsky=2.'
             print(warning.format(opt.fitsky))
+
+    if opt.tweak_thresh:
+        self.threshold = opt.tweak_thresh
 
     return(opt)
 
