@@ -165,6 +165,7 @@ instrument_defaults = {
 
 detector_defaults = {
     'wfc3_uvis': {'driz_bits': 96, 'nx': 5200, 'ny': 5200,
+                  'driz_sep_scale': None,
                   'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                   'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                   'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -173,6 +174,7 @@ detector_defaults = {
                               'RSky2': '4 10'},
                    'idcscale': 0.03962000086903572},
     'wfc3_ir': {'driz_bits': 576, 'nx': 5200, 'ny': 5200,
+                'driz_sep_scale': None,
                 'input_files': '*_flt.fits', 'pixel_scale': 0.0642,
                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -181,6 +183,7 @@ detector_defaults = {
                             'RSky2': '3 10'},
                    'idcscale': 0.1282500028610229},
     'acs_wfc': {'driz_bits': 96, 'nx': 5200, 'ny': 5200,
+                'driz_sep_scale': None,
                 'input_files': '*_flc.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -188,6 +191,7 @@ detector_defaults = {
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
     'acs_hrc': {'driz_bits': 0, 'nx': 5200, 'ny': 5200,
+                'driz_sep_scale': None,
                 'input_files': '*_flt.fits', 'pixel_scale': 0.05,
                 'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
@@ -195,7 +199,8 @@ detector_defaults = {
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
     'wfpc2_wfpc2': {'driz_bits': 1032, 'nx': 5200, 'ny': 5200,
-                    'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
+                    'driz_sep_scale': 0.0996,
+                    'input_files': '*_c0m.fits', 'pixel_scale': 0.0996,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
                     'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
@@ -421,6 +426,8 @@ class hst123(object):
         help='Keep images with EXPFLAG==TDF-DOWN AT START.')
     parser.add_argument('--tweak_thresh', default=None, type=float,
         help='Initial threshold for finding sources in tweakreg.')
+    parser.add_argument('--add_crmask', default=False, action='store_true',
+        help='Add the cosmic ray mask to the image DQ mask for dolphot.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -591,7 +598,7 @@ class hst123(object):
 
     # Calculate average and propagate uncertainties weighted by fluxerr
     average_flux = np.sum(flux*1/fluxerr**2)/np.sum(1/fluxerr**2)
-    average_fluxerr = np.sqrt(np.sum(fluxerr**2))/len(fluxerr)
+    average_fluxerr = np.sqrt(np.sum(fluxerr**2)/len(fluxerr))
 
     # Transform back to magnitude and magnitude error
     final_mag = 27.5 - 2.5 * np.log10(average_flux)
@@ -2257,24 +2264,25 @@ class hst123(object):
             clean=False)
 
         # Add cosmic ray mask to static image mask
-        for row in obstable[mask]:
-            file = row['image']
-            crmasks = glob.glob(file.replace('.fits','*crmask.fits'))
+        if self.options['args'].add_crmask:
+            for row in obstable[mask]:
+                file = row['image']
+                crmasks = glob.glob(file.replace('.fits','*crmask.fits'))
 
-            for i,crmaskfile in enumerate(sorted(crmasks)):
-                crmaskhdu = fits.open(crmaskfile)
-                crmask = crmaskhdu[0].data==0
-                if 'c0m' in file:
-                    maskfile = file.split('_')[0]+'_c1m.fits'
-                    if os.path.exists(maskfile):
-                        maskhdu = fits.open(maskfile)
-                        maskhdu[i+1].data[crmask]=4096
-                        maskhdu.writeto(maskfile, overwrite=True)
-                else:
-                    maskhdu = fits.open(file)
-                    if maskhdu[3*i+1].name=='DQ':
-                        maskhdu[3*i+1].data[crmask]=4096
-                    maskhdu.writeto(file, overwrite=True)
+                for i,crmaskfile in enumerate(sorted(crmasks)):
+                    crmaskhdu = fits.open(crmaskfile)
+                    crmask = crmaskhdu[0].data==0
+                    if 'c0m' in file:
+                        maskfile = file.split('_')[0]+'_c1m.fits'
+                        if os.path.exists(maskfile):
+                            maskhdu = fits.open(maskfile)
+                            maskhdu[i+1].data[crmask]=4096
+                            maskhdu.writeto(maskfile, overwrite=True)
+                    else:
+                        maskhdu = fits.open(file)
+                        if maskhdu[3*i+1].name=='DQ':
+                            maskhdu[3*i+1].data[crmask]=4096
+                        maskhdu.writeto(file, overwrite=True)
 
     if not opt.skip_tweakreg:
         error = self.run_tweakreg(obstable, '')
@@ -2576,7 +2584,8 @@ class hst123(object):
                 skymethod='globalmin+match', skymask_cat=skymask_cat,
                 skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
                 driz_sep_fillval=None, driz_sep_bits=options['driz_bits'],
-                driz_sep_wcs=True, driz_sep_rot=rotation, driz_sep_scale=None,
+                driz_sep_wcs=True, driz_sep_rot=rotation,
+                driz_sep_scale=options['driz_sep_scale'],
                 driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
                 driz_sep_ra=ra, driz_sep_dec=dec, driz_sep_pixfrac=0.8,
                 combine_maskpt=0.2, combine_type=combine_type,
@@ -2694,16 +2703,17 @@ class hst123(object):
             hdulist[i].data[:,:] = crclean[:,:]
 
             # Add crmask data to DQ array or DQ image
-            if 'flc' in image or 'flt' in image:
-                # Assume this hdu is corresponding DQ array
-                if len(hdulist)>=i+2 and hdulist[i+2].name=='DQ':
-                    hdulist[i+2].data[np.where(crmask)]=4096
-            elif 'c0m' in image:
-                maskfile = image.split('_')[0]+'_c1m.fits'
-                if os.path.exists(maskfile):
-                    maskhdu = fits.open(maskfile)
-                    maskhdu[i].data[np.where(crmask)]=4096
-                    maskhdu.writeto(maskfile, overwrite=True)
+            if self.options['args'].add_crmask:
+                if 'flc' in image or 'flt' in image:
+                    # Assume this hdu is corresponding DQ array
+                    if len(hdulist)>=i+2 and hdulist[i+2].name=='DQ':
+                        hdulist[i+2].data[np.where(crmask)]=4096
+                elif 'c0m' in image:
+                    maskfile = image.split('_')[0]+'_c1m.fits'
+                    if os.path.exists(maskfile):
+                        maskhdu = fits.open(maskfile)
+                        maskhdu[i].data[np.where(crmask)]=4096
+                        maskhdu.writeto(maskfile, overwrite=True)
 
     # This writes in place
     hdulist.writeto(output, overwrite=True, output_verify='silentfix')
