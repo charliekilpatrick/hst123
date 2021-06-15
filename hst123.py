@@ -338,6 +338,8 @@ class hst123(object):
         'catalog from the input RA/Dec.')
     parser.add_argument('--reffilter', default=None, type=str,
         help='Use this filter for the reference image if available.')
+    parser.add_argument('--avoidwfpc2', default=False, action='store_true',
+        help='Avoid using WFPC2 images as the reference image.')
     parser.add_argument('--refinst', default=None, type=str,
         help='Use this instrument for the reference image if available.')
     parser.add_argument('--dofake','--df', default=False,
@@ -2191,7 +2193,8 @@ class hst123(object):
     # If we haven't defined input images, catch error
 
     reference_images = self.pick_deepest_images(list(obstable['image']),
-        reffilter=self.options['args'].reffilter, avoid_wfpc2=True,
+        reffilter=self.options['args'].reffilter,
+        avoid_wfpc2=self.options['args'].avoidwfpc2,
         refinst=self.options['args'].refinst)
 
     if len(reference_images)==0:
@@ -3146,8 +3149,8 @@ class hst123(object):
                     if nsources < 1000:
                         shallow_img.append(img)
 
-            except (MemoryError,TypeError,UnboundLocalError,RuntimeError) as e:
-                self.tweakreg_error(e)
+            #except (MemoryError,TypeError,UnboundLocalError,RuntimeError) as e:
+            #    self.tweakreg_error(e)
 
             self.add_thresholds(tweak_img, ithresh)
             self.add_thresholds([reference], rthresh)
@@ -3799,9 +3802,12 @@ if __name__ == '__main__':
 
     if opt.archive and not opt.skip_copy:
         hst.make_banner('Copying raw data to working dir')
-        for product in hst.productlist:
-            hst.copy_raw_data_archive(product, archivedir=opt.archive,
-                workdir=opt.workdir, check_for_coord=True)
+        if hst.productlist:
+            for product in hst.productlist:
+                hst.copy_raw_data_archive(product, archivedir=opt.archive,
+                    workdir=opt.workdir, check_for_coord=True)
+        else:
+            hst.make_banner('WARNING: no products to download!')
     else:
         # Assume that all files are in the raw/ data directory
         hst.make_banner('Copying raw data to working dir')
