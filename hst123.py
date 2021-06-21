@@ -3326,13 +3326,18 @@ class hst123(object):
             error += 'Try again later...'
             print(error)
             return(productlist)
+
         instrument = obs['instrument_name']
         s_ra = obs['s_ra']
         s_dec = obs['s_dec']
-        productList.add_column([instrument]*len(productList),
-            name='instrument_name')
-        productList.add_column([s_ra]*len(productList), name='ra')
-        productList.add_column([s_dec]*len(productList), name='dec')
+
+        instcol = Column([instrument]*len(productList), name='instrument_name')
+        racol = Column([s_ra]*len(productList), name='ra')
+        deccol = Column([s_dec]*len(productList), name='dec')
+
+        productList.add_column(instcol)
+        productList.add_column(racol)
+        productList.add_column(deccol)
 
         for prod in productList:
             filename = prod['productFilename']
