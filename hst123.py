@@ -31,7 +31,7 @@ from scipy import interpolate
 from astropy import units as u
 from astropy.utils.data import clear_download_cache,download_file
 from astropy.io import fits
-from astropy.table import Table, Column
+from astropy.table import Table, Column, unique
 from astropy.time import Time
 from astroscrappy import detect_cosmics
 from dateutil.parser import parse
@@ -3356,6 +3356,24 @@ class hst123(object):
                 else:
                     productlist.add_row(prod)
 
+    downloadFilenames = []
+    for prod in productlist:
+        filename = prod['productFilename']
+
+        # Cut down new HST filenames that start with hst_PROGID
+        filename = '_'.join(filename.split('_')[-2:])
+
+        downloadFilenames.append(filename)
+
+    productlist.add_column(Column(downloadFilenames, name='downloadFilename'))
+
+    # Check that all files to download are unique
+    if productlist and len(productlist)>1:
+        productlist = unique(productlist, keys='downloadFilename')
+
+    # Sort by obsID in case we need to reference
+    productlist.sort('obsID')
+
     return(productlist)
 
   def download_files(self, productlist, dest=None, archivedir=None,
@@ -3367,10 +3385,7 @@ class hst123(object):
         return(False)
 
     for prod in productlist:
-        filename = prod['productFilename']
-
-        # Cut down new HST filenames that start with hst_PROGID
-        filename = '_'.join(filename.split('_')[-2:])
+        filename = prod['downloadFilename']
 
         outdir = ''
         if dest:
