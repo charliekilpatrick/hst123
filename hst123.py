@@ -3362,7 +3362,6 @@ class hst123(object):
 
         # Cut down new HST filenames that start with hst_PROGID
         filename = '_'.join(filename.split('_')[-2:])
-
         downloadFilenames.append(filename)
 
     productlist.add_column(Column(downloadFilenames, name='downloadFilename'))
