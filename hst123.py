@@ -260,7 +260,7 @@ class hst123(object):
     self.productlist = None
 
     self.keepshort = False
-    self.nocleanup = False
+    self.cleanup = False
     self.updatewcs = True
     self.archive = False
     self.keep_objfile = False
@@ -347,8 +347,8 @@ class hst123(object):
         'Requires that dolphot has been run, and so files are taken from the '+\
         'parameters in dolphot output from the current directory rather than '+\
         'files derived from the current run.')
-    parser.add_argument('--nocleanup', default=False, action='store_true',
-        help='Dont clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
+    parser.add_argument('--cleanup', default=False, action='store_true',
+        help='Clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
     parser.add_argument('--drizzleall', default=False, action='store_true',
         help='Drizzle all visit/filter pairs together.')
     parser.add_argument('--object', default=None, type=str,
@@ -2453,7 +2453,7 @@ class hst123(object):
     wht_type = self.options['args'].wht_type
 
     if clean is not None:
-        clean = not self.options['args'].nocleanup
+        clean = self.options['args'].cleanup
 
     if len(tmp_input)==1:
         shutil.copy(tmp_input[0], 'dummy.fits')
@@ -2614,7 +2614,7 @@ class hst123(object):
     message = 'Astrodrizzle took {time} seconds to execute.\n\n'
     print(message.format(time = time.time()-start_drizzle))
 
-    if not self.options['args'].nocleanup:
+    if self.options['args'].cleanup:
         for image in tmp_input:
             os.remove(image)
 
@@ -3234,7 +3234,7 @@ class hst123(object):
 
         newhdu.writeto(image, output_verify='silentfix', overwrite=True)
 
-        if (os.path.isfile(rawtmp) and not self.options['args'].nocleanup):
+        if (os.path.isfile(rawtmp) and not self.options['args'].cleanup):
             os.remove(rawtmp)
 
     # Clean up temporary files and output
@@ -3910,7 +3910,7 @@ if __name__ == '__main__':
     hst.input_list(hst.input_images, show=True, save=False, file=hst.summary)
 
     # Clean up interstitial files in working directory
-    if not opt.nocleanup:
+    if opt.cleanup:
         message = 'Cleaning up {n} input images.'
         hst.make_banner(message.format(n=len(hst.input_images)))
         for image in hst.input_images:
