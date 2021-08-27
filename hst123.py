@@ -78,7 +78,7 @@ global_defaults = {
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
     'crds': 'https://hst-crds.stsci.edu/unchecked_get/references/hst/',
     'visit': 1,
-    'search_rad': 0.5, # for tweakreg in arcsec
+    'search_rad': 1.0, # for tweakreg in arcsec
     'radius': 5 * u.arcmin,
     'nbright': 7000,
     'minobj': 10,
@@ -932,7 +932,7 @@ class hst123(object):
     obstable = self.add_visit_info(obstable)
 
     # Show the obstable in a column formatted style
-    form = '{file: <34} {inst: <18} {filt: <10} '
+    form = '{file: <36} {inst: <18} {filt: <10} '
     form += '{exp: <12} {date: <10} {time: <10}'
     if show:
         header = form.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
@@ -2614,7 +2614,8 @@ class hst123(object):
     # Equalize sensitivities for WFPC2 data
     for image in tmp_input:
         if 'c0m' in image:
-            photeq.photeq(files=image, readonly=False, ref_phot_ext=3)
+            photeq.photeq(files=image, readonly=False, ref_phot_ext=3,
+                logfile=None)
 
     rotation = 0.0
     if self.options['args'].no_rotation:
@@ -2945,7 +2946,7 @@ class hst123(object):
         nobj = self.get_nsources(image, t)
         # If no data yet, just add and continue
         if len(inp_data)<3:
-            inp_data.append((nobj, t))
+            inp_data.append((float(nobj), float(t)))
         # If we're going backward - i.e., more objects than last run, then
         # just break
         elif nobj < inp_data[-1][0]:
@@ -2953,12 +2954,63 @@ class hst123(object):
         else:
             # Otherwise, add the data and if we've already hit the target then
             # break
-            inp_data.append((nobj, t))
+            inp_data.append((float(nobj), float(t)))
             if nobj > target: break
 
+    return(inp_data)
+
+  def add_thresh_data(self, thresh_data, image, inp_data):
+    if not thresh_data:
+        keys = []
+        data = []
+        for val in inp_data:
+            keys.append('%2.1f'%float(val[1]))
+            data.append([val[0]])
+
+        keys.insert(0, 'file')
+        data.insert(0, [image])
+
+        thresh_data = Table(data, names=keys)
+        return(thresh_data)
+
+    keys = []
+    data = []
+    for val in inp_data:
+        key = '%2.1f'%float(val[1])
+        keys.append(key)
+        data.append(float(val[0]))
+        if key not in thresh_data.keys():
+            thresh_data.add_column(Column([np.nan]*len(thresh_data),
+                name=key))
+
+    keys.insert(0, 'file')
+    data.insert(0, image)
+
+    for key in thresh_data.keys():
+        if key not in keys:
+            data.append(np.nan)
+
+    thresh_data.add_row(data)
+    return(thresh_data)
+
+  def get_best_tweakreg_threshold(self, thresh_data, target):
+
+    thresh = []
+    nsources = []
+    for key in thresh_data.keys():
+        if key=='file': continue
+        thresh.append(float(key))
+        nsources.append(float(thresh_data[key]))
+
+    thresh = np.array(thresh)
+    nsources = np.array(nsources)
+
+    mask = (~np.isnan(thresh)) & (~np.isnan(nsources))
+    thresh = thresh[mask]
+    nsources = nsources[mask]
+
     # Interpolate the data and check what S/N target we want to get obj number
-    thresh_func = interp1d([d[0] for d in inp_data],
-        [d[1] for d in inp_data], kind='linear', bounds_error=False,
+    thresh_func = interp1d(nsources, thresh, kind='linear', bounds_error=False,
         fill_value='extrapolate')
     threshold = thresh_func(target)
 
@@ -3116,6 +3168,7 @@ class hst123(object):
     tweak_img = copy.copy(tmp_images)
     ithresh = self.threshold ; rthresh = self.threshold
     shallow_img = []
+    thresh_data = None
     tries = 0
 
     while (not tweakreg_success and tries < 10):
@@ -3153,9 +3206,25 @@ class hst123(object):
             # Get shallowest image and use threshold from that
             shallow = sorted(tweak_img,
                 key=lambda im: fits.getval(im, 'EXPTIME'))[0]
-            new_ithresh = self.get_tweakreg_thresholds(shallow,
+
+            if not thresh_data or shallow not in thresh_data['file']:
+                inp_data = self.get_tweakreg_thresholds(shallow,
+                    options['nbright']*4)
+                thresh_data = self.add_thresh_data(thresh_data, shallow,
+                    inp_data)
+            mask = thresh_data['file']==shallow
+            inp_thresh = thresh_data[mask][0]
+            new_ithresh = self.get_best_tweakreg_threshold(inp_thresh,
                 options['nbright']*4)
-            new_rthresh = self.get_tweakreg_thresholds(reference,
+
+            if not thresh_data or reference not in thresh_data['file']:
+                inp_data = self.get_tweakreg_thresholds(reference,
+                    options['nbright']*4)
+                thresh_data = self.add_thresh_data(thresh_data, reference,
+                    inp_data)
+            mask = thresh_data['file']==reference
+            inp_thresh = thresh_data[mask][0]
+            new_rthresh = self.get_best_tweakreg_threshold(inp_thresh,
                 options['nbright']*4)
 
             if not rthresh: rthresh = self.threshold
@@ -3171,7 +3240,14 @@ class hst123(object):
             if 'wfc3_ir' in self.get_instrument(reference):
                 rconv = 2.5
             if all(['wfc3_ir' in self.get_instrument(i)
-                for i in tweak_img]): iconv = 2.5 ; tol = 0.6
+                for i in tweak_img]):
+                iconv = 2.5 ; tol = 0.6
+            if 'wfpc2' in self.get_instrument(reference):
+                rconv = 2.5
+            if all(['wfpc2' in self.get_instrument(i)
+                for i in tweak_img]):
+                iconv = 2.5 ; tol = 0.5
+
 
             # Don't want to keep trying same thing over and over
             if (new_ithresh>=ithresh or new_rthresh>=rthresh) and tries>1:
@@ -3181,15 +3257,22 @@ class hst123(object):
                 ithresh = np.max([new_ithresh*(0.95**tries), 3.0])
                 rthresh = np.max([new_rthresh*(0.95**tries), 3.0])
                 tol = tol * 1.3**tries
+                search_rad = search_rad * 1.2**tries
             else:
                 ithresh = new_ithresh
                 rthresh = new_rthresh
+
+            if tries > 7:
+                minobj = 7
 
             message = '\nAdjusting thresholds:\n'
             message += 'Reference threshold={rthresh}\n'
             message += 'Image threshold={ithresh}\n'
             message += 'Tolerance={tol}\n'
-            print(message.format(ithresh=ithresh, rthresh=rthresh, tol=tol))
+            message += 'Search radius={rad}\n'
+            print(message.format(ithresh='%2.4f'%ithresh,
+                rthresh='%2.4f'%rthresh, tol='%2.4f'%tol,
+                rad='%2.4f'%search_rad))
 
             outshifts = 'drizzle_shifts.txt'
 
@@ -3200,7 +3283,7 @@ class hst123(object):
                     rfluxunits='counts', minobj=minobj, wcsname='TWEAK',
                     searchrad=search_rad, searchunits='arcseconds', runfile='',
                     tolerance=tol, refnbright=nbright, nbright=nbright,
-                    separation=1.0, residplot='No plot', see2dplot=False,
+                    separation=0.5, residplot='No plot', see2dplot=False,
                     imagefindcfg = {'threshold': ithresh,
                         'conv_width': iconv, 'use_sharp_round': True},
                     refimagefindcfg = {'threshold': rthresh,
@@ -3784,10 +3867,12 @@ class hst123(object):
                         # Update header variable
                         hdu[i].header['CRVAL1PR']=corig.ra.degree
                         hdu[i].header['CRVAL2PR']=corig.dec.degree
-                        hdu[i].header['CRVAL1']=corig.ra.degree
-                        hdu[i].header['CRVAL2']=corig.dec.degree
-                        #hdu[i].header['CRVAL1']=newra
-                        #hdu[i].header['CRVAL2']=newdec
+                        if 'c0m' in file:
+                            hdu[i].header['CRVAL1']=newra
+                            hdu[i].header['CRVAL2']=newdec
+                        else:
+                            hdu[i].header['CRVAL1']=corig.ra.degree
+                            hdu[i].header['CRVAL2']=corig.dec.degree
                         hdu[i].header['SHIFTX']=row['xoffset']
                         hdu[i].header['SHIFTY']=row['yoffset']
                         hdu[i].header['SHIFTRA']=sra
