@@ -27,7 +27,6 @@ import smtplib, datetime, requests, random
 import astropy.wcs as wcs
 import numpy as np
 from contextlib import contextmanager
-from scipy import interpolate
 from astropy import units as u
 from astropy.utils.data import clear_download_cache,download_file
 from astropy.io import fits
@@ -1621,7 +1620,7 @@ class hst123(object):
     snr = snr[~mask]
 
     if len(snr)>10:
-        snr_func = interpolate.interp1d(snr, bin_mag, fill_value='extrapolate',
+        snr_func = interp1d(snr, bin_mag, fill_value='extrapolate',
             bounds_error=False)
         return(snr_func(limit))
     else:
@@ -2613,16 +2612,9 @@ class hst123(object):
                     f.write(line+' \n')
 
     # Equalize sensitivities for WFPC2 data
-    hdu = fits.open(tmp_input[0])
-    photflam = None
-    for h in hdu:
-        if h.name=='SCI' and 'PHOTFLAM' in h.header.keys():
-            photflam = h.header['PHOTFLAM']
-
     for image in tmp_input:
         if 'c0m' in image:
-            photeq.photeq(files=image, readonly=False, ref_phot=photflam,
-                phot_kwd='PHOTFLAM')
+            photeq.photeq(files=image, readonly=False, ref_phot_ext=3)
 
     rotation = 0.0
     if self.options['args'].no_rotation:
@@ -2952,7 +2944,7 @@ class hst123(object):
     for t in np.flip([3.0,4.0,5.0,6.0,8.0,10.0,15.0,20.0,25.0,30.0,40.0,80.0]):
         nobj = self.get_nsources(image, t)
         # If no data yet, just add and continue
-        if len(inp_data)==0:
+        if len(inp_data)<3:
             inp_data.append((nobj, t))
         # If we're going backward - i.e., more objects than last run, then
         # just break
