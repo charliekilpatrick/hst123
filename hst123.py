@@ -217,7 +217,7 @@ detector_defaults = {
                                 'RPSF': 13, 'RSky': '15 35',
                                 'RSky2': '4 10'}}}
 
-acceptable_filters = {
+acceptable_filters = [
     'F220W','F250W','F330W','F344N','F435W','F475W','F550M','F555W',
     'F606W','F625W','F660N','F660N','F775W','F814W','F850LP','F892N',
     'F098M','F105W','F110W','F125W','F126N','F127M','F128N','F130N','F132N',
@@ -228,7 +228,7 @@ acceptable_filters = {
     'F673N','F680N','F689M','F763M','F845M','F953N','F122M','F160BW','F185W',
     'F218W','F255W','F300W','F375N','F380W','F390N','F437N','F439W','F450W',
     'F569W','F588N','F622W','F631N','F673N','F675W','F702W','F785LP','F791W',
-    'F953N','F1042M'}
+    'F953N','F1042M']
 
 """
 Zeropoints in hst123 are calculated in the AB mag system by default (this is
@@ -1037,6 +1037,19 @@ class hst123(object):
     except ValueError:
         return(False)
     return(True)
+
+  # Check for necessary dolphot scripts in the path
+  def check_for_dolphot(self):
+    # Complete list of scripts that hst123 needs to run all dolphot cmds
+    scripts = ['dolphot','calcsky','acsmask','wfc3mask','wfpc2mask',
+        'splitgroups']
+
+    dolphot = True
+    for s in scripts:
+        if not shutil.which(s):
+            dolphot = False
+
+    return(dolphot)
 
   # Make dictionary with dolphot information
   def make_dolphot_dict(self, dolphot):
@@ -2387,6 +2400,18 @@ class hst123(object):
   # Update image wcs using updatewcs routine
   def update_image_wcs(self, image, options, use_db=True):
 
+    hdu = fits.open(image, mode='readonly')
+    # Check if tweakreg was successfully run.  If so, then skip
+    if 'TWEAKSUC' in hdu[0].header.keys() and hdu[0].header['TWEAKSUC']==1:
+        return(True)
+
+    # Check for hierarchical alignment.  If image has been shifted with
+    # hierarchical alignment, we don't want to shift it again
+    if 'HIERARCH' in hdu[0].header.keys() and hdu[0].header['HIERARCH']==1:
+        return(True)
+
+    hdu.close()
+
     message = 'Updating WCS for {file}'
     print(message.format(file=image))
 
@@ -3653,6 +3678,8 @@ class hst123(object):
   # sub-frames after all sub-images are drizzled.
   def drizzle_all(self, obstable, hierarchical=False, clobber=False):
 
+    opt = self.options['args']
+
     for name in np.unique(obstable['drizname'].data):
         mask = obstable['drizname']==name
         driztable = obstable[mask]
@@ -3671,12 +3698,13 @@ class hst123(object):
         self.sanitize_reference(name)
 
         # Make a sky file for the drizzled image and rename 'noise'
-        if (self.needs_to_calc_sky(name)):
-            self.compress_reference(name)
-            self.calc_sky(name, self.options['detector_defaults'])
-            sky_image = name.replace('.fits', '.sky.fits')
-            noise_name = name.replace('.fits', '.noise.fits')
-            shutil.copy(sky_image, noise_name)
+        if opt.rundolphot:
+            if (self.needs_to_calc_sky(name)):
+                self.compress_reference(name)
+                self.calc_sky(name, self.options['detector_defaults'])
+                sky_image = name.replace('.fits', '.sky.fits')
+                noise_name = name.replace('.fits', '.noise.fits')
+                shutil.copy(sky_image, noise_name)
 
     if hierarchical:
         driztable = unique(obstable, keys='drizname')
@@ -3699,12 +3727,18 @@ class hst123(object):
         error, shift_table = self.run_tweakreg(driztable, deepest,
             do_cosmic=False, skip_wcs=True, search_radius=5.0)
 
+        # Append deepest image to driztable with 0,0 offset
+        shift_table.add_row([deepest, 0., 0.])
+
         print('\n\nShift table:')
-        form = '{file: <24} {xoffset: <12} {yoffset: <12}'
+        form = '{file: <34} {xoffset: <12} {yoffset: <12}'
         print(form.format(file='file', xoffset='xoffset', yoffset='yoffset'))
         for row in shift_table:
             print(form.format(file=row['file'], xoffset='%2.4f'%row['xoffset'],
                 yoffset='%2.4f'%row['yoffset']))
+            mask = obstable['drizname']==row['file']
+            for file in obstable[mask]['image']:
+                print(file)
 
         # Convert xoffset and yoffset values to RAoffset and DECoffset
         message = '\n\nApplying shifts from shift table to frames'
@@ -3718,7 +3752,7 @@ class hst123(object):
             print(message.format(x=row['xoffset'], y=row['yoffset'],
                 f=row['file']))
 
-            xshift = hdu[0].header['CRPIX1'] + row['xoffset']
+            xshift = hdu[0].header['CRPIX1'] + 0.5 * row['xoffset']
             yshift = hdu[0].header['CRPIX2'] + row['yoffset']
 
             hdu.close()
@@ -3741,6 +3775,9 @@ class hst123(object):
 
                 # Unset TWEAKSUC so tweakreg will do fine alignment next run
                 hdu[0].header['TWEAKSUC']=0
+                # Set HIERARCH=1 so other methods will recognize that the
+                # image has been hierarchically aligned
+                hdu[0].header['HIERARCH']=1
 
                 for i,h in enumerate(hdu):
                     if ('CRVAL1' in h.header.keys() and
@@ -3748,15 +3785,17 @@ class hst123(object):
                         corig = SkyCoord(h.header['CRVAL1'],
                                          h.header['CRVAL2'], unit='deg')
                         sdec = ddec.degree
-                        newdec = corig.dec.degree + sdec
+                        newdec = corig.dec.degree - sdec
                         sra  = 1./np.cos(newdec*np.pi/180.0)*dra.degree
-                        newra = corig.ra.degree + sra
+                        newra = corig.ra.degree - sra
 
                         # Update header variable
                         hdu[i].header['CRVAL1PR']=corig.ra.degree
                         hdu[i].header['CRVAL2PR']=corig.dec.degree
-                        hdu[i].header['CRVAL1']=newra
-                        hdu[i].header['CRVAL2']=newdec
+                        hdu[i].header['CRVAL1']=corig.ra.degree
+                        hdu[i].header['CRVAL2']=corig.dec.degree
+                        #hdu[i].header['CRVAL1']=newra
+                        #hdu[i].header['CRVAL2']=newdec
                         hdu[i].header['SHIFTX']=row['xoffset']
                         hdu[i].header['SHIFTY']=row['yoffset']
                         hdu[i].header['SHIFTRA']=sra
@@ -3764,6 +3803,10 @@ class hst123(object):
                         hdu[i].header['SHIFTREF']=row['file']
 
                 hdu.close()
+
+        # Now that WCS corrections have been applied, we want to skip this for
+        # future runs of tweakreg and astrodrizzle
+        self.updatewcs = False
 
 
   def get_dolphot_photometry(self, split_images, reference):
@@ -3842,6 +3885,15 @@ class hst123(object):
 
     if opt.tweak_thresh:
         self.threshold = opt.tweak_thresh
+
+    # Check for dolphot scripts and set rundolphot to False if any of them is
+    # not available.  This will prevent errors due to scripts not being in path
+    if not self.check_for_dolphot():
+        warning = 'WARNING: dolphot scripts not in path!  Setting --rundolphot '
+        warning += 'to False.  If you want to run dolphot, download and '
+        warning += 'compile scripts!'
+        print(warning)
+        opt.rundolphot = False
 
     return(opt)
 
