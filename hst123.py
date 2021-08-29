@@ -2986,6 +2986,9 @@ class hst123(object):
     keys.insert(0, 'file')
     data.insert(0, image)
 
+    # Recast as table to prevent complaint aobut thresh_data.keys()
+    thresh_data = Table(thresh_data)
+
     for key in thresh_data.keys():
         if key not in keys:
             data.append(np.nan)
