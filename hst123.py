@@ -3000,6 +3000,7 @@ class hst123(object):
 
     thresh = []
     nsources = []
+    thresh_data = Table(thresh_data)
     for key in thresh_data.keys():
         if key=='file': continue
         thresh.append(float(key))
