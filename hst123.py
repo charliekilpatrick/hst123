@@ -442,6 +442,9 @@ class hst123(object):
         help='Initial threshold for finding sources in tweakreg.')
     parser.add_argument('--add_crmask', default=False, action='store_true',
         help='Add the cosmic ray mask to the image DQ mask for dolphot.')
+    parser.add_argument('--redrizzle', default=False, action='store_true',
+        help='Redrizzle all epochs/filters once the master reference image '+\
+        'is created and all images are aligned to that frame.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -3132,34 +3135,12 @@ class hst123(object):
         message = 'Copying {deep} to reference dummy.fits'
         print(message.format(deep=deepest))
         shutil.copyfile(deepest, reference)
-        # Remove dummy image from tmp_images
-        if deepest in tmp_images:
-            tmp_images.remove(deepest)
-            # xoffset and yoffset should be set to 0 for this file
-            deepfile = deepest.replace('rawtmp.fits','')
-            deepfile = deepfile.replace('.fits','')
-            idx = [i for i,row in enumerate(shift_table)
-                    if deepfile in row['file']]
-            if len(idx)==1:
-                shift_table[idx[0]]['xoffset']=0.
-                shift_table[idx[0]]['yoffset']=0.
     elif not self.prepare_reference_tweakreg(reference):
         # Can't use this reference image, just use one of the input
         reference = 'dummy.fits'
         message = 'Copying {deep} to reference dummy.fits'
         print(message.format(deep=deepest))
         shutil.copyfile(deepest, reference)
-        # Remove dummy image from tmp_images
-        if deepest in tmp_images:
-            tmp_images.remove(deepest)
-            # xoffset and yoffset should be set to 0 for this file
-            deepfile = deepest.replace('rawtmp.fits','')
-            deepfile = deepfile.replace('.fits','')
-            idx = [i for i,row in enumerate(shift_table)
-                    if deepfile in row['file']]
-            if len(idx)==1:
-                shift_table[idx[0]]['xoffset']=0.
-                shift_table[idx[0]]['yoffset']=0.
     else:
         modified = True
 
@@ -3755,7 +3736,8 @@ class hst123(object):
   # observation epochs.  These are segmented by drizname defined in input_list.
   # There is an additional option to perform hierarchical alignment on the
   # sub-frames after all sub-images are drizzled.
-  def drizzle_all(self, obstable, hierarchical=False, clobber=False):
+  def drizzle_all(self, obstable, hierarchical=False, clobber=False,
+    tweakreg=True):
 
     opt = self.options['args']
 
@@ -3770,7 +3752,8 @@ class hst123(object):
             message = 'Constructing drizzled image: {im}'
             print(message.format(im=name))
             # Run tweakreg on the sub-table to make sure frames are aligned
-            error, shift_table = self.run_tweakreg(driztable, '')
+            if tweakreg:
+                error, shift_table = self.run_tweakreg(driztable, '')
             # Next run astrodrizzle to construct the drizzled frame
             self.run_astrodrizzle(driztable, output_name=name)
 
@@ -4187,6 +4170,11 @@ if __name__ == '__main__':
             if not opt.skip_tweakreg:
                 hst.make_banner('Running main tweakreg')
                 error = hst.run_tweakreg(obstable, hst.reference)
+
+            if opt.redrizzle:
+                hst.make_banner('Performing redrizzle of all epochs/filters')
+                hst.updatewcs = False
+                hst.drizzle_all(obstable, clobber=True)
 
             # dolphot image preparation: mask_image, split_groups, calc_sky
             split_images = []
