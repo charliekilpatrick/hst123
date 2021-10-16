@@ -80,4 +80,4 @@ hst123 also requires a complete installation of dolphot, including all instrumen
 
 ## Contact
 
-For all questions, comments, suggestions, and bugs related to this script, please contact Charlie Kilpatrick at cdkilpat@ucsc.edu.
+For all questions, comments, suggestions, and bugs related to this script, please contact Charlie Kilpatrick at ckilpatrick@northwestern.edu.
