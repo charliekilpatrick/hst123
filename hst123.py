@@ -86,7 +86,7 @@ global_defaults = {
                 'SkipSky': 2,
                 'RCombine': 1.5,
                 'SkySig': 2.25,
-                'SecondPass': 5,
+                'SecondPass': 1,
                 'SigFindMult': 0.85,
                 'MaxIT': 25,
                 'NoiseMult': 0.10,
@@ -95,7 +95,7 @@ global_defaults = {
                 'RCentroid': 2,
                 'PosStep': 0.25,
                 'dPosMax': 2.5,
-                'SigPSF': 10.0,
+                'SigPSF': 5.0,
                 'PSFres': 1,
                 'Align': 4,
                 'Rotate': 1,
@@ -107,12 +107,12 @@ global_defaults = {
                 'SigFinal': 3.5,
                 'UseWCS': 1,
                 'AlignOnly': 0,
-                'AlignIter': 3,
+                'AlignIter': 5,
                 'AlignTol': 0.5,
-                'AlignStep': 0.2,
+                'AlignStep': 2.0,
                 'VerboseData': 1,
-                'NegSky': 0,
-                'Force1': 0,
+                'NegSky': 1,
+                'Force1': 1,
                 'DiagPlotType': 'PNG',
                 'InterpPSFlib': 1,
                 'FakeMatch': 3.0,
@@ -445,6 +445,8 @@ class hst123(object):
     parser.add_argument('--redrizzle', default=False, action='store_true',
         help='Redrizzle all epochs/filters once the master reference image '+\
         'is created and all images are aligned to that frame.')
+    parser.add_argument('--dolphot_lim', default=3.5, type=float,
+        help='Detection threshold for sources detected by dolphot.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -595,7 +597,7 @@ class hst123(object):
     idx = []
     for i in np.arange(len(magerrs)):
         try:
-            if (float(magerrs[i]) < 0.5 and float(counts[i]) > 0.0 and
+            if (float(magerrs[i]) <  0.5 and float(counts[i]) > 0.0 and
                 float(exptimes[i]) > 0.0 and float(zpt[i]) > 0.0):
                 idx.append(i)
         except:
@@ -1162,8 +1164,11 @@ class hst123(object):
             yline = float(line.split()[ycol]) + 0.5
             dist = np.sqrt((xline-x)**2 + (yline-y)**2)
             sn = self.get_dolphot_data(line, colfile, 'Signal-to-noise', '')
+            counts = self.get_dolphot_data(line, colfile,
+                'Normalized count rate', '')
             if (dist < radius):
-                data.append({'sep':dist, 'data':line, 'sn': float(sn)})
+                data.append({'sep':dist, 'data':line, 'sn': float(sn),
+                    'counts': float(counts)})
 
     limit_data = []
     if get_limits:
@@ -1181,9 +1186,9 @@ class hst123(object):
     else:
         warning = 'WARNING: found more than one source. '
         warning += 'Picking {0}'
-        # If brightest, sort by 1/sn so highest sn is first
+        # If brightest, reverse sort by counts
         if brightest:
-            data = sorted(data, key=lambda obj: 1./obj['sn'])
+            data = sorted(data, key=lambda obj: obj['counts'], reverse=True)
             warning = warning.format('brightest object')
         # Otherwise sort by separation so closest object is first
         else:
@@ -3517,6 +3522,9 @@ class hst123(object):
                 else:
                     productlist.add_row(prod)
 
+    if not productlist:
+        return(None)
+
     downloadFilenames = []
     for prod in productlist:
         filename = prod['productFilename']
@@ -3950,6 +3958,12 @@ class hst123(object):
     if opt.tweak_thresh:
         self.threshold = opt.tweak_thresh
 
+    if opt.dolphot_lim < self.options['global_defaults']['dolphot']['SigFinal']:
+        lim = opt.dolphot_lim
+        self.options['global_defaults']['dolphot']['SigFinal']=lim
+        if lim < self.options['global_defaults']['dolphot']['SigFind']:
+            self.options['global_defaults']['dolphot']['SigFind']=lim
+
     # Check for dolphot scripts and set rundolphot to False if any of them is
     # not available.  This will prevent errors due to scripts not being in path
     if not self.check_for_dolphot():
@@ -4154,7 +4168,7 @@ if __name__ == '__main__':
         for i,obstable in enumerate(tables):
 
             vnum = str(i).zfill(4)
-            if opt.rundolphot:
+            if opt.rundolphot or opt.scrapedolphot:
                 hst.dolphot = hst.make_dolphot_dict(opt.dolphot+vnum)
 
             # Drizzle all visit/filter pairs if drizzleall
@@ -4178,7 +4192,7 @@ if __name__ == '__main__':
 
             # dolphot image preparation: mask_image, split_groups, calc_sky
             split_images = []
-            if opt.rundolphot:
+            if opt.rundolphot or opt.scrapedolphot:
                 message = 'Preparing dolphot data for files={files}.'
                 print(message.format(files=','.join(map(str,
                     obstable['image']))))
