@@ -447,6 +447,8 @@ class hst123(object):
         'is created and all images are aligned to that frame.')
     parser.add_argument('--dolphot_lim', default=3.5, type=float,
         help='Detection threshold for sources detected by dolphot.')
+    parser.add_argument('--tweak_search', default=None, type=float,
+        help='Default search radius for tweakreg.')
     return(parser)
 
   def clear_downloads(self, options):
@@ -1831,8 +1833,7 @@ class hst123(object):
     detector = ''
 
     # Check for header keys that we need
-    for key in ['INSTRUME','EXPFLAG','EXPTIME',
-        'DATE-OBS','TIME-OBS']:
+    for key in ['INSTRUME','EXPTIME','DATE-OBS','TIME-OBS']:
         if key not in hdu[0].header.keys():
             warning = 'WARNINGS: {key} not in {img} header'
             warning = warning.format(key=key, img=image)
@@ -3954,6 +3955,9 @@ class hst123(object):
         else:
             warning = 'WARNING: --fitsky {0} not allowed.  Setting fitsky=2.'
             print(warning.format(opt.fitsky))
+
+    if opt.tweak_search:
+        self.options['global_defaults']['search_rad']=opt.tweak_search
 
     if opt.tweak_thresh:
         self.threshold = opt.tweak_thresh
