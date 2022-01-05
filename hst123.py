@@ -80,7 +80,7 @@ global_defaults = {
     'visit': 1,
     'search_rad': 1.0, # for tweakreg in arcsec
     'radius': 5 * u.arcmin,
-    'nbright': 7000,
+    'nbright': 8000,
     'minobj': 10,
     'dolphot': {'FitSky': 2,
                 'SkipSky': 2,
@@ -448,6 +448,8 @@ class hst123(object):
     parser.add_argument('--dolphot_lim', default=3.5, type=float,
         help='Detection threshold for sources detected by dolphot.')
     parser.add_argument('--tweak_search', default=None, type=float,
+        help='Default search radius for tweakreg.')
+    parser.add_argument('--tweak_min_obj', default=None, type=int,
         help='Default search radius for tweakreg.')
     return(parser)
 
@@ -1853,22 +1855,22 @@ class hst123(object):
         flag = hdu[0].header['EXPFLAG']
         if flag=='INDETERMINATE':
             if not keep_indt:
-                warning = 'WARNING: {img} has EXPFLAG==INDETERMINATE'
-                return(warning.format(img=image), False)
+                warning = f'WARNING: {image} has EXPFLAG==INDETERMINATE'
+                return(warning, False)
         elif 'TDF-DOWN' in flag:
             if not keep_tdf_down:
-                warning = 'WARNING: {img} has EXPFLAG==TDF-DOWN AT EXPSTART'
-                return(warning.format(img=image), False)
+                warning = f'WARNING: {image} has EXPFLAG==TDF-DOWN AT EXPSTART'
+                return(warning, False)
         elif flag!='NORMAL':
-            warning = 'WARNING: {img} has EXPFLAG!=NORMAL.'
-            return(warning.format(img=image), False)
+            warning = f'WARNING: {image} has EXPFLAG=={flag}.'
+            return(warning, False)
 
     # Get rid of exposures with exptime < 20s
     if not self.options['args'].keepshort:
         exptime = hdu[0].header['EXPTIME']
         if (exptime < 15):
-            warning = 'WARNING: {img} EXPTIME is {exp} < 20.'
-            return(warning.format(img=image, exp=exptime), False)
+            warning = f'WARNING: {image} EXPTIME is {exptime} < 20.'
+            return(warning, False)
 
     # Now check date and compare to self.before
     mjd_obs = Time(hdu[0].header['DATE-OBS']+'T'+hdu[0].header['TIME-OBS']).mjd
@@ -1876,16 +1878,16 @@ class hst123(object):
         mjd_before = Time(self.before).mjd
         dbefore = self.before.strftime('%Y-%m-%d')
         if mjd_obs > mjd_before:
-            warning = 'WARNING: {img} is after the input before date {date}.'
-            return(warning.format(img=image, date=dbefore), False)
+            warning = f'WARNING: {image} after the input before date {dbefore}.'
+            return(warning, False)
 
     # Same with self.after
     if self.after is not None:
         mjd_after = Time(self.after).mjd
         dafter = self.after.strftime('%Y-%m-%d')
         if mjd_obs < mjd_after:
-            warning = 'WARNING: {img} is before the input after date {date}.'
-            return(warning.format(img=image, date=dafter), False)
+            warning = f'WARNING: {image} before the input after date {dafter}.'
+            return(warning, False)
 
     # Get rid of data where input coordinate not in any extension
     if self.coord:
@@ -1911,24 +1913,24 @@ class hst123(object):
                     is_not_hst_image = True
 
         if not is_not_hst_image:
-            warning = 'WARNING: {img} does not contain: {ra} {dec}'
+            warning = f'WARNING: {image} does not contain: {ra} {dec}'
             ra = self.coord.ra.degree
             dec = self.coord.dec.degree
-            return(warning.format(img=image, ra=ra, dec=dec), False)
+            return(warning, False)
 
     filt = self.get_filter(image).upper()
     if not (filt in self.options['acceptable_filters']):
-        warning = 'WARNING: {img} with FILTER={filt} '
+        warning = f'WARNING: {image} with FILTER={filt} '
         warning += 'does not have an acceptable filter.'
-        return(warning.format(img=image, filt=filt), False)
+        return(warning, False)
 
     # Get rid of images that don't match one of the allowed instrument/detector
     # types and images whose extensions don't match the allowed type for those
     # instrument/detector types
     is_not_hst_image = False
-    warning = 'WARNING: {img} with INSTRUME={inst}, DETECTOR={det}, '
-    warning += 'NEXTEND={N} is bad.'
     nextend = hdu[0].header['NEXTEND']
+    warning = f'WARNING: {image} with INSTRUME={instrument}, '
+    warning += f'DETECTOR={detector}, NEXTEND={nextend} is bad.'
     if (instrument.upper() == 'WFPC2' and 'c0m.fits' in image and nextend==4):
         is_not_hst_image = True
     if (instrument.upper() == 'ACS' and
@@ -1947,8 +1949,7 @@ class hst123(object):
         if (instrument.upper() == 'WFPC2' and 'c1m.fits' in image):
             is_not_hst_image = True
 
-    return(warning.format(img=image, inst=instrument, det=detector,
-        N=nextend), is_not_hst_image)
+    return(warning, is_not_hst_image)
 
   def needs_to_split_groups(self,image):
     return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
@@ -2043,12 +2044,13 @@ class hst123(object):
         sub = 'full'
     else:
         det = hdu[0].header['DETECTOR'].lower()
-        if hdu[0].header['SUBARRAY'] == 'T':
+        if (str(hdu[0].header['SUBARRAY']) == 'T' or
+           str(hdu[0].header['SUBARRAY']) == 'True'):
             sub = 'sub'
         else:
             sub = 'full'
-    out = '{inst}_{det}_{sub}'
-    return(out.format(inst=inst, det=det, sub=sub))
+    out = f'{inst}_{det}_{sub}'
+    return(out)
 
   # Glob all of the input images from working directory
   def get_input_images(self, pattern=None):
@@ -3958,6 +3960,8 @@ class hst123(object):
 
     if opt.tweak_search:
         self.options['global_defaults']['search_rad']=opt.tweak_search
+    if opt.tweak_min_obj:
+        self.options['global_defaults']['minobj']=opt.tweak_min_obj
 
     if opt.tweak_thresh:
         self.threshold = opt.tweak_thresh
