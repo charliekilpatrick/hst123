@@ -1,5 +1,5 @@
 Shapely==1.7.0
-numpy==1.18.1
+numpy==1.21.0
 astropy==4.0
 drizzlepac==3.1.6
 scipy==1.4.1
