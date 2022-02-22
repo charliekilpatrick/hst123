@@ -1,11 +1,11 @@
-numpy==1.16.5
-drizzlepac==3.1.6
+Shapely==1.7.0
+numpy==1.18.1
 astropy==4.0
-requests==2.23.0
+drizzlepac==3.1.6
 scipy==1.4.1
 astroscrappy==1.0.5
 stwcs==1.5.3
-Shapely==1.7.0
+requests==2.23.0
 astroquery==0.4
 progressbar33==2.4
-python_dateutil==2.8.1
+python_dateutil==2.8.2

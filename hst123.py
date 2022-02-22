@@ -1913,9 +1913,9 @@ class hst123(object):
                     is_not_hst_image = True
 
         if not is_not_hst_image:
-            warning = f'WARNING: {image} does not contain: {ra} {dec}'
             ra = self.coord.ra.degree
             dec = self.coord.dec.degree
+            warning = f'WARNING: {image} does not contain: {ra} {dec}'
             return(warning, False)
 
     filt = self.get_filter(image).upper()
