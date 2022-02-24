@@ -23,7 +23,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import stwcs
 import glob, sys, os, shutil, time, filecmp, astroquery, progressbar, copy
-import smtplib, datetime, requests, random
+import requests, random
 import astropy.wcs as wcs
 import numpy as np
 from contextlib import contextmanager
@@ -33,11 +33,7 @@ from astropy.io import fits
 from astropy.table import Table, Column, unique
 from astropy.time import Time
 from astroscrappy import detect_cosmics
-from dateutil.parser import parse
 from stwcs import updatewcs
-from shapely.geometry import Polygon, Point
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from scipy.interpolate import interp1d
 
 @contextmanager
@@ -175,7 +171,7 @@ instrument_defaults = {
 detector_defaults = {
     'wfc3_uvis': {'driz_bits': 96, 'nx': 5200, 'ny': 5200,
                   'driz_sep_scale': None,
-                  'input_files': '*_flc.fits', 'pixel_scale': 0.05,
+                  'input_files': '*_flc.fits', 'pixel_scale': 0.04,
                   'dolphot_sky': {'r_in': 15, 'r_out': 35, 'step': 4,
                                   'sigma_low': 2.25, 'sigma_high': 2.00},
                   'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2.0,
@@ -388,9 +384,6 @@ class hst123(object):
         help='Input a token for astroquery.mast.Observations.')
     parser.add_argument('--scraperadius', default=None, type=float,
         help='Override the dolphot scrape radius (units are arcsec).')
-    parser.add_argument('--alert', default=None, type=str,
-        help='Include a configuration file to send an alert via email '+\
-        'once the script has finished.')
     parser.add_argument('--nocuts', default=False, action='store_true',
         help='Skip cuts to dolphot output file.')
     parser.add_argument('--onlywide', default=False, action='store_true',
@@ -535,66 +528,6 @@ class hst123(object):
             zpt = -2.5*np.log10(photflam)-21.1
 
     return(zpt)
-
-  def parse_polygon(self, line, closed=True):
-    repd = {'j2000 ': '', 'gsc1 ': '', 'icrs ': '', 'multi': '',
-            'polygon': '', ')': '', '(': '', 'other': ''}
-
-    line = line.lower()
-    for old, new in repd.items():
-        line = line.replace(old, new)
-
-    line = line.strip().replace(' ', ',')
-    line = line.replace(',,,', ',')
-    line = line.replace(',,',',')
-
-    polyline = np.array(line.strip().split(','), dtype=float)
-
-    if closed:
-        if False in polyline[:2] == polyline[-2:]:
-            polyline = np.append(polyline, polyline[:2])
-
-    poly = Polygon(polyline.reshape(len(polyline) // 2, 2))
-
-    return(poly)
-
-  def parse_circle(self, line):
-    repd = {'j2000 ': '', 'gsc1 ': '', 'icrs ': '', 'multi': '',
-            'circle': '', ')': '', '(': '', 'other': ''}
-
-    line = line.lower()
-    for old, new in repd.items():
-        line = line.replace(old, new)
-
-    line = line.strip().replace(' ', ',')
-    line = line.replace(',,,', ',')
-    line = line.replace(',,',',')
-
-    polyline = np.array(line.strip().split(','), dtype=float)
-
-    if len(polyline)==3:
-        p = Point(polyline[0], polyline[1])
-        circle = p.buffer(polyline[2])
-
-        return(circle)
-
-    else:
-        return(None)
-
-  def region_contains_coord(self, s_region, coord):
-    s_region = s_region.strip().lower()
-    region = None
-    if 'polygon' in s_region:
-        region = self.parse_polygon(s_region)
-    if 'circle' in s_region:
-        region = self.parse_circle(s_region)
-
-    if not region:
-        return(False)
-
-    point = Point(coord.ra.degree, coord.dec.degree)
-
-    return(region.contains(point))
 
   def avg_magnitudes(self, magerrs, counts, exptimes, zpt):
     # Mask out bad values
@@ -2635,6 +2568,8 @@ class hst123(object):
     tries = 0
     while tries < 3:
         try:
+            print('Running astrodrizzle on: {0}'.format(','.join(tmp_input)))
+            print('Output image: {0}'.format(output_name))
             astrodrizzle.AstroDrizzle(tmp_input, output=output_name, runfile='',
                 wcskey=wcskey, context=True, group='', build=False,
                 num_cores=8, preserve=False, clean=clean, skysub=skysub,
@@ -3600,56 +3535,6 @@ class hst123(object):
 
     return(True)
 
-  def sendEmail(self, alert, outfiles=None):
-
-    try:
-        to_addr = alert['to_addr'][0]
-        login = alert['login'][0]
-        password = alert['password'][0]
-        smtpserver = alert['smtpserver'][0]
-    except:
-        return(False)
-
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = 'hst123.py has finished'
-    msg['From'] = 'Supernova Alerts: hst123.py'
-    msg['To'] = to_addr
-
-    kwargs = {'cmd': self.command, 'dir': os.getcwd(),
-        'time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-    message = '''<html><body><p>Finished with hst123.py!</p>
-                <p>Command: {cmd}</p>
-                <p>Directory: {dir}</p>
-                <p>Time finished: {time}</p>
-                <p>{text}</p>
-                <p>CDK</p>
-                </body></html>'''
-
-    kwargs['text']=''
-    if outfiles:
-        with open(outfiles[0]) as f:
-            for line in f:
-                kwargs['text']+=line+'<br>'
-
-    if not kwargs['text']: kwargs['text']='No sources detected by dolphot!'
-
-    message = message.format(**kwargs)
-
-    payload = MIMEText(message, 'html')
-    msg.attach(payload)
-
-    with smtplib.SMTP(smtpserver) as server:
-        try:
-            server.starttls()
-            server.login(login, password)
-            resp = server.sendmail(msg['From'], [to_addr], msg.as_string())
-            return(True)
-        except:
-            return(False)
-
-    return(False)
-
   def check_large_reduction(self):
     n = len(self.input_images)
     m = self.options['args'].large_num
@@ -3930,8 +3815,8 @@ class hst123(object):
     # Handle other options
     self.reference = self.options['args'].reference
     if opt.alignonly: default['dolphot']['AlignOnly']=1
-    if opt.before: self.before=parse(self.options['args'].before)
-    if opt.after: self.after=parse(self.options['args'].after)
+    if opt.before: self.before=Time(self.options['args'].before)
+    if opt.after: self.after=Time(self.options['args'].after)
     if opt.skip_tweakreg: self.updatewcs = False
 
     # Override drizzled image dimensions
@@ -4196,7 +4081,8 @@ if __name__ == '__main__':
             if opt.redrizzle:
                 hst.make_banner('Performing redrizzle of all epochs/filters')
                 hst.updatewcs = False
-                hst.drizzle_all(obstable, clobber=True)
+                tweakreg = not opt.skip_tweakreg
+                hst.drizzle_all(obstable, clobber=True, tweakreg=tweakreg)
 
             # dolphot image preparation: mask_image, split_groups, calc_sky
             split_images = []
@@ -4247,11 +4133,6 @@ if __name__ == '__main__':
             print(message.format(im=image))
             if os.path.isfile(image):
                 os.remove(image)
-
-    if opt.alert:
-        hst.make_banner('Sending alert about completed hst123.py script')
-        outfiles = glob.glob('dp*.phot')
-        hst.sendEmail(Table.read(opt.alert, format='ascii'), outfiles=outfiles)
 
     message = 'Finished with: {cmd}\n'
     message += 'It took {time} seconds to complete this script.'
