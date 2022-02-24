@@ -2565,12 +2565,15 @@ class hst123(object):
     if self.options['args'].no_rotation:
         rotation = None
 
+    logfile_name = 'astrodrizzle.log'
+
     tries = 0
     while tries < 3:
         try:
             print('Running astrodrizzle on: {0}'.format(','.join(tmp_input)))
             print('Output image: {0}'.format(output_name))
-            astrodrizzle.AstroDrizzle(tmp_input, output=output_name, runfile='',
+            astrodrizzle.AstroDrizzle(tmp_input, output=output_name,
+                runfile=logfile_name,
                 wcskey=wcskey, context=True, group='', build=False,
                 num_cores=8, preserve=False, clean=clean, skysub=skysub,
                 skymethod='globalmin+match', skymask_cat=skymask_cat,
