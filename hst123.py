@@ -358,7 +358,10 @@ class hst123(object):
         help='Drizzle all visit/filter pairs together.')
     parser.add_argument('--hierarchical', default=False, action='store_true',
         help='Drizzle all visit/filter pairs then use them as basis to'+\
-        'perform alignment on the sub-frames.')
+        ' perform alignment on the sub-frames.')
+    parser.add_argument('--hierarch_test', default=False, action='store_true',
+        help='Testing for hierarchical alignment mode so the script exits'+\
+        ' after tweakreg alignment is performed on drz files.')
     parser.add_argument('--object', default=None, type=str,
         help='Change the object name in all science files to value and '+\
         'use that value in the filenames for drizzled images.')
@@ -2337,6 +2340,14 @@ class hst123(object):
             print(message.format(im=image, i=i, key=key, val=ref_file))
             hdu[i].header[key] = ref_file
 
+        # WFPC2 does not have residual distortion corrections and astrodrizzle
+        # choke if DGEOFILE is in header but not NPOLFILE.  So do a final check
+        # for this part of the WCS keys
+        if 'wfpc2' in self.get_instrument(image).lower():
+            keys = list(h.header.keys())
+            if 'DGEOFILE' in keys and 'NPOLFILE' not in keys:
+                del hdu[i].header['DGEOFILE']
+
     hdu.writeto(image, overwrite=True, output_verify='silentfix')
     hdu.close()
 
@@ -3119,7 +3130,7 @@ class hst123(object):
                 tweak_img = self.check_images_for_tweakreg(tweak_img)
 
             # If we've tried multiple runs and there are images in input
-            # list with TWEAK and reference image=dummy.fits, we might need
+            # list with TWEAKSUC and reference image=dummy.fits, we might need
             # to try a different reference image
             success = list(set(tmp_images) ^ set(tweak_img))
             if tries > 1 and reference=='dummy.fits' and len(success)>0:
@@ -3145,6 +3156,7 @@ class hst123(object):
                     inp_data)
             mask = thresh_data['file']==shallow
             inp_thresh = thresh_data[mask][0]
+            print('Getting image threshold...')
             new_ithresh = self.get_best_tweakreg_threshold(inp_thresh,
                 options['nbright']*4)
 
@@ -3155,6 +3167,7 @@ class hst123(object):
                     inp_data)
             mask = thresh_data['file']==reference
             inp_thresh = thresh_data[mask][0]
+            print('Getting reference threshold...')
             new_rthresh = self.get_best_tweakreg_threshold(inp_thresh,
                 options['nbright']*4)
 
@@ -3215,6 +3228,7 @@ class hst123(object):
                     searchrad=search_rad, searchunits='arcseconds', runfile='',
                     tolerance=tol, refnbright=nbright, nbright=nbright,
                     separation=0.5, residplot='No plot', see2dplot=False,
+                    fitgeometry='shift',
                     imagefindcfg = {'threshold': ithresh,
                         'conv_width': iconv, 'use_sharp_round': True},
                     refimagefindcfg = {'threshold': rthresh,
@@ -3267,6 +3281,25 @@ class hst123(object):
 
     message = 'Tweakreg took {time} seconds to execute.\n\n'
     print(message.format(time = time.time()-start_tweak))
+
+    # tweakreg improperly indexes the CRVAL1 and CRVAL2 values
+    # TODO: If drizzlepac fixes this then get rid of this code
+    for image in tmp_images:
+        rawtmp = image
+        rawhdu = fits.open(rawtmp, mode='readonly')
+
+        tweaksuc = False
+        if ('TWEAKSUC' in rawhdu[0].header.keys() and
+            rawhdu[0].header['TWEAKSUC']==1):
+            tweaksuc = True
+
+        for i,h in enumerate(rawhdu):
+            if (tweaksuc and 'CRVAL1' in h.header.keys() and
+                'CRVAL2' in h.header.keys()):
+                rawhdu[i].header['CRPIX1']=rawhdu[i].header['CRPIX1']-0.5
+                rawhdu[i].header['CRPIX2']=rawhdu[i].header['CRPIX2']-0.5
+
+        rawhdu.writeto(rawtmp, overwrite=True)
 
     if not skip_wcs:
         for image in run_images:
@@ -3674,11 +3707,25 @@ class hst123(object):
             'visit']
         driztable.rename_column('drizname','image')
 
+        # Create a dictionary of the central pixel RA/Dec for comparison to
+        # post-alignment images
+        central = {}
+
         # Overwrite WCSNAME 'TWEAK' if it exists
         for file in driztable['image']:
             hdu = fits.open(file, mode='update')
             hdu[0].header['WCSNAME']='TWEAK-ORIG'
             hdu[0].header['TWEAKSUC']=0
+
+            x = hdu[0].header['NAXIS1']/2
+            y = hdu[0].header['NAXIS2']/2
+            w = wcs.WCS(hdu[0].header)
+            coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
+
+            central[file]={}
+            central[file]['cra']=coord.ra.degree
+            central[file]['cdec']=coord.dec.degree
+
             hdu.close()
 
         # Pick deepest drizzled image for reference and run tweakreg
@@ -3688,43 +3735,23 @@ class hst123(object):
         error, shift_table = self.run_tweakreg(driztable, deepest,
             do_cosmic=False, skip_wcs=True, search_radius=5.0)
 
-        # Append deepest image to driztable with 0,0 offset
-        shift_table.add_row([deepest, 0., 0.])
-
-        print('\n\nShift table:')
-        form = '{file: <34} {xoffset: <12} {yoffset: <12}'
-        print(form.format(file='file', xoffset='xoffset', yoffset='yoffset'))
-        for row in shift_table:
-            print(form.format(file=row['file'], xoffset='%2.4f'%row['xoffset'],
-                yoffset='%2.4f'%row['yoffset']))
-            mask = obstable['drizname']==row['file']
-            for file in obstable[mask]['image']:
-                print(file)
-
         # Convert xoffset and yoffset values to RAoffset and DECoffset
-        message = '\n\nApplying shifts from shift table to frames'
+        message = '\n\nApplying shifts to individual image frames'
         print(message)
         for row in shift_table:
             hdu = fits.open(row['file'], mode='readonly')
-            coord1 = SkyCoord(hdu[0].header['CRVAL1'], hdu[0].header['CRVAL2'],
-                unit='deg', frame='icrs')
 
-            message = 'Applying shift x={x}, y={y} from {f}'
-            print(message.format(x=row['xoffset'], y=row['yoffset'],
-                f=row['file']))
-
-            xshift = hdu[0].header['CRPIX1'] + 0.5 * row['xoffset']
-            yshift = hdu[0].header['CRPIX2'] + row['yoffset']
-
-            hdu.close()
-
+            # Repeat process from above to get central RA/Dec and get offset
+            x = hdu[0].header['NAXIS1']/2
+            y = hdu[0].header['NAXIS2']/2
             w = wcs.WCS(hdu[0].header)
-            coord = wcs.utils.pixel_to_skycoord(xshift, yshift, w, origin=1)
-            # Adjust frame to same as coord above
-            coord = SkyCoord(coord.ra.degree, coord.dec.degree, unit='deg',
-                frame='icrs')
+            coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
 
-            dra, ddec = coord1.spherical_offsets_to(coord)
+            nra = coord.ra.degree
+            ndec = coord.dec.degree
+
+            dra = central[row['file']]['cra']-nra
+            ddec = central[row['file']]['cdec']-ndec
 
             mask = obstable['drizname']==row['file']
             filetable = obstable[mask]
@@ -3734,38 +3761,42 @@ class hst123(object):
                 print(message.format(f=file))
                 hdu = fits.open(file, mode='update')
 
-                # Unset TWEAKSUC so tweakreg will do fine alignment next run
-                hdu[0].header['TWEAKSUC']=0
                 # Set HIERARCH=1 so other methods will recognize that the
-                # image has been hierarchically aligned
+                # image has been hierarchically aligned and do not run tweakreg
                 hdu[0].header['HIERARCH']=1
+                hdu[0].header['TWEAKSUC']=1
 
                 for i,h in enumerate(hdu):
                     if ('CRVAL1' in h.header.keys() and
                         'CRVAL2' in h.header.keys()):
                         corig = SkyCoord(h.header['CRVAL1'],
                                          h.header['CRVAL2'], unit='deg')
-                        sdec = ddec.degree
-                        newdec = corig.dec.degree - sdec
-                        sra  = 1./np.cos(newdec*np.pi/180.0)*dra.degree
-                        newra = corig.ra.degree - sra
+                        newdec = corig.dec.degree - ddec
+                        newra = corig.ra.degree - dra
 
                         # Update header variable
                         hdu[i].header['CRVAL1PR']=corig.ra.degree
                         hdu[i].header['CRVAL2PR']=corig.dec.degree
-                        if 'c0m' in file:
-                            hdu[i].header['CRVAL1']=newra
-                            hdu[i].header['CRVAL2']=newdec
-                        else:
-                            hdu[i].header['CRVAL1']=corig.ra.degree
-                            hdu[i].header['CRVAL2']=corig.dec.degree
-                        hdu[i].header['SHIFTX']=row['xoffset']
-                        hdu[i].header['SHIFTY']=row['yoffset']
-                        hdu[i].header['SHIFTRA']=sra
-                        hdu[i].header['SHIFTDEC']=sdec
+                        hdu[i].header['CRVAL1']=newra
+                        hdu[i].header['CRVAL2']=newdec
+                        hdu[i].header['SHIFTRA']=dra
+                        hdu[i].header['SHIFTDEC']=ddec
                         hdu[i].header['SHIFTREF']=row['file']
 
                 hdu.close()
+
+                # If wfpc2 copy WCS keys over to mask file
+                if 'c0m' in file:
+                    maskfile = image.split('_')[0]+'_c1m.fits'
+                    if os.path.exists(maskfile):
+                        maskhdu = fits.open(maskfile)
+                        self.copy_wcs_keys(rawhdu[i], maskhdu[i])
+                        maskhdu.writeto(maskfile, overwrite=True)
+
+        # Flag for testing - exits after hierarchical alignment on drz frames
+        # has been performed
+        if opt.hierarch_test:
+            sys.exit()
 
         # Now that WCS corrections have been applied, we want to skip this for
         # future runs of tweakreg and astrodrizzle
@@ -4067,12 +4098,6 @@ if __name__ == '__main__':
             if opt.rundolphot or opt.scrapedolphot:
                 hst.dolphot = hst.make_dolphot_dict(opt.dolphot+vnum)
 
-            # Drizzle all visit/filter pairs if drizzleall
-            # Handle this first, especially if doing hierarchical alignment
-            if ((opt.drizzleall or opt.hierarchical) and
-                'drizname' in obstable.keys()):
-                hst.drizzle_all(obstable, hierarchical=opt.hierarchical)
-
             hst.reference = hst.handle_reference(obstable, opt.reference)
 
             # Run main tweakreg to register to the reference.  Skipping tweakreg
@@ -4080,6 +4105,12 @@ if __name__ == '__main__':
             if not opt.skip_tweakreg:
                 hst.make_banner('Running main tweakreg')
                 error = hst.run_tweakreg(obstable, hst.reference)
+
+            # Drizzle all visit/filter pairs if drizzleall
+            # Handle this first, especially if doing hierarchical alignment
+            if ((opt.drizzleall or opt.hierarchical) and
+                'drizname' in obstable.keys()):
+                hst.drizzle_all(obstable, hierarchical=opt.hierarchical)
 
             if opt.redrizzle:
                 hst.make_banner('Performing redrizzle of all epochs/filters')
