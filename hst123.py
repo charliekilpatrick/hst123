@@ -1931,6 +1931,26 @@ class hst123(object):
     if 'off image' in result:
         return(False)
     else:
+        ra,dec,epoch,arrow,x,y = result.split()
+        x = float(x)
+        y = float(y)
+
+        print(f'Image {image} has x={x}, y={y} for target')
+
+        inst = self.get_instrument(image).lower()
+        # WFPC2 contiguous field in
+        # https://www.stsci.edu/instruments/wfpc2/Wfpc2_dhb/wfpc2_ch1.html
+        if 'wfpc2' in inst and 'full' in inst:
+            if 'chip1' in image and (x < 44 or y < 52):
+                return(False)
+            elif 'chip2' in image and (x < 46 or y < 26):
+                return(False)
+            elif 'chip3' in image and (x < 30 or y < 47):
+                return(False)
+            elif 'chip4' in image and (x < 43 or y < 44):
+                return(False)
+        # TODO: add for ACS/WFC, WFC3/UVIS, WFC3/IR
+
         return(True)
 
   # Determine if we need to run the dolphot mask routine
@@ -2009,10 +2029,10 @@ class hst123(object):
 
   # Run the dolphot splitgroups routine
   def split_groups(self, image, delete_non_science=True):
-    print('Running split groups for {image}'.format(image=image))
-    splitgroups = 'splitgroups {filename}'.format(filename=image)
+    print(f'Running split groups for {image}')
+    splitgroups = f'splitgroups {image}'
 
-    print('\n\nExecuting: {0}\n\n'.format(splitgroups))
+    print(f'\n\nExecuting: {splitgroups}\n\n')
     os.system(splitgroups)
 
     # Delete images that aren't from science extensions
@@ -2024,17 +2044,16 @@ class hst123(object):
             info = hdu[0]._summary()
 
             if info[0].upper()!='SCI':
-                warning = 'WARNING: deleting {im}, not a science extension.'
-                print(warning.format(im=split))
+                warning = f'WARNING: deleting {split}, not a science extension.'
+                print(warning)
                 os.remove(split)
 
   # Run the dolphot mask routine for the input image
   def mask_image(self, image, instrument):
     maskimage = self.get_dq_image(image)
-    cmd = '{instrument}mask {image} {maskimage}'
-    mask = cmd.format(instrument=instrument, image=image, maskimage=maskimage)
+    cmd = f'{instrument}mask {image} {maskimage}'
 
-    print('\n\nExecuting: {0}\n\n'.format(mask))
+    print(f'\n\nExecuting: {cmd}\n\n')
     os.system(mask)
 
   # Run the dolphot calcsky routine
@@ -2063,7 +2082,8 @@ class hst123(object):
     return(options[detector_string]['dolphot'])
 
   # Write image and image-specific parameters to dolphot parameter file
-  def add_image_to_param_file(self,param_file, image, i, options):
+  def add_image_to_param_file(self,param_file, image, i, options,
+    is_wfpc2=False):
     # Add image name to param file
     image_name = 'img{i}_file = {file}\n'
     param_file.write(image_name.format(i=str(i).zfill(4),
@@ -2072,6 +2092,21 @@ class hst123(object):
     # Now add all image-specific params to param file
     params = self.get_dolphot_instrument_parameters(image, options)
     for par, val in params.items():
+        if is_wfpc2:
+            # For reference images, rescale these values by 1.5 as on p. 8 of
+            # the dolphot/WFPC2 documentation, because dolphot will not
+            # automatically recognize the reference image as WFPC2 with WFC
+            # pixel scale (0.0996"/pix)
+            # http://americano.dolphinsim.com/dolphot/dolphotWFPC2.pdf
+            if par in ['RAper','RPSF','apsize']:
+                val = '%.2f'%(float(val)/1.5)
+                print(f'Adjusting for WFPC2 {par} = {val}')
+            elif par in ['apsky','RSky','RSky2']:
+                val1, val2 = val.split()
+                val1 = '%.2f'%(float(val1)/1.5)
+                val2 = '%.2f'%(float(val2)/1.5)
+                val = f'{val1} {val2}'
+                print(f'Adjusting for WFPC2 {par} = {val}')
         image_par_value = 'img{i}_{par} = {val}\n'
         param_file.write(image_par_value.format(i=str(i).zfill(4),
             par=par, val=val))
@@ -3067,7 +3102,7 @@ class hst123(object):
             tmp_images.append(image)
             continue
 
-        rawtmp = image.replace('.fits','rawtmp.fits')
+        rawtmp = image.replace('.fits','.rawtmp.fits')
         tmp_images.append(rawtmp)
 
         # Check if rawtmp already exists
@@ -3264,7 +3299,7 @@ class hst123(object):
             # Add data from output shiftfile to shift_table
             for row in shifts:
                 filename = os.path.basename(row['file'])
-                filename = filename.replace('rawtmp.fits','')
+                filename = filename.replace('.rawtmp.fits','')
                 filename = filename.replace('.fits','')
 
                 idx = [i for i,row in enumerate(shift_table)
@@ -3309,7 +3344,7 @@ class hst123(object):
 
             message = '\n\nUpdating image data for image: {im}'
             print(message.format(im=image))
-            rawtmp = image.replace('.fits','rawtmp.fits')
+            rawtmp = image.replace('.fits','.rawtmp.fits')
 
             rawhdu = fits.open(rawtmp, mode='readonly')
             hdu    = fits.open(image, mode='readonly')
@@ -3591,7 +3626,13 @@ class hst123(object):
         self.generate_base_param_file(dolphot_file, gopt, len(images))
 
         # Write reference image to param file
-        self.add_image_to_param_file(dolphot_file, reference, 0, dopt)
+        inst = self.get_instrument(reference)
+        is_wfpc2 = 'wfpc2' in inst.lower()
+        # Check if image is WFPC2 to adjust dolphot parameters
+        print(f'Checking reference {reference} instrument type {inst}')
+        print(f'WFPC2={is_wfpc2}')
+        self.add_image_to_param_file(dolphot_file, reference, 0, dopt,
+            is_wfpc2=is_wfpc2)
 
         # Write out image-specific params to dolphot file
         for i,image in enumerate(images):
@@ -3606,6 +3647,10 @@ class hst123(object):
         self.make_banner(banner.format(cmd=cmd))
         os.system(cmd)
         print('dolphot is finished (whew)!')
+        if os.path.exists(self.dolphot['base']):
+            filesize = os.stat(self.dolphot['base']).st_size/1024/1024
+            filesize = '%.3f'%(filesize)
+            print(f'Output dolphot file size is {filesize} MB')
     else:
         error = 'ERROR: dolphot parameter file {file} does not exist!'
         error += ' Generate a parameter file first.'
@@ -4144,8 +4189,10 @@ if __name__ == '__main__':
                 hst.make_banner(banner.format(file=hst.dolphot['param']))
                 hst.make_dolphot_file(split_images, hst.reference)
 
-            # Dolphot using param file and input parameters
-            if opt.rundolphot: hst.run_dolphot()
+                # Preparing to start dolphot...
+                print('Preparing to start dolphot run...')
+                time.sleep(10)
+                hst.run_dolphot()
 
             # Scrape data from the dolphot catalog for the input coordinates
             if opt.scrapedolphot: hst.get_dolphot_photometry(split_images,
