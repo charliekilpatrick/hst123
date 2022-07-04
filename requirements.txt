@@ -1,5 +1,5 @@
 scipy==1.7.3
-numpy==1.21.2
+numpy==1.22.0
 drizzlepac==3.3.0
 stwcs==1.6.1
 astroscrappy==1.0.5
