@@ -180,7 +180,7 @@ detector_defaults = {
                    'idcscale': 0.03962000086903572},
     'wfc3_ir': {'driz_bits': 576, 'nx': 5200, 'ny': 5200,
                 'driz_sep_scale': None,
-                'input_files': '*_flt.fits', 'pixel_scale': 0.0642,
+                'input_files': '*_flt.fits', 'pixel_scale': 0.128,
                 'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                 'sigma_low': 2.25, 'sigma_high': 2.00},
                 'dolphot': {'apsky': '8 20', 'RAper': 2, 'RChi': 1.5,
@@ -204,8 +204,8 @@ detector_defaults = {
                             'RPSF': 10, 'RSky': '15 35',
                             'RSky2': '3 6'}},
     'wfpc2_wfpc2': {'driz_bits': 1032, 'nx': 5200, 'ny': 5200,
-                    'driz_sep_scale': 0.0996,
-                    'input_files': '*_c0m.fits', 'pixel_scale': 0.0996,
+                    'driz_sep_scale': 0.046,
+                    'input_files': '*_c0m.fits', 'pixel_scale': 0.046,
                     'dolphot_sky': {'r_in': 10, 'r_out': 25, 'step': 2,
                                     'sigma_low': 2.25, 'sigma_high': 2.00},
                     'dolphot': {'apsky': '15 25', 'RAper': 3, 'RChi': 2,
@@ -2054,7 +2054,7 @@ class hst123(object):
     cmd = f'{instrument}mask {image} {maskimage}'
 
     print(f'\n\nExecuting: {cmd}\n\n')
-    os.system(mask)
+    os.system(cmd)
 
   # Run the dolphot calcsky routine
   def calc_sky(self, image, options):
@@ -2099,13 +2099,13 @@ class hst123(object):
             # pixel scale (0.0996"/pix)
             # http://americano.dolphinsim.com/dolphot/dolphotWFPC2.pdf
             if par in ['RAper','RPSF','apsize']:
-                val = '%.2f'%(float(val)/1.5)
+                #val = '%.2f'%(float(val)/1.5)
                 print(f'Adjusting for WFPC2 {par} = {val}')
             elif par in ['apsky','RSky','RSky2']:
-                val1, val2 = val.split()
-                val1 = '%.2f'%(float(val1)/1.5)
-                val2 = '%.2f'%(float(val2)/1.5)
-                val = f'{val1} {val2}'
+                #val1, val2 = val.split()
+                #val1 = '%.2f'%(float(val1)/1.5)
+                #val2 = '%.2f'%(float(val2)/1.5)
+                #val = f'{val1} {val2}'
                 print(f'Adjusting for WFPC2 {par} = {val}')
         image_par_value = 'img{i}_{par} = {val}\n'
         param_file.write(image_par_value.format(i=str(i).zfill(4),
@@ -2454,11 +2454,11 @@ class hst123(object):
     inst = list(set(obstable['instrument']))
     det = '_'.join(self.get_instrument(obstable[0]['image']).split('_')[:2])
     options = self.options['detector_defaults'][det]
-    if len(inst) > 1 and not self.options['args'].drizadd:
-        error = 'ERROR: Cannot drizzle together images from detectors: {det}.'
-        error += 'Exiting...'
-        print(error.format(det=','.join(map(str,inst))))
-        return(False)
+    #if len(inst) > 1 and not self.options['args'].drizadd:
+    #    error = 'ERROR: Cannot drizzle together images from detectors: {det}.'
+    #    error += 'Exiting...'
+    #    print(error.format(det=','.join(map(str,inst))))
+    #    return(False)
 
     # Make a copy of each input image so drizzlepac doesn't edit base headers
     tmp_input = []
@@ -2603,9 +2603,12 @@ class hst123(object):
 
     # Equalize sensitivities for WFPC2 data
     for image in tmp_input:
-        if 'c0m' in image:
+        if 'wfpc2' in self.get_instrument(image).lower():
+            print(f'Equalizing photometric calibration in {image}')
             photeq.photeq(files=image, readonly=False, ref_phot_ext=3,
-                logfile=None)
+                logfile='photeq.log')
+            if os.path.exists('photeq.log'):
+                os.remove('photeq.log')
 
     rotation = 0.0
     if self.options['args'].no_rotation:
@@ -3283,6 +3286,10 @@ class hst123(object):
                     if nsources < 1000:
                         shallow_img.append(img)
 
+            # Occurs when all images fail alignment
+            except TypeError as e:
+                self.tweakreg_error(e)
+
             # Need to address this in a systematic way rather than just catching
             # all possible tweakreg errors
             #except (MemoryError,TypeError,UnboundLocalError,RuntimeError) as e:
@@ -3316,6 +3323,8 @@ class hst123(object):
 
     message = 'Tweakreg took {time} seconds to execute.\n\n'
     print(message.format(time = time.time()-start_tweak))
+
+    print(shift_table)
 
     # tweakreg improperly indexes the CRVAL1 and CRVAL2 values
     # TODO: If drizzlepac fixes this then get rid of this code
@@ -3447,7 +3456,8 @@ class hst123(object):
     # Define search params and grab all files from MAST
     try:
         if self.options['args'].token:
-            Observations.login(token=self.options['args'].token)
+            print('Logging in with token...')
+            log=Observations.login(token=self.options['args'].token)
     except:
         warning = 'WARNING: could not log in with input username/password'
         print(warning)
@@ -3802,8 +3812,7 @@ class hst123(object):
             filetable = obstable[mask]
 
             for file in filetable['image']:
-                message = 'Applying shift to {f}'
-                print(message.format(f=file))
+                print(f'Applying shift to {file}')
                 hdu = fits.open(file, mode='update')
 
                 # Set HIERARCH=1 so other methods will recognize that the
@@ -3828,15 +3837,15 @@ class hst123(object):
                         hdu[i].header['SHIFTDEC']=ddec
                         hdu[i].header['SHIFTREF']=row['file']
 
-                hdu.close()
+                    # If wfpc2 copy WCS keys over to mask file
+                    if 'c0m' in self.get_instrument(file).lower():
+                        maskfile = file.split('_')[0]+'_c1m.fits'
+                        if os.path.exists(maskfile):
+                            maskhdu = fits.open(maskfile)
+                            self.copy_wcs_keys(rawhdu[i], maskhdu[i])
+                            maskhdu.writeto(maskfile, overwrite=True)
 
-                # If wfpc2 copy WCS keys over to mask file
-                if 'c0m' in file:
-                    maskfile = image.split('_')[0]+'_c1m.fits'
-                    if os.path.exists(maskfile):
-                        maskhdu = fits.open(maskfile)
-                        self.copy_wcs_keys(rawhdu[i], maskhdu[i])
-                        maskhdu.writeto(maskfile, overwrite=True)
+                hdu.close()
 
         # Flag for testing - exits after hierarchical alignment on drz frames
         # has been performed
@@ -3849,12 +3858,11 @@ class hst123(object):
 
 
   def get_dolphot_photometry(self, split_images, reference):
-    message = 'Starting scrape dolphot for: {ra} {dec}'
-    self.make_banner(message.format(ra=ra, dec=dec))
+    ra = self.coord.ra.degree ; dec = self.coord.dec.degree
+    self.make_banner(f'Starting scrape dolphot for: {ra} {dec}')
 
     opt = self.options['args']
     dp = self.dolphot
-    print(dp['colfile'], dp['base'])
     if (os.path.exists(dp['colfile']) and
         os.path.exists(dp['base']) and
         os.stat(dp['base']).st_size>0):
@@ -3874,8 +3882,7 @@ class hst123(object):
             self.print_final_phot(phot, self.dolphot, allphot=allphot)
 
         else:
-            message = 'WARNING: did not find a source for: {ra} {dec}'
-            self.make_banner(message.format(ra=ra, dec=dec))
+            self.make_banner(f'WARNING: did not find a source for: {ra} {dec}')
 
     else:
         message = 'WARNING: dolphot did not run.  Use the --rundolphot flag'
@@ -3896,7 +3903,7 @@ class hst123(object):
     if opt.alignonly: default['dolphot']['AlignOnly']=1
     if opt.before: self.before=Time(self.options['args'].before)
     if opt.after: self.after=Time(self.options['args'].after)
-    if opt.skip_tweakreg: self.updatewcs = False
+    #if opt.skip_tweakreg: self.updatewcs = False
 
     # Override drizzled image dimensions
     dim = opt.drizdim
