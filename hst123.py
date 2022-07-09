@@ -3725,7 +3725,7 @@ class hst123(object):
   # There is an additional option to perform hierarchical alignment on the
   # sub-frames after all sub-images are drizzled.
   def drizzle_all(self, obstable, hierarchical=False, clobber=False,
-    tweakreg=True):
+    do_tweakreg=True):
 
     opt = self.options['args']
 
@@ -3740,7 +3740,7 @@ class hst123(object):
             message = 'Constructing drizzled image: {im}'
             print(message.format(im=name))
             # Run tweakreg on the sub-table to make sure frames are aligned
-            if tweakreg:
+            if do_tweakreg:
                 error, shift_table = self.run_tweakreg(driztable, '')
             # Next run astrodrizzle to construct the drizzled frame
             self.run_astrodrizzle(driztable, output_name=name)
@@ -4163,15 +4163,16 @@ if __name__ == '__main__':
             # Handle this first, especially if doing hierarchical alignment
             if ((opt.drizzleall or opt.hierarchical) and
                 'drizname' in obstable.keys()):
-                tweakreg = not opt.skip_tweakreg
+                do_tweakreg = not opt.skip_tweakreg
                 hst.drizzle_all(obstable, hierarchical=opt.hierarchical,
-                    tweakreg=tweakreg)
+                    do_tweakreg=do_tweakreg)
 
             if opt.redrizzle:
                 hst.make_banner('Performing redrizzle of all epochs/filters')
                 hst.updatewcs = False
-                tweakreg = not opt.skip_tweakreg
-                hst.drizzle_all(obstable, clobber=True, tweakreg=tweakreg)
+                do_tweakreg = not opt.skip_tweakreg
+                hst.drizzle_all(obstable, clobber=True,
+                    do_tweakreg=do_tweakreg)
 
             # dolphot image preparation: mask_image, split_groups, calc_sky
             split_images = []
