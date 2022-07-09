@@ -93,7 +93,7 @@ global_defaults = {
                 'dPosMax': 2.5,
                 'SigPSF': 5.0,
                 'PSFres': 1,
-                'Align': 4,
+                'Align': 2,
                 'Rotate': 1,
                 'ACSuseCTE': 0,
                 'WFC3useCTE': 0,
@@ -104,7 +104,7 @@ global_defaults = {
                 'UseWCS': 1,
                 'AlignOnly': 0,
                 'AlignIter': 5,
-                'AlignTol': 0.5,
+                'AlignTol': 0,
                 'AlignStep': 2.0,
                 'VerboseData': 1,
                 'NegSky': 1,
@@ -3656,6 +3656,7 @@ class hst123(object):
         banner = 'Running dolphot with cmd={cmd}'
         self.make_banner(banner.format(cmd=cmd))
         os.system(cmd)
+        time.sleep(10)
         print('dolphot is finished (whew)!')
         if os.path.exists(self.dolphot['base']):
             filesize = os.stat(self.dolphot['base']).st_size/1024/1024
@@ -3903,7 +3904,7 @@ class hst123(object):
     if opt.alignonly: default['dolphot']['AlignOnly']=1
     if opt.before: self.before=Time(self.options['args'].before)
     if opt.after: self.after=Time(self.options['args'].after)
-    #if opt.skip_tweakreg: self.updatewcs = False
+    if opt.skip_tweakreg: self.updatewcs = False
 
     # Override drizzled image dimensions
     dim = opt.drizdim
@@ -4162,7 +4163,9 @@ if __name__ == '__main__':
             # Handle this first, especially if doing hierarchical alignment
             if ((opt.drizzleall or opt.hierarchical) and
                 'drizname' in obstable.keys()):
-                hst.drizzle_all(obstable, hierarchical=opt.hierarchical)
+                tweakreg = not opt.skip_tweakreg
+                hst.drizzle_all(obstable, hierarchical=opt.hierarchical,
+                    tweakreg=tweakreg)
 
             if opt.redrizzle:
                 hst.make_banner('Performing redrizzle of all epochs/filters')
