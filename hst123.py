@@ -3059,7 +3059,12 @@ class hst123(object):
 
     for row in shifts:
         if ~np.isnan(row['xoffset']) and ~np.isnan(row['yoffset']):
-            hdu = fits.open(row['file'], mode='update')
+            file=row['file']
+            if not os.path.exists(file):
+                file=row['file']
+                print(f'WARNING: {file} does not exist!')
+                continue
+            hdu = fits.open(file, mode='update')
             hdu[0].header['TWEAKSUC']=1
             hdu.close()
 
