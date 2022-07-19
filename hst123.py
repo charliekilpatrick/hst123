@@ -2474,6 +2474,15 @@ class hst123(object):
             det = '_'.join(self.get_instrument(image).split('_')[:2])
             wcsoptions = self.options['detector_defaults'][det]
             self.update_image_wcs(image, wcsoptions, use_db=False)
+    elif self.options['args'].skip_tweakreg:
+        for image in tmp_input:
+            self.clear_downloads(self.options['global_defaults'])
+
+            change_keys = self.options['global_defaults']['keys']
+            inst = self.get_instrument(image).split('_')[0]
+            ref_url = self.options['instrument_defaults'][inst]['env_ref']
+
+            self.fix_hdu_wcs_keys(image, change_keys, ref_url)
 
     if not ra or not dec:
         ra = self.coord.ra.degree if self.coord else None
@@ -2564,11 +2573,11 @@ class hst123(object):
             tweak = False ; wcsname = False
             print('Checking for tweak keys in header...')
             for key in head.keys():
-                if 'WCSNAME' in key: wcsname = True
                 if 'WCSNAME' in key and head[key].strip()=='TWEAK': tweak = True
 
-            if wcsname and not tweak:
+            if not tweak:
                 # Rename 'WCSNAME' to 'TWEAK' in rawhdu
+                print(f'Changing WCSNAME to TWEAK for {image},{i}')
                 imhdu[i].header['WCSNAME']='TWEAK'
 
         imhdu.writeto(image, overwrite=True, output_verify='silentfix')
@@ -2603,12 +2612,10 @@ class hst123(object):
 
     # Equalize sensitivities for WFPC2 data
     for image in tmp_input:
-        if 'wfpc2' in self.get_instrument(image).lower():
+        if 'wfpc2' not in self.get_instrument(image).lower():
             print(f'Equalizing photometric calibration in {image}')
             photeq.photeq(files=image, readonly=False, ref_phot_ext=3,
                 logfile='photeq.log')
-            if os.path.exists('photeq.log'):
-                os.remove('photeq.log')
 
     rotation = 0.0
     if self.options['args'].no_rotation:
