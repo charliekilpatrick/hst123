@@ -2325,6 +2325,26 @@ class hst123(object):
 
         hdu.writeto(image, overwrite=True, output_verify='silentfix')
 
+  def fix_phot_keys(self, image):
+
+    hdu = fits.open(image)
+    photplam=None
+    photflam=None
+
+    for i,h in enumerate(hdu):
+
+        if 'PHOTPLAM' in h.header.keys() and 'PHOTFLAM' in h.header.keys():
+            photplam = h.header['PHOTPLAM']
+            photflam = h.header['PHOTFLAM']
+            break
+
+    if photflam and photplam:
+        for i,h in enumerate(hdu):
+            hdu[i].header['PHOTPLAM']=photplam
+            hdu[i].header['PHOTFLAM']=photflam
+
+        hdu.writeto(image, overwrite=True, output_verify='silentfix')
+
   def fix_hdu_wcs_keys(self, image, change_keys, ref_url):
 
     hdu = fits.open(image, mode='update')
@@ -2614,8 +2634,10 @@ class hst123(object):
     for image in tmp_input:
         if 'wfpc2' not in self.get_instrument(image).lower():
             print(f'Equalizing photometric calibration in {image}')
-            photeq.photeq(files=image, readonly=False, ref_phot_ext=3,
-                logfile='photeq.log')
+            self.fix_phot_keys(image)
+            with suppress_stdout():
+                photeq.photeq(files=image, readonly=False, ref_phot_ext=3,
+                    logfile='photeq.log')
 
     rotation = 0.0
     if self.options['args'].no_rotation:
