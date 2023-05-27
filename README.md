@@ -25,52 +25,121 @@ Final photometry is scraped (--scrapedolphot) from the dolphot output and split 
 
 ## Options
 
-Usage: hst123.py
+```
+usage: hst123.py ra dec
 
-Options:
+positional arguments:
+  ra                    Right ascension to reduce the HST images
+  dec                   Declination to reduce the HST images
 
-  -h, --help<br/>            show this help message and exit
-
-  --redo<br/>                Redo the hst123 reduction by re-copying files from the
-                        raw dir.
-
-  --makeclean, --mc<br/>     Clean up all output files from previous runs then
+optional arguments:
+  -h, --help            show this help message and exit
+  --makeclean           Clean up all output files from previous runs then
                         exit.
-
-  --download<br/>            Download the raw data files given input ra and dec.
-
-  --before=YYYY-MM-DD<br/>   Date after which we should reject all HST observations
-                        for reduction.
-
-  --after=YYYY-MM-DD<br/>    Date before which we should reject all HST
-                        observations for reduction.
-
-  --clobber<br/>             Overwrite files when using download mode.
-
-  --ra=deg/HH:MM:SS<br/>     RA of interest.
-
-  --dec=deg/DD:MM:SS<br/>    DEC of interest.
-
-  --reference=ref.fits, --ref=ref.fits<br/>
+  --download            Download the raw data files given input ra and dec.
+  --keepshort           Keep image files that are shorter than 20 seconds.
+  --before BEFORE       Reject obs after this date.
+  --after AFTER         Reject obs before this date.
+  --clobber             Overwrite files when using download mode.
+  --reference REFERENCE, --ref REFERENCE
                         Name of the reference image.
-
-  --rundolphot, --rd<br/>    Run dolphot as part of this hst123 run.
-
-  --maxdolphot=9999999, --mdp=9999999, --maxdp=9999999<br/>
-                        Maximum number of images per dolphot run.
-
-  --alignonly, --ao<br/>     When running dolphot, set AlignOnly=1 so dolphot stops
-                        after image alignment.
-
-  --dolphot=dp, --dp=dp<br/>
+  --rundolphot          Run dolphot as part of this hst123 run.
+  --alignonly           Set AlignOnly=1 when running dolphot.
+  --dolphot DOLPHOT, --dp DOLPHOT
                         Name of the dolphot output file.
-
-  --nocuts, --nc<br/>        Do not mask bad sources from the dolphot output
-                        catalog before scraping data.
-
-  --scrapedolphot, --sd<br/>
+  --scrapedolphot, --sd
                         Scrape photometry from the dolphot catalog from the
                         input RA/Dec.
+  --reffilter REFFILTER
+                        Use this filter for the reference image if available.
+  --avoidwfpc2          Avoid using WFPC2 images as the reference image.
+  --refinst REFINST     Use this instrument for the reference image if
+                        available.
+  --dofake, --df        Run fake star injection into dolphot. Requires that
+                        dolphot has been run, and so files are taken from the
+                        parameters in dolphot output from the current
+                        directory rather than files derived from the current
+                        run.
+  --cleanup             Clean up interstitial image files (i.e.,
+                        flt,flc,c1m,c0m).
+  --drizzleall          Drizzle all visit/filter pairs together.
+  --hierarchical        Drizzle all visit/filter pairs then use them as basis
+                        to perform alignment on the sub-frames.
+  --hierarch_test       Testing for hierarchical alignment mode so the script
+                        exits after tweakreg alignment is performed on drz
+                        files.
+  --object OBJECT       Change the object name in all science files to value
+                        and use that value in the filenames for drizzled
+                        images.
+  --archive ARCHIVE     Download and save raw data to an archive directory
+                        instead of same folder as reduction (see
+                        global_defaults['archive'])
+  --workdir WORKDIR     Use the input working directory rather than the
+                        current dir
+  --keep_objfile        Keep the object file output from tweakreg.
+  --skip_tweakreg       Skip running tweakreg.
+  --drizdim DRIZDIM     Override the dimensions of drizzled images.
+  --drizscale DRIZSCALE
+                        Override the pixel scale of drizzled images (units are
+                        arcsec).
+  --scrapeall           Scrape all candidate counterparts within the scrape
+                        radius (default=2 pixels) and output to files
+                        dpXXX.phot where XXX is zero-padded integer for
+                        labeling sources in order of proximity to input
+                        coordinate.
+  --token TOKEN         Input a token for astroquery.mast.Observations.
+  --scraperadius SCRAPERADIUS
+                        Override the dolphot scrape radius (units are arcsec).
+  --nocuts              Skip cuts to dolphot output file.
+  --onlywide            Only reduce wide-band filters.
+  --brightest           Sort output source files by signal-to-noise in
+                        reference image.
+  --no_large_reduction  Exit if input list is >large_num images.
+  --large_num LARGE_NUM
+                        Large number of images to skip when
+                        --no_large_reduction used.
+  --combine_type COMBINE_TYPE
+                        Override astrodrizzle combine_type with input.
+  --sky_sub             Use sky subtraction in astrodrizzle.
+  --wht_type WHT_TYPE   final_wht_type parameter for astrodrizzle.
+  --drizadd DRIZADD     Comma-separated list of images to add to the drizzled
+                        reference image. Use this to inject data from other
+                        instruments, filters, etc. if they would not be
+                        selected by pick_best_reference.
+  --drizmask DRIZMASK   Mask out pixels in a box around input mask coordinate
+                        in drizzled images but outside box in images from
+                        drizadd.
+  --no_clear_downloads  Suppress the clear_downloads method.
+  --fixzpt FIXZPT       Fix the zero point of drizzled images to input value
+                        (accounting for combined EXPTIME in header).
+  --no_nan              Set nan values in drizzled images to median pixel
+                        value.
+  --skip_copy           Skip copying files from archive if --archive is used.
+  --byvisit             Reduce images by visit number.
+  --no_rotation         When drizzling, do not rotate to PA=0 degrees but
+                        preserve the original position angle.
+  --only_filter ONLY_FILTER
+                        List of filters that will be used to update acceptable
+                        filters.
+  --fitsky FITSKY       Change the dolphot FitSky parameter to something other
+                        than 2.
+  --no_mask             Do not add extra masking based on other input files.
+  --keep_indt           Keep images with EXPFLAG==INDETERMINATE.
+  --keep_tdf_down       Keep images with EXPFLAG==TDF-DOWN AT START.
+  --tweak_thresh TWEAK_THRESH
+                        Initial threshold for finding sources in tweakreg.
+  --add_crmask          Add the cosmic ray mask to the image DQ mask for
+                        dolphot.
+  --redrizzle           Redrizzle all epochs/filters once the master reference
+                        image is created and all images are aligned to that
+                        frame.
+  --dolphot_lim DOLPHOT_LIM
+                        Detection threshold for sources detected by dolphot.
+  --tweak_search TWEAK_SEARCH
+                        Default search radius for tweakreg.
+  --tweak_min_obj TWEAK_MIN_OBJ
+                        Default search radius for tweakreg.
+```
 
 ## Requirements
 
