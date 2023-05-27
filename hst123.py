@@ -104,8 +104,8 @@ global_defaults = {
                 'UseWCS': 1,
                 'AlignOnly': 0,
                 'AlignIter': 5,
-                'AlignTol': 0,
-                'AlignStep': 2.0,
+                'AlignTol': 0.5,
+                'AlignStep': 4.0,
                 'VerboseData': 1,
                 'NegSky': 1,
                 'Force1': 1,
@@ -2283,7 +2283,7 @@ class hst123(object):
         if not opt.skip_tweakreg:
             error, shift_table = self.run_tweakreg(obstable[mask], '')
         self.run_astrodrizzle(obstable[mask], output_name=outimage,
-            clean=False)
+            clean=False, save_fullfile=True)
 
         # Add cosmic ray mask to static image mask
         if self.options['args'].add_crmask:
@@ -2308,7 +2308,7 @@ class hst123(object):
 
     if not opt.skip_tweakreg:
         error, shift_table = self.run_tweakreg(obstable, '')
-    self.run_astrodrizzle(obstable, output_name=drizname)
+    self.run_astrodrizzle(obstable, output_name=drizname, save_fullfile=True)
 
     return(drizname)
 
@@ -2450,7 +2450,7 @@ class hst123(object):
 
   # Run the drizzlepac astrodrizzle routine using detector parameters.
   def run_astrodrizzle(self, obstable, output_name = None, ra=None, dec=None,
-    clean=None):
+    clean=None, save_fullfile=False):
 
     print('Starting astrodrizzle')
 
@@ -2645,6 +2645,9 @@ class hst123(object):
 
     logfile_name = 'astrodrizzle.log'
 
+    if save_fullfile:
+        clean=False
+
     tries = 0
     while tries < 3:
         try:
@@ -2699,8 +2702,10 @@ class hst123(object):
 
     if os.path.exists(weight_file):
         os.rename(weight_file, output_name.replace('.fits', '.weight.fits'))
+        weight_file = output_name.replace('.fits', '.weight.fits')
     if os.path.exists(mask_file):
         os.rename(mask_file, output_name.replace('.fits', '.mask.fits'))
+        mask_file = output_name.replace('.fits', '.mask.fits')
     if os.path.exists(science_file):
         os.rename(science_file, output_name)
 
@@ -2709,6 +2714,8 @@ class hst123(object):
     tmp_input = sorted(tmp_input)
     str_input = ','.join([s.split('.')[0] for s in tmp_input])
 
+    origzpt = self.get_zpt(output_name)
+
     # Add header keys on drizzled file
     hdu = fits.open(output_name, mode='update')
     filt = obstable['filter'][0]
@@ -2716,6 +2723,7 @@ class hst123(object):
     hdu[0].header['TELID'] = 'HST'
     hdu[0].header['OBSTYPE'] = 'OBJECT'
     hdu[0].header['EXTVER'] = 1
+    hdu[0].header['ORIGZPT']=origzpt
     # Format the header time variable for MJD-OBS, DATE-OBS, TIME-OBS
     time_start = Time(hdu[0].header['EXPSTART'], format='mjd')
     hdu[0].header['MJD-OBS'] = time_start.mjd
@@ -2724,6 +2732,7 @@ class hst123(object):
     # These keys are useful for auditing drz image later
     hdu[0].header['NINPUT'] = ninput
     hdu[0].header['INPUT'] = str_input
+    hdu[0].header['BUNIT'] = 'ELECTRONS'
     # Add object name if it was input from command line
     if self.options['args'].object:
         hdu[0].header['TARGNAME'] = self.options['args'].object
@@ -2732,7 +2741,7 @@ class hst123(object):
     if self.options['args'].fixzpt:
         # Get current zeropoint of drizzled image
         fixzpt = self.options['args'].fixzpt
-        zpt = self.get_zpt(output_name)
+        zpt = origzpt
         exptime = hdu[0].header['EXPTIME']
         effzpt = zpt + 2.5*np.log10(exptime)
         fixscale = 10**(0.4 * (fixzpt - effzpt))
@@ -2747,7 +2756,6 @@ class hst123(object):
         hdu[0].header['FIXZPT']   = fixzpt
         hdu[0].header['FIXFLUX']  = fluxscale
         hdu[0].header['EFFZPT']   = effzpt
-        hdu[0].header['ORIGZPT']  = zpt
         hdu[0].header['FIXSCALE'] = fixscale
         # rescaled by EXPTIME, so essentially cps
         hdu[0].header['BUNIT']    = 'cps'
@@ -2758,6 +2766,44 @@ class hst123(object):
         hdu[0].data = data
 
     hdu.close()
+
+    print(f'save_fullfile={save_fullfile}',weight_file,
+        os.path.exists(weight_file),mask_file,os.path.exists(mask_file))
+    if (save_fullfile and os.path.exists(weight_file) and
+        os.path.exists(mask_file)):
+
+        hdu = fits.open(output_name)
+        hdu.info()
+
+        newhdu = fits.HDUList()
+
+        # Make PRIMARY HDU
+        newhdu.append(copy.copy(hdu[0]))
+        newhdu[0].data = None
+        newhdu[0].header['EXTNAME']='PRIMARY'
+
+        # Make SCI HDU
+        newhdu.append(copy.copy(hdu[0]))
+        newhdu[1].header['EXTNAME']='SCI'
+
+        # Make WHT HDU
+        weight_hdu = fits.open(weight_file)
+        newhdu.append(weight_hdu[0])
+        newhdu[2].header['EXTNAME']='WHT'
+        newhdu[2].header['BUNIT'] = 'UNITLESS'
+
+        # Make CTX HDU
+        mask_hdu = fits.open(mask_file)
+        newhdu.append(mask_hdu[0])
+        newhdu[3].header['EXTNAME']='CTX'
+        newhdu[3].header['BUNIT'] = 'UNITLESS'
+
+        # Make HDRTAB HDU
+        if 'HDRTAB' in [h.name for h in hdu]:
+            newhdu.append(copy.copy(hdu['HDRTAB']))
+
+        newhdu.writeto(output_name.replace('.drz.fits','.drc.fits'),
+            overwrite=True, output_verify='silentfix')
 
     return(True)
 
@@ -3371,6 +3417,8 @@ class hst123(object):
             rawhdu[0].header['TWEAKSUC']==1):
             tweaksuc = True
 
+        if 'wfc3_ir' in self.get_instrument(image): continue
+
         for i,h in enumerate(rawhdu):
             if (tweaksuc and 'CRVAL1' in h.header.keys() and
                 'CRVAL2' in h.header.keys()):
@@ -3777,7 +3825,8 @@ class hst123(object):
             if do_tweakreg:
                 error, shift_table = self.run_tweakreg(driztable, '')
             # Next run astrodrizzle to construct the drizzled frame
-            self.run_astrodrizzle(driztable, output_name=name)
+            self.run_astrodrizzle(driztable, output_name=name,
+                save_fullfile=True)
 
         self.sanitize_reference(name)
 
@@ -4199,7 +4248,7 @@ if __name__ == '__main__':
                 'drizname' in obstable.keys()):
                 do_tweakreg = not opt.skip_tweakreg
                 hst.drizzle_all(obstable, hierarchical=opt.hierarchical,
-                    do_tweakreg=do_tweakreg)
+                    do_tweakreg=do_tweakreg, clobber=opt.clobber)
 
             if opt.redrizzle:
                 hst.make_banner('Performing redrizzle of all epochs/filters')
