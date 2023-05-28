@@ -191,11 +191,9 @@ options:
                         reference image.
 ```
 
-## Requirements
+## External dependencies
 
-See requirements.txt.  The main requirements are numpy, astropy, drizzlepac, and astroquery.  hst123 also uses astroscrappy (based on LACosmic) for the cosmic ray rejection routine and stwcs for updating the geometric distortion terms in HST image headers.
-
-hst123 also requires a complete installation of dolphot, including all instrument-specific modules and filter PSFs.  To obtain these files, visit: http://americano.dolphinsim.com/dolphot/.
+hst123 requires a complete installation of dolphot to run PSF photometry, including all instrument-specific modules and filter PSFs.  To obtain these files, visit: http://americano.dolphinsim.com/dolphot/.
 
 ## Contact
 
