@@ -13,7 +13,7 @@ global_defaults = {
         'SHADCORR','DOSATMAP','DOPHOTOM','DOHISTOS','DRIZCORR','OUTDTYPE'],
     'cdbs': 'ftp://ftp.stsci.edu/cdbs/',
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
-    'crds': 'https://hst-crds.stsci.edu/unchecked_get/references/hst/',
+    'crds': 'https://hst-crds.stsci.edu/browse/',
     'visit': 1,
     'search_rad': 1.0, # for tweakreg in arcsec
     'radius': 5 * u.arcmin,

@@ -580,7 +580,7 @@ class hst123(object):
         print(header)
 
         for row in obstable:
-            line = form.format(file=row['image'],
+            line = form.format(file=os.path.basename(row['image']),
                     inst=row['instrument'].upper(),
                     filt=row['filter'].upper(),
                     exp='%7.4f' % row['exptime'],
@@ -619,6 +619,9 @@ class hst123(object):
             drizname = drizname.format(inst=inst.split('_')[0],
                 filt=filt, n=n, date=date_str)
 
+        if self.options['args'].work_dir:
+            drizname = os.path.join(self.options['args'].work_dir, drizname)
+
         obstable[i]['drizname'] = drizname
 
     if file:
@@ -626,6 +629,10 @@ class hst123(object):
         form = '{inst: <10} {filt: <10} {exp: <12} {date: <16}'
         header = form.format(inst='INSTRUMENT', filt='FILTER', exp='EXPTIME',
             date='DATE')
+
+        if self.options['args'].work_dir:
+            file = os.path.join(self.options['args'].work_dir, file)
+
         outfile = open(file, 'w')
         outfile.write(header+'\n')
 
@@ -763,10 +770,10 @@ class hst123(object):
     radius = dolphot['radius']
 
     # Check if we need to override dolphot scrape radius
-    if self.options['args'].scraperadius:
+    if self.options['args'].scrape_radius:
         # Calculate what the radius will be for reference image in pixels
         # we can do this pretty easily with a trick from dec
-        angradius = self.options['args'].scraperadius/3600.
+        angradius = self.options['args'].scrape_radius/3600.
         if dec < 89:
             dec1 = coord.dec.degree + angradius
         else:
@@ -1672,15 +1679,19 @@ class hst123(object):
     return(out)
 
   # Glob all of the input images from working directory
-  def get_input_images(self, pattern=None):
+  def get_input_images(self, pattern=None, workdir=None):
+    if workdir == None:
+        workdir = '.'
     if pattern == None:
         pattern = ['*c1m.fits','*c0m.fits','*flc.fits','*flt.fits']
-    return([s for p in pattern for s in glob.glob(p)])
+    return([s for p in pattern for s in glob.glob(os.path.join(workdir,p))])
 
-  def get_split_images(self, pattern=None):
+  def get_split_images(self, pattern=None, workdir=None):
+    if workdir == None:
+        workdir = '.'
     if pattern == None:
         pattern = ['*c0m.chip?.fits', '*flc.chip?.fits', '*flt.chip?.fits']
-    return([s for p in pattern for s in glob.glob(p)])
+    return([s for p in pattern for s in glob.glob(os.path.join(workdir,p))])
 
   # Get the data quality image for dolphot mask routine.  This is entirely for
   # WFPC2 since mask routine requires additional input for this instrument
@@ -1870,9 +1881,9 @@ class hst123(object):
     # If we haven't defined input images, catch error
 
     reference_images = self.pick_deepest_images(list(obstable['image']),
-        reffilter=self.options['args'].reffilter,
-        avoid_wfpc2=self.options['args'].avoidwfpc2,
-        refinst=self.options['args'].refinst)
+        reffilter=self.options['args'].reference_filter,
+        avoid_wfpc2=self.options['args'].avoid_wfpc2,
+        refinst=self.options['args'].reference_instrument)
 
     if len(reference_images)==0:
         error = 'ERROR: could not pick a reference image'
@@ -1916,8 +1927,8 @@ class hst123(object):
     message += 'Generating from input files: {img}\n\n'
     print(message.format(reference=drizname, img=reference_images))
 
-    if self.options['args'].drizadd:
-        add_images = list(str(self.options['args'].drizadd).split(','))
+    if self.options['args'].drizzle_add:
+        add_images = list(str(self.options['args'].drizzle_add).split(','))
         for image in add_images:
             if os.path.exists(image) and image not in reference_images:
                 reference_images.append(image)
@@ -2007,6 +2018,9 @@ class hst123(object):
 
     hdu = fits.open(image, mode='update')
     ref = ref_url.strip('.old')
+    outdir = self.options['args'].work_dir
+    if not outdir:
+        outdir = '.'
 
     for i,h in enumerate(hdu):
         for key in hdu[i].header.keys():
@@ -2023,7 +2037,9 @@ class hst123(object):
                 ref_file = val.split('$')[1]
             else:
                 ref_file = val
-            if not os.path.exists(ref_file):
+
+            fullfile = os.path.join(outdir, ref_file)
+            if not os.path.exists(fullfile):
                 # Try using both old cdbs database and new crds link
                 urls = []
                 url = self.options['global_defaults']['cdbs']
@@ -2032,26 +2048,26 @@ class hst123(object):
                 url = self.options['global_defaults']['crds']
                 urls.append(url+ref_file)
                 for url in urls:
-                    message = 'Downloading file: {url}'
-                    sys.stdout.write(message.format(url=url))
+                    message = f'Downloading file: {url}'
+                    sys.stdout.write(message)
                     sys.stdout.flush()
                     try:
                         dat = download_file(url, cache=False,
                             show_progress=False, timeout=120)
-                        shutil.move(dat, ref_file)
+                        shutil.move(dat, fullfile)
                         message = '\r' + message
                         message += Constants.green+' [SUCCESS]'+end+'\n'
-                        sys.stdout.write(message.format(url=url))
+                        sys.stdout.write(message)
                         break
                     except:
                         message = '\r' + message
                         message += Constants.red+' [FAILURE]'+Constants.end+'\n'
-                        sys.stdout.write(message.format(url=url))
-                        print(message.format(url=url))
+                        sys.stdout.write(message)
+                        print(message)
 
-            message = 'Setting {im},{i} {key}={val}'
-            print(message.format(im=image, i=i, key=key, val=ref_file))
-            hdu[i].header[key] = ref_file
+            message = f'Setting {image},{i} {key}={fullfile}'
+            print(message)
+            hdu[i].header[key] = fullfile
 
         # WFPC2 does not have residual distortion corrections and astrodrizzle
         # choke if DGEOFILE is in header but not NPOLFILE.  So do a final check
@@ -2114,8 +2130,13 @@ class hst123(object):
 
     n = len(obstable)
 
+    if self.options['args'].work_dir:
+        outdir = self.options['args'].work_dir
+    else:
+        outdir = '.'
+
     if output_name is None:
-        output_name = 'drizzled.fits'
+        output_name = os.path.join(outdir, 'drizzled.fits')
 
     if n < 7:
         combine_type = 'minmed'
@@ -2132,11 +2153,6 @@ class hst123(object):
     inst = list(set(obstable['instrument']))
     det = '_'.join(self.get_instrument(obstable[0]['image']).split('_')[:2])
     options = self.options['detector_defaults'][det]
-    #if len(inst) > 1 and not self.options['args'].drizadd:
-    #    error = 'ERROR: Cannot drizzle together images from detectors: {det}.'
-    #    error += 'Exiting...'
-    #    print(error.format(det=','.join(map(str,inst))))
-    #    return(False)
 
     # Make a copy of each input image so drizzlepac doesn't edit base headers
     tmp_input = []
@@ -2171,8 +2187,8 @@ class hst123(object):
     else:
         skysub = True
 
-    if self.options['args'].drizscale:
-        pixscale = self.options['args'].drizscale
+    if self.options['args'].drizzle_scale:
+        pixscale = self.options['args'].drizzle_scale
     else:
         pixscale = options['pixel_scale']
 
@@ -2190,9 +2206,9 @@ class hst123(object):
 
     # If drizmask, then edit tmp_input masks for everything except for drizadd
     # files
-    if self.options['args'].drizmask and self.options['args'].drizadd:
+    if self.options['args'].drizzle_mask and self.options['args'].drizzle_add:
         add_im_base = [im.split('.')[0]
-            for im in self.options['args'].drizadd.split(',')]
+            for im in self.options['args'].drizzle_add.split(',')]
 
         if ',' in self.options['args'].drizmask:
             ramask, decmask = self.options['args'].drizmask.split(',')
@@ -2294,15 +2310,16 @@ class hst123(object):
         if 'wfpc2' not in self.get_instrument(image).lower():
             print(f'Equalizing photometric calibration in {image}')
             self.fix_phot_keys(image)
+
             with suppress_stdout():
                 photeq.photeq(files=image, readonly=False, ref_phot_ext=3,
-                    logfile='photeq.log')
+                    logfile=os.path.join(outdir, 'photeq.log'))
 
     rotation = 0.0
     if self.options['args'].no_rotation:
         rotation = None
 
-    logfile_name = 'astrodrizzle.log'
+    logfile_name = os.path.join(outdir, 'astrodrizzle.log')
 
     if save_fullfile:
         clean=False
@@ -2397,9 +2414,9 @@ class hst123(object):
         hdu[0].header['TARGNAME'] = self.options['args'].object
         hdu[0].header['OBJECT'] = self.options['args'].object
 
-    if self.options['args'].fixzpt:
+    if self.options['args'].fix_zpt:
         # Get current zeropoint of drizzled image
-        fixzpt = self.options['args'].fixzpt
+        fixzpt = self.options['args'].fix_zpt
         zpt = origzpt
         exptime = hdu[0].header['EXPTIME']
         effzpt = zpt + 2.5*np.log10(exptime)
@@ -2806,6 +2823,13 @@ class hst123(object):
   def run_tweakreg(self, obstable, reference, do_cosmic=True, skip_wcs=False,
     search_radius=None, update_hdr=True):
 
+    if self.options['args'].work_dir:
+        outdir = self.options['args'].work_dir
+    else:
+        outdir = '.'
+
+    os.chdir(outdir)
+
     # Get options from object
     options = self.options['global_defaults']
     # Check if tweakreg has already been run on each image
@@ -2995,7 +3019,7 @@ class hst123(object):
                 rthresh='%2.4f'%rthresh, tol='%2.4f'%tol,
                 rad='%2.4f'%search_rad))
 
-            outshifts = 'drizzle_shifts.txt'
+            outshifts = os.path.join(outdir, 'drizzle_shifts.txt')
 
             try:
                 tweakreg.TweakReg(files=tweak_img, refimage=reference,
@@ -3178,7 +3202,7 @@ class hst123(object):
 
   def copy_wcs_keys(self, from_hdu, to_hdu):
     for key in ['CRPIX1','CRPIX2','CRVAL1','CRVAL2','CD1_1','CD1_2','CD2_1',
-        'CD2_2']:
+        'CD2_2','CTYPE1','CTYPE2']:
         if key in from_hdu.header.keys():
             to_hdu.header[key]=from_hdu.header[key]
 
@@ -3238,6 +3262,16 @@ class hst123(object):
     # Apply the masks to the observation table
     mask = [all(l) for l in list(map(list, zip(*masks)))]
     obsTable = obsTable[mask]
+
+    if self.options['args'].only_filter:
+        get_filts = self.options['args'].only_filter.split(',')
+        get_filts = [f.lower() for f in get_filts]
+        mask = np.array([any([f in row['filters'].lower() for f in get_filts])
+            for row in obsTable])
+        obsTable = obsTable[mask]
+
+    # Get product lists in order of observation time
+    obsTable.sort('t_min')
 
     # Iterate through each observation and download the correct product
     # depending on the filename and instrument/detector of the observation
@@ -3312,7 +3346,10 @@ class hst123(object):
         print(error)
         return(False)
 
-    for prod in productlist:
+    n = len(productlist)
+    print(f'We need to download {n} files')
+
+    for i,prod in enumerate(productlist):
         filename = prod['downloadFilename']
 
         outdir = ''
@@ -3336,8 +3373,8 @@ class hst123(object):
 
         obsid = prod['obsID']
 
-        message = 'Trying to download {image}'
-        sys.stdout.write(message.format(image=filename))
+        message = f'Trying to download ({i+1}/{n}) {filename}'
+        sys.stdout.write(message)
         sys.stdout.flush()
 
         try:
@@ -3345,15 +3382,16 @@ class hst123(object):
                 cache = '.'
                 download = Observations.download_products(Table(prod),
                     download_dir=cache, cache=False)
-            shutil.move(download['Local Path'][0], filename)
+                shutil.move(download['Local Path'][0], filename)
+            
             message = '\r' + message
             message += Constants.green+' [SUCCESS]'+Constants.end+'\n'
-            sys.stdout.write(message.format(image=filename))
+            sys.stdout.write(message)
+        
         except Exception as e:
             message = '\r' + message
             message += Constants.red+' [FAILURE]'+Constants.end+'\n'
-            sys.stdout.write(message.format(image=filename))
-            print('Error:', e)
+            sys.stdout.write(message)
 
     # Clean up mastDownload directory
     if os.path.exists('mastDownload'):
@@ -3673,7 +3711,7 @@ class hst123(object):
         if opt.fit_sky in [1,2,3,4]:
             self.options['global_defaults']['dolphot']['FitSky']=opt.fit_sky
         else:
-            warning = f'WARNING: --fitsky {opt.fit_sky} not allowed.  Setting fitsky=2.'
+            warning = f'WARNING: --fit-sky {opt.fit_sky} not allowed.'
             print(warning)
 
     if opt.tweak_search:
@@ -3705,7 +3743,7 @@ class hst123(object):
     dp = self.dolphot
     gopt = self.options['global_defaults']['fake']
     if not os.path.exists(dp['base'] or os.path.getsize(dp['base'])==0):
-        warning = 'WARNING: option --dofake used but dolphot has not been run.'
+        warning = 'WARNING: option --do-fake used but dolphot has not been run.'
         print(warning)
         return(None)
 
@@ -3873,7 +3911,7 @@ if __name__ == '__main__':
         hst.copy_raw_data(opt.raw_dir, reverse=True, check_for_coord=True)
 
     # Get input images
-    hst.input_images = hst.get_input_images()
+    hst.input_images = hst.get_input_images(workdir=opt.work_dir)
 
     # Check which are HST images that need to be reduced
     Util.make_banner('Checking which images need to be reduced')
@@ -3911,7 +3949,7 @@ if __name__ == '__main__':
 
             # Drizzle all visit/filter pairs if drizzleall
             # Handle this first, especially if doing hierarchical alignment
-            if ((opt.drizzleall or opt.hierarchical) and
+            if ((opt.drizzle_all or opt.hierarchical) and
                 'drizname' in obstable.keys()):
                 do_tweakreg = not opt.skip_tweakreg
                 hst.drizzle_all(obstable, hierarchical=opt.hierarchical,
@@ -3959,8 +3997,8 @@ if __name__ == '__main__':
             if opt.scrape_dolphot: hst.get_dolphot_photometry(split_images,
                 hst.reference)
 
-            # Do fake star injection if --dofake is passed
-            if opt.dofake: hst.do_fake(obstable, hst.reference)
+            # Do fake star injection if --do-fake is passed
+            if opt.do_fake: hst.do_fake(obstable, hst.reference)
 
     # Write out a list of the input images with metadata for easy reference
     Util.make_banner('Complete list of input images')
