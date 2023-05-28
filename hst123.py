@@ -109,7 +109,6 @@ class hst123(object):
 
     self.productlist = None
 
-    self.keepshort = False
     self.cleanup = False
     self.updatewcs = True
     self.archive = False
@@ -698,7 +697,7 @@ class hst123(object):
     # Check input variables
     base = dolphot['base'] ; colfile = dolphot['colfile']
     if not os.path.isfile(base) or not os.path.isfile(colfile):
-        error = 'ERROR: dolphot output {dp} does not exist.  Use --rundolphot '
+        error = 'ERROR: dolphot output {dp} does not exist.  Use --run-dolphot '
         error += 'or check your dolphot output for errors'
         print(error.format(dp=dolphot['base']))
         return(None)
@@ -916,10 +915,7 @@ class hst123(object):
         for file in glob.glob(rawdir+'/*.fits'):
             # If check_for_coord, only copy files that have target coord
             if check_for_coord:
-                keep_tdf_down = self.options['args'].keep_tdf_down
-                keep_indt = self.options['args'].keep_indt
-                warning, check = self.needs_to_be_reduced(file, save_c1m=True,
-                    keep_indt=keep_indt, keep_tdf_down=keep_tdf_down)
+                warning, check = self.needs_to_be_reduced(file, save_c1m=True)
                 if not check:
                     print(warning)
                     continue
@@ -1024,15 +1020,12 @@ class hst123(object):
         return(None)
     else:
         if check_for_coord:
-            keep_tdf_down = self.options['args'].keep_tdf_down
-            keep_indt = self.options['args'].keep_indt
-            warning, check = self.needs_to_be_reduced(fullfile, save_c1m=True,
-                keep_indt=keep_indt, keep_tdf_down=keep_tdf_down)
+            warning, check = self.needs_to_be_reduced(fullfile, save_c1m=True)
             if not check:
                 print(warning)
                 return(None)
         if workdir:
-            fulloutfile = workdir + '/' + basefile
+            fulloutfile = os.path.join(workdir, basefile)
         else:
             fulloutfile = basefile
 
@@ -1382,8 +1375,12 @@ class hst123(object):
     # Write out to same file w/ overwrite
     newhdu.writeto(image, output_verify='silentfix', overwrite=True)
 
-  def needs_to_be_reduced(self, image, save_c1m=False, keep_indt=False,
-    keep_tdf_down=False):
+  def needs_to_be_reduced(self, image, save_c1m=False):
+
+    keep_short = self.options['args'].keep_short
+    keep_tdf_down = self.options['args'].keep_tdf_down
+    keep_indt = self.options['args'].keep_indt
+
     if not os.path.exists(image):
         success = self.try_to_get_image(image)
         if not success:
@@ -1411,15 +1408,15 @@ class hst123(object):
             warning = 'WARNING: could not find or download {img}'
             return(warning.format(img=image), False)
 
-        archivedir = self.options['args'].archive
-        workdir = self.options['args'].workdir
-
         self.download_files(self.productlist,
-            archivedir=self.options['args'].archive, clobber=True)
+            archivedir=self.options['args'].archive, 
+            clobber=True)
 
         for product in self.productlist[mask]:
-            self.copy_raw_data_archive(product, archivedir=archivedir,
-                workdir=workdir, check_for_coord=True)
+            self.copy_raw_data_archive(product, 
+                archivedir=self.options['args'].archive,
+                workdir=self.options['args'].work_dir, 
+                check_for_coord=True)
 
         if os.path.exists(image):
             try:
@@ -1468,7 +1465,7 @@ class hst123(object):
             return(warning, False)
 
     # Get rid of exposures with exptime < 20s
-    if not self.options['args'].keepshort:
+    if not keep_short:
         exptime = hdu[0].header['EXPTIME']
         if (exptime < 15):
             warning = f'WARNING: {image} EXPTIME is {exptime} < 20.'
@@ -2169,7 +2166,7 @@ class hst123(object):
         ra = self.coord.ra.degree if self.coord else None
         dec = self.coord.dec.degree if self.coord else None
 
-    if self.options['args'].keepshort and not self.options['args'].sky_sub:
+    if self.options['args'].keep_short and not self.options['args'].sky_sub:
         skysub = False
     else:
         skysub = True
@@ -3235,7 +3232,7 @@ class hst123(object):
         masks.append([t > Time(self.after).mjd for t in obsTable['t_min']])
 
     # Get rid of short exposures (defined as 15s or less)
-    if not self.options['args'].keepshort:
+    if not self.options['args'].keep_short:
         masks.append([t > 15. for t in obsTable['t_exptime']])
 
     # Apply the masks to the observation table
@@ -3357,6 +3354,10 @@ class hst123(object):
             message += Constants.red+' [FAILURE]'+Constants.end+'\n'
             sys.stdout.write(message.format(image=filename))
             print('Error:', e)
+
+    # Clean up mastDownload directory
+    if os.path.exists('mastDownload'):
+        shutil.rmtree('mastDownload')
 
     return(True)
 
@@ -3493,7 +3494,7 @@ class hst123(object):
         self.sanitize_reference(name)
 
         # Make a sky file for the drizzled image and rename 'noise'
-        if opt.rundolphot:
+        if opt.run_dolphot:
             if (self.needs_to_calc_sky(name)):
                 self.compress_reference(name)
                 self.calc_sky(name, self.options['detector_defaults'])
@@ -3631,9 +3632,9 @@ class hst123(object):
             Util.make_banner(f'WARNING: did not find a source for: {ra} {dec}')
 
     else:
-        message = 'WARNING: dolphot did not run.  Use the --rundolphot flag'
+        message = 'WARNING: dolphot did not run.  Use the --run-dolphot flag'
         message += ' or check your dolphot output for errors before using '
-        message += '--scrapedolphot'
+        message += '--scrape-dolphot'
         print(message)
 
   def handle_args(self, parser):
@@ -3642,23 +3643,23 @@ class hst123(object):
     default = self.options['global_defaults']
 
     # If we're cleaning up a previous run, execute that here then exit
-    if self.options['args'].makeclean: self.make_clean()
+    if self.options['args'].make_clean: self.make_clean()
 
     # Handle other options
     self.reference = self.options['args'].reference
-    if opt.alignonly: default['dolphot']['AlignOnly']=1
+    if opt.align_only: default['dolphot']['AlignOnly']=1
     if opt.before: self.before=Time(self.options['args'].before)
     if opt.after: self.after=Time(self.options['args'].after)
     if opt.skip_tweakreg: self.updatewcs = False
 
     # Override drizzled image dimensions
-    dim = opt.drizdim
+    dim = opt.drizzle_dim
     for det in self.options['detector_defaults'].keys():
         self.options['detector_defaults'][det]['nx']=dim
         self.options['detector_defaults'][det]['ny']=dim
 
     # If only wide, modify acceptable_filters to those with W, X, or LP
-    if opt.onlywide:
+    if opt.only_wide:
         self.options['acceptable_filters'] = [filt for filt in
             self.options['acceptable_filters'] if (filt.upper().endswith('X')
                 or filt.upper().endswith('W') or filt.upper().endswith('LP'))]
@@ -3668,12 +3669,12 @@ class hst123(object):
         self.options['acceptable_filters'] = [filt for filt in
             self.options['acceptable_filters'] if filt.lower() in filts]
 
-    if opt.fitsky:
-        if opt.fitsky in [1,2,3,4]:
-            self.options['global_defaults']['dolphot']['FitSky']=opt.fitsky
+    if opt.fit_sky:
+        if opt.fit_sky in [1,2,3,4]:
+            self.options['global_defaults']['dolphot']['FitSky']=opt.fit_sky
         else:
-            warning = 'WARNING: --fitsky {0} not allowed.  Setting fitsky=2.'
-            print(warning.format(opt.fitsky))
+            warning = f'WARNING: --fitsky {opt.fit_sky} not allowed.  Setting fitsky=2.'
+            print(warning)
 
     if opt.tweak_search:
         self.options['global_defaults']['search_rad']=opt.tweak_search
@@ -3689,14 +3690,14 @@ class hst123(object):
         if lim < self.options['global_defaults']['dolphot']['SigFind']:
             self.options['global_defaults']['dolphot']['SigFind']=lim
 
-    # Check for dolphot scripts and set rundolphot to False if any of them is
+    # Check for dolphot scripts and set run-dolphot to False if any of them is
     # not available.  This will prevent errors due to scripts not being in path
     if not self.check_for_dolphot():
-        warning = 'WARNING: dolphot scripts not in path!  Setting --rundolphot '
-        warning += 'to False.  If you want to run dolphot, download and '
+        warning = 'WARNING: dolphot scripts not in path!  Setting --run-dolphot'
+        warning += ' to False.  If you want to run dolphot, download and '
         warning += 'compile scripts!'
         print(warning)
-        opt.rundolphot = False
+        opt.run_dolphot = False
 
     return(opt)
 
@@ -3828,6 +3829,7 @@ if __name__ == '__main__':
     if len(sys.argv) < 3: print(hst.usagestring) ; sys.exit(1)
     else: coord = Util.parse_coord(sys.argv[1], sys.argv[2]) ; hst.coord = coord
     if not hst.coord: print(hst.usagestring) ; sys.exit(1)
+    
     # This is to prevent argparse from choking if dec was not degrees as float
     sys.argv[1] = str(coord.ra.degree) ; sys.argv[2] = str(coord.dec.degree)
     ra = '%7.8f' % hst.coord.ra.degree
@@ -3842,12 +3844,18 @@ if __name__ == '__main__':
     if opt.download:
         banner = f'Downloading HST data from MAST for: {ra} {dec}'
         Util.make_banner(banner)
+
+        if opt.raw_dir:
+            opt.raw_dir = os.path.join(opt.raw_dir, 'raw')
+
         if opt.archive:
             hst.dest=None
         else:
-            hst.dest = hst.rawdir
-        if hst.rawdir and not os.path.exists(hst.rawdir):
-            os.makedirs(hst.rawdir)
+            hst.dest = opt.raw_dir
+
+        if opt.raw_dir and not os.path.exists(opt.raw_dir):
+            os.makedirs(opt.raw_dir)
+
         hst.download_files(hst.productlist, archivedir=opt.archive,
             dest=hst.dest, clobber=opt.clobber)
 
@@ -3856,13 +3864,13 @@ if __name__ == '__main__':
         if hst.productlist:
             for product in hst.productlist:
                 hst.copy_raw_data_archive(product, archivedir=opt.archive,
-                    workdir=opt.workdir, check_for_coord=True)
+                    workdir=opt.work_dir, check_for_coord=True)
         else:
             Util.make_banner('WARNING: no products to download!')
     else:
         # Assume that all files are in the raw/ data directory
         Util.make_banner('Copying raw data to working dir')
-        hst.copy_raw_data(hst.rawdir, reverse=True, check_for_coord=True)
+        hst.copy_raw_data(opt.raw_dir, reverse=True, check_for_coord=True)
 
     # Get input images
     hst.input_images = hst.get_input_images()
@@ -3870,10 +3878,7 @@ if __name__ == '__main__':
     # Check which are HST images that need to be reduced
     Util.make_banner('Checking which images need to be reduced')
     for file in list(hst.input_images):
-        keep_tdf_down = hst.options['args'].keep_tdf_down
-        keep_indt = hst.options['args'].keep_indt
-        warning, needs_reduce = hst.needs_to_be_reduced(file,
-            keep_indt=keep_indt, keep_tdf_down=keep_tdf_down)
+        warning, needs_reduce = hst.needs_to_be_reduced(file)
         if not needs_reduce:
             print(warning)
             hst.input_images.remove(file)
@@ -3888,18 +3893,18 @@ if __name__ == '__main__':
         Util.make_banner('Organizing input images by visit')
         # Going forward, we'll refer everything to obstable for imgs + metadata
         table = hst.input_list(hst.input_images, show=True)
-        tables = hst.organize_reduction_tables(table, byvisit=opt.byvisit)
+        tables = hst.organize_reduction_tables(table, byvisit=opt.by_visit)
 
         for i,obstable in enumerate(tables):
 
             vnum = str(i).zfill(4)
-            if opt.rundolphot or opt.scrapedolphot:
+            if opt.run_dolphot or opt.scrape_dolphot:
                 hst.dolphot = hst.make_dolphot_dict(opt.dolphot+vnum)
 
             hst.reference = hst.handle_reference(obstable, opt.reference)
 
             # Run main tweakreg to register to the reference.  Skipping tweakreg
-            # will speed up analysis if only running scrapedolphot
+            # will speed up analysis if only running scrape-dolphot
             if not opt.skip_tweakreg:
                 Util.make_banner('Running main tweakreg')
                 error = hst.run_tweakreg(obstable, hst.reference)
@@ -3921,7 +3926,7 @@ if __name__ == '__main__':
 
             # dolphot image preparation: mask_image, split_groups, calc_sky
             split_images = []
-            if opt.rundolphot or opt.scrapedolphot:
+            if opt.run_dolphot or opt.scrape_dolphot:
                 message = 'Preparing dolphot data for files={files}.'
                 print(message.format(files=','.join(map(str,
                     obstable['image']))))
@@ -3931,7 +3936,7 @@ if __name__ == '__main__':
 
             if os.path.exists(hst.reference):
                 hst.compress_reference(hst.reference)
-                if opt.rundolphot:
+                if opt.run_dolphot:
                     if hst.needs_to_calc_sky(hst.reference, check_wcs=True):
                         message = 'Running calcsky for reference image: {ref}'
                         print(message.format(ref=hst.reference))
@@ -3940,7 +3945,7 @@ if __name__ == '__main__':
                             hst.options['detector_defaults'])
 
             # Construct dolphot param file from split images and reference
-            if opt.rundolphot:
+            if opt.run_dolphot:
                 banner = 'Adding images to dolphot parameter file: {file}.'
                 Util.make_banner(banner.format(file=hst.dolphot['param']))
                 hst.make_dolphot_file(split_images, hst.reference)
@@ -3951,7 +3956,7 @@ if __name__ == '__main__':
                 hst.run_dolphot()
 
             # Scrape data from the dolphot catalog for the input coordinates
-            if opt.scrapedolphot: hst.get_dolphot_photometry(split_images,
+            if opt.scrape_dolphot: hst.get_dolphot_photometry(split_images,
                 hst.reference)
 
             # Do fake star injection if --dofake is passed
