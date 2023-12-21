@@ -11,7 +11,7 @@ def add_options(parser=None, usage=None):
         help='Declination to reduce the HST images')
     parser.add_argument('--work-dir', default=None, type=str,
         help='Use the input working directory rather than the current dir.')
-    parser.add_argument('--raw-dir', default=None, type=str,
+    parser.add_argument('--raw-dir', default='raw', type=str,
         help='Use the input raw data directory rather than the current dir.')
     parser.add_argument('--make-clean', default=False, action='store_true',
         help='Clean up all output files from previous runs then exit.')
@@ -56,7 +56,7 @@ def add_options(parser=None, usage=None):
     # Reference image parameters
     parser.add_argument('--reference','--ref', default='',
         type=str, help='Name of the reference image.')
-    parser.add_argument('--reference-filter', default=None, type=str,
+    parser.add_argument('--reference-filter','--ref-filter', default=None, type=str,
         help='Use this filter for the reference image if available.')
     parser.add_argument('--reference-instrument', default=None, type=str,
         help='Use this instrument for the reference image if available.')

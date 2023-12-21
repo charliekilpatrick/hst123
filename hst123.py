@@ -720,7 +720,7 @@ class hst123(object):
     if not os.path.exists(dolphot['original']):
         shutil.copyfile(dolphot['base'], dolphot['original'])
 
-    if not self.options['args'].nocuts:
+    if not self.options['args'].no_cuts:
 
         message = 'Cutting bad sources from dolphot catalog.'
         print(message)
@@ -1589,39 +1589,38 @@ class hst123(object):
         else:
             return(False)
 
+  # Make a stripped down version of a wcs header to override WCS header errors
+  def make_meta_wcs_header(self, header):
+    meta_header = {}
+    for key in ['NAXIS','NAXIS1','NAXIS2','CD1_1','CD1_2','CD2_1','CD2_2',
+        'CRVAL1','CRVAL2','CRPIX1','CRPIX1','CTYPE1','CTYPE2']:
+        meta_header[key]=header[key]
+
+    return(meta_header)
+
   # Check if the image contains input coordinate.  This is somewhat complicated
   # as an image might cover input coordinates, but they land on a bad part of
   # the detector.  So 1) check if coordinate is in image, and 2) check if
   # corresponding DQ file lists this part of image as good pixels.
-  def image_contains(self, image, coord):
+  def split_image_contains(self, image, coord):
 
-    cmd = 'sky2xy {image} {ra} {dec}'
-    cmd = cmd.format(image=image, ra=coord.ra.degree, dec=coord.dec.degree)
-    result = os.popen(cmd).read()
-    if 'off image' in result:
-        return(False)
-    else:
-        ra,dec,epoch,arrow,x,y = result.split()
-        x = float(x)
-        y = float(y)
+    print(f'Analyzing split image: {image}')
+    hdu = fits.open(image)
+    try:
+        w = wcs.WCS(hdu[0].header)
+    except MemoryError:
+        w = wcs.WCS(self.make_meta_wcs_header(hdu[0].header))
 
-        print(f'Image {image} has x={x}, y={y} for target')
+    y,x = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
 
-        inst = self.get_instrument(image).lower()
-        # WFPC2 contiguous field in
-        # https://www.stsci.edu/instruments/wfpc2/Wfpc2_dhb/wfpc2_ch1.html
-        if 'wfpc2' in inst and 'full' in inst:
-            if 'chip1' in image and (x < 44 or y < 52):
-                return(False)
-            elif 'chip2' in image and (x < 46 or y < 26):
-                return(False)
-            elif 'chip3' in image and (x < 30 or y < 47):
-                return(False)
-            elif 'chip4' in image and (x < 43 or y < 44):
-                return(False)
-        # TODO: add for ACS/WFC, WFC3/UVIS, WFC3/IR
+    naxis1,naxis2 = hdu[0].data.shape
 
-        return(True)
+    inside_im = False
+    if (x > 0 and x < naxis1-1 and
+        y > 0 and y < naxis2-1):
+        inside_im = True
+
+    return(inside_im)
 
   # Determine if we need to run the dolphot mask routine
   def needs_to_be_masked(self,image):
@@ -2312,7 +2311,7 @@ class hst123(object):
             self.fix_phot_keys(image)
 
             with suppress_stdout():
-                photeq.photeq(files=image, readonly=False, ref_phot_ext=3,
+                photeq.photeq(files=image, readonly=False, ref_phot_ext=1,
                     logfile=os.path.join(outdir, 'photeq.log'))
 
     rotation = 0.0
@@ -3248,6 +3247,9 @@ class hst123(object):
     masks.append([any(l) for l in list(map(list,zip(*[[det in inst.upper()
                 for inst in obsTable['instrument_name']]
                 for det in ['ACS','WFC','WFPC2']])))])
+    # Added mask to remove calibration data from search
+    masks.append([f.upper()!='DETECTION' for f in obsTable['filters']])
+    masks.append([i.upper()!='CALIBRATION' for i in obsTable['intentType']])
 
     # Time constraint masks (before and after MJD)
     if self.before:
@@ -3492,7 +3494,7 @@ class hst123(object):
     outimg = []
     split_images = glob.glob(image.replace('.fits', '.chip?.fits'))
     for im in split_images:
-        if not self.image_contains(im, self.coord):
+        if not self.split_image_contains(im, self.coord):
             # If the image doesn't have coord, delete that file
             os.remove(im)
         else:
@@ -3653,7 +3655,7 @@ class hst123(object):
         os.stat(dp['base']).st_size>0):
 
         phot = self.scrapedolphot(self.coord, reference, split_images, dp,
-            get_limits=True, scrapeall=opt.scrapeall, brightest=opt.brightest)
+            get_limits=True, scrapeall=opt.scrape_all, brightest=opt.brightest)
 
         self.final_phot = phot
 
@@ -3663,7 +3665,7 @@ class hst123(object):
             message = message.format(ra=ra, dec=dec, n=len(phot))
             Util.make_banner(message)
 
-            allphot = self.options['args'].scrapeall
+            allphot = self.options['args'].scrape_all
             self.print_final_phot(phot, self.dolphot, allphot=allphot)
 
         else:
