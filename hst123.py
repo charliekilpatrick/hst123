@@ -2493,7 +2493,7 @@ class hst123(object):
 
     for i,hdu in enumerate(hdulist):
         if hdu.name=='SCI':
-            mask = np.zeros(hdu.data.shape, dtype=np.bool)
+            mask = np.zeros(hdu.data.shape, dtype=np.bool_)
 
             crmask, crclean = detect_cosmics(hdu.data.copy().astype('<f4'),
                 inmask=mask, readnoise=options['rdnoise'], gain=options['gain'],
