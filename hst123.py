@@ -2039,13 +2039,15 @@ class hst123(object):
 
             fullfile = os.path.join(outdir, ref_file)
             if not os.path.exists(fullfile):
+                print(f'Grabbing: {fullfile}')
                 # Try using both old cdbs database and new crds link
                 urls = []
+                url = self.options['global_defaults']['crds']
+                urls.append(url+ref_file)
+
                 url = self.options['global_defaults']['cdbs']
                 urls.append(url+ref_url+'/'+ref_file)
 
-                url = self.options['global_defaults']['crds']
-                urls.append(url+ref_file)
                 for url in urls:
                     message = f'Downloading file: {url}'
                     sys.stdout.write(message)
@@ -2055,7 +2057,7 @@ class hst123(object):
                             show_progress=False, timeout=120)
                         shutil.move(dat, fullfile)
                         message = '\r' + message
-                        message += Constants.green+' [SUCCESS]'+end+'\n'
+                        message += Constants.green+' [SUCCESS]'+Constants.end+'\n'
                         sys.stdout.write(message)
                         break
                     except:
@@ -2945,16 +2947,16 @@ class hst123(object):
             message += 'Images: {im}'
             print(message.format(ref=reference, im=','.join(tweak_img)))
 
-            # Get shallowest image and use threshold from that
-            shallow = sorted(tweak_img,
-                key=lambda im: fits.getval(im, 'EXPTIME'))[0]
+            # Get deepest image and use threshold from that
+            deepest = sorted(tweak_img,
+                key=lambda im: fits.getval(im, 'EXPTIME'))[-1]
 
-            if not thresh_data or shallow not in thresh_data['file']:
-                inp_data = self.get_tweakreg_thresholds(shallow,
+            if not thresh_data or deepest not in thresh_data['file']:
+                inp_data = self.get_tweakreg_thresholds(deepest,
                     options['nbright']*4)
-                thresh_data = self.add_thresh_data(thresh_data, shallow,
+                thresh_data = self.add_thresh_data(thresh_data, deepest,
                     inp_data)
-            mask = thresh_data['file']==shallow
+            mask = thresh_data['file']==deepest
             inp_thresh = thresh_data[mask][0]
             print('Getting image threshold...')
             new_ithresh = self.get_best_tweakreg_threshold(inp_thresh,
@@ -3051,11 +3053,6 @@ class hst123(object):
             # Occurs when all images fail alignment
             except TypeError as e:
                 self.tweakreg_error(e)
-
-            # Need to address this in a systematic way rather than just catching
-            # all possible tweakreg errors
-            #except (MemoryError,TypeError,UnboundLocalError,RuntimeError) as e:
-            #    self.tweakreg_error(e)
 
             # Record what the shifts are for each of the files run
             message='Reading in shift file: {file}'

@@ -13,7 +13,7 @@ global_defaults = {
         'SHADCORR','DOSATMAP','DOPHOTOM','DOHISTOS','DRIZCORR','OUTDTYPE'],
     'cdbs': 'ftp://ftp.stsci.edu/cdbs/',
     'mast': 'https://mast.stsci.edu/api/v0/download/file?uri=',
-    'crds': 'https://hst-crds.stsci.edu/browse/',
+    'crds': 'https://hst-crds.stsci.edu/unchecked_get/references/hst/',
     'rmap': {
         'base_url': 'https://hst-crds.stsci.edu/unchecked_get/mappings/hst',
         'acs': {
@@ -40,7 +40,7 @@ global_defaults = {
     'visit': 1,
     'search_rad': 1.0, # for tweakreg in arcsec
     'radius': 5 * u.arcmin,
-    'nbright': 8000,
+    'nbright': 4000,
     'minobj': 10,
     'dolphot': {'FitSky': 2,
                 'SkipSky': 2,
