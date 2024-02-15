@@ -68,6 +68,8 @@ def add_options(parser=None, usage=None):
         help='Default search radius for tweakreg.')
     parser.add_argument('--tweak-min-obj', default=None, type=int,
         help='Default search radius for tweakreg.')
+    parser.add_argument('--tweak-nbright', default=None, type=int,
+        help='Default number of bright sources to try to use for alignment.')
     parser.add_argument('--tweak-thresh', default=None, type=float,
         help='Initial threshold for finding sources in tweakreg.')
     parser.add_argument('--keep-objfile', default=False, action='store_true',

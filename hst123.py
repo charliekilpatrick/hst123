@@ -3677,14 +3677,13 @@ class hst123(object):
   def handle_args(self, parser):
     opt = parser.parse_args()
     self.options['args'] = opt
-    default = self.options['global_defaults']
 
     # If we're cleaning up a previous run, execute that here then exit
     if self.options['args'].make_clean: self.make_clean()
 
     # Handle other options
     self.reference = self.options['args'].reference
-    if opt.align_only: default['dolphot']['AlignOnly']=1
+    if opt.align_only: self.options['global_defaults']['dolphot']['AlignOnly']=1
     if opt.before: self.before=Time(self.options['args'].before)
     if opt.after: self.after=Time(self.options['args'].after)
     if opt.skip_tweakreg: self.updatewcs = False
@@ -3717,6 +3716,8 @@ class hst123(object):
         self.options['global_defaults']['search_rad']=opt.tweak_search
     if opt.tweak_min_obj:
         self.options['global_defaults']['minobj']=opt.tweak_min_obj
+    if opt.tweak_nbright:
+        self.options['global_defaults']['nbright']=opt.tweak_nbright
 
     if opt.tweak_thresh:
         self.threshold = opt.tweak_thresh
