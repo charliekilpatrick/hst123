@@ -1558,7 +1558,12 @@ class hst123(object):
     return(warning, is_not_hst_image)
 
   def needs_to_split_groups(self,image):
-    return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) == 0)
+    # Count number of science extensions in image
+    hdu = fits.open(image, mode='readonly')
+    total=0
+    for h in hdu:
+        if h.name=='SCI': total+=1
+    return(len(glob.glob(image.replace('.fits', '.chip?.fits'))) != total)
 
   def needs_to_calc_sky(self, image, check_wcs=False):
     print('Checking for',image.replace('.fits','.sky.fits'))
@@ -1593,8 +1598,11 @@ class hst123(object):
   def make_meta_wcs_header(self, header):
     meta_header = {}
     for key in ['NAXIS','NAXIS1','NAXIS2','CD1_1','CD1_2','CD2_1','CD2_2',
-        'CRVAL1','CRVAL2','CRPIX1','CRPIX1','CTYPE1','CTYPE2']:
+        'CRVAL1','CRVAL2','CRPIX1','CRPIX2','CTYPE1','CTYPE2']:
         meta_header[key]=header[key]
+
+    if meta_header['CTYPE1']=='RA---TAN-SIP': meta_header['CTYPE1']='RA---TAN'
+    if meta_header['CTYPE2']=='DEC--TAN-SIP': meta_header['CTYPE2']='DEC--TAN'
 
     return(meta_header)
 
