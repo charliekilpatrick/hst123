@@ -3440,6 +3440,12 @@ class hst123(object):
 
   def run_dolphot(self):
     if os.path.isfile(self.dolphot['param']):
+        # Clean previous runs of dolphot if they exist to avoid conflicts
+        if os.path.exists(self.dolphot['base']):
+            os.remove(self.dolphot['base'])
+        if os.path.exists(self.dolphot['original']):
+            os.remove(self.dolphot['original'])
+
         cmd = 'dolphot {base} -p{par} > {log}'
         cmd = cmd.format(base=self.dolphot['base'], par=self.dolphot['param'],
             log=self.dolphot['log'])
