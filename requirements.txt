@@ -1,4 +1,4 @@
-astropy==5.3
+astropy==5.3.3
 astroquery==0.4.6
 astroscrappy==1.1.0
 drizzlepac==3.5.1
