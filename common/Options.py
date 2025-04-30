@@ -11,7 +11,7 @@ def add_options(parser=None, usage=None):
         help='Declination to reduce the HST images')
     parser.add_argument('--work-dir', default=None, type=str,
         help='Use the input working directory rather than the current dir.')
-    parser.add_argument('--raw-dir', default='raw', type=str,
+    parser.add_argument('--raw-dir', default='./', type=str,
         help='Use the input raw data directory rather than the current dir.')
     parser.add_argument('--make-clean', default=False, action='store_true',
         help='Clean up all output files from previous runs then exit.')
@@ -139,6 +139,8 @@ def add_options(parser=None, usage=None):
         'files derived from the current run.')
     parser.add_argument('--add-crmask', default=False, action='store_true',
         help='Add the cosmic ray mask to the image DQ mask for dolphot.')
+    parser.add_argument('--include-all-splits', default=False, action='store_true',
+        help='Include all split images in the dolphot parameter files.')
     
     # Scrape dolphot options
     parser.add_argument('--scrape-dolphot','--sd', default=False,

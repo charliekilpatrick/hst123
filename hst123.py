@@ -3505,7 +3505,7 @@ class hst123(object):
     outimg = []
     split_images = glob.glob(image.replace('.fits', '.chip?.fits'))
     for im in split_images:
-        if not self.split_image_contains(im, self.coord):
+        if not self.split_image_contains(im, self.coord) and not self.options['args'].include_all_splits:
             # If the image doesn't have coord, delete that file
             os.remove(im)
         else:
