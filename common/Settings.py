@@ -176,8 +176,7 @@ detector_defaults = {
                                 'RPSF': 13, 'RSky': '15 35',
                                 'RSky2': '4 10'}}}
 
-acceptable_filters = {'jwst': ['F444W'],
-    'hst': [
+acceptable_filters = [
     'F220W','F250W','F330W','F344N','F435W','F475W','F550M','F555W',
     'F606W','F625W','F660N','F660N','F775W','F814W','F850LP','F892N',
     'F098M','F105W','F110W','F125W','F126N','F127M','F128N','F130N','F132N',
@@ -188,7 +187,7 @@ acceptable_filters = {'jwst': ['F444W'],
     'F673N','F680N','F689M','F763M','F845M','F953N','F122M','F160BW','F185W',
     'F218W','F255W','F300W','F375N','F380W','F390N','F437N','F439W','F450W',
     'F569W','F588N','F622W','F631N','F673N','F675W','F702W','F785LP','F791W',
-    'F953N','F1042M']}
+    'F953N','F1042M']
 
 pipeline_products = ['*chip?.fits', '*chip?.sky.fits',
                               '*rawtmp.fits', '*drz.fits', '*drz.sky.fits',
