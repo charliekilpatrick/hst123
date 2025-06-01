@@ -1,5 +1,8 @@
 # hst123
 
+[![GitHub Actions](https://github.com/charliekilpatrick/hst123/actions/workflows/build-test.yml/badge.svg)](https://github.com/charliekilpatrick/hst123/actions/workflows/build-test.yml)
+[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://charliekilpatrick.github.io/hst123/)
+
 An all-in-one script for downloading, registering, and drizzling HST images, running dolphot, and scraping data from dolphot catalogs.  This script is optimized to obtain photometry of point sources across multiple HST images.
 
 ## Installation
