@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hst123"
+version = "1.0.7"
+description = "An all-in-one script for downloading, registering, and drizzling HST images, running dolphot, and scraping data from dolphot catalogs."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "astropy==5.3.3",
+    "astroquery==0.4.6",
+    "astroscrappy==1.1.0",
+    "drizzlepac==3.5.1",
+    "numpy==1.24.3",
+    "progressbar33==2.4",
+    "python-dateutil==2.8.2",
+    "requests==2.32.0",
+    "scipy==1.10.1",
+    "stwcs==1.7.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+]
+docs = [
+    "sphinx>=5.0",
+    "sphinx-rtd-theme>=1.2",
+]
+
+[project.scripts]
+hst123 = "hst123:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["common*", "primitives*"]
+
+[tool.setuptools]
+py-modules = ["hst123"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
