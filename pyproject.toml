@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,6 +8,21 @@ version = "1.0.7"
 description = "An all-in-one script for downloading, registering, and drizzling HST images, running dolphot, and scraping data from dolphot catalogs."
 readme = "README.md"
 requires-python = ">=3.8"
+license = { text = "BSD-3-Clause" }
+keywords = ["astronomy", "HST", "Hubble", "dolphot", "drizzle", "photometry"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
 dependencies = [
     "astropy==5.3.3",
     "astroquery==0.4.6",
@@ -33,12 +48,12 @@ docs = [
 [project.scripts]
 hst123 = "hst123:main"
 
+[tool.setuptools]
+py-modules = ["hst123"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["common*", "primitives*"]
-
-[tool.setuptools]
-py-modules = ["hst123"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
