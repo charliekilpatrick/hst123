@@ -16,6 +16,11 @@ v1.07: 2020-03-08. Updates to archiving capability and added the script
 
 hst123.py: An all-in-one script for downloading, registering, drizzling,
 running dolphot, and scraping data from dolphot catalogs.
+
+Pipeline logic is split into helper classes (_FitsHelper, _PhotometryHelper,
+etc.) so the main hst123 class stays a thin orchestrator. Additional helpers
+(Download, Reference, Tweakreg, Drizzle, Dolphot, Reduction) can be added
+following the same delegation pattern.
 """
 
 """
@@ -66,6 +71,7 @@ from common import Constants
 from common import Options
 from common import Settings
 from common import Util
+from primitives import FitsHelper, PhotometryHelper
 
 @contextmanager
 def suppress_stdout():
@@ -84,6 +90,10 @@ with suppress_stdout():
     from drizzlepac import tweakreg,astrodrizzle,catalogs,photeq
     from astroquery.mast import Observations
     from astropy.coordinates import SkyCoord
+
+
+# Helpers live in primitives/ (FitsHelper, PhotometryHelper, etc.)
+
 
 class hst123(object):
 
@@ -145,11 +155,15 @@ class hst123(object):
     self.pipeline_products = Settings.pipeline_products
     self.pipeline_images = Settings.pipeline_images
 
+    # Helpers from primitives/ (logic split by responsibility)
+    self._fits = FitsHelper(self)
+    self._phot = PhotometryHelper(self)
+
   def add_options(self, parser=None, usage=None):
     return(Options.add_options(parser=parser, usage=usage))
 
   def clear_downloads(self, options):
-    if not self.options['args'].no_clear_downloads:
+    if self.options['args'].no_clear_downloads:
         return(None)
     print('Trying to clear downloads')
     try:
@@ -177,87 +191,20 @@ class hst123(object):
     var = input(question)
     if var != 'y' and var != 'yes':
         warning = 'WARNING: input={inp}. Exiting...'
-        print(warning)
+        print(warning.format(inp=var))
+        sys.exit(1)
     else:
         for pattern in self.pipeline_products:
             for file in glob.glob(pattern):
                 if os.path.isfile(file):
                     os.remove(file)
-
-    sys.exit(0)
+        sys.exit(0)
 
   def get_zpt(self, image, ccdchip=1, zptype='abmag'):
-    # For a given image and optional ccdchip, determine the photometric zero
-    # point in AB mag from PHOTFLAM and PHOTPLAM.
-    # ZP_AB = -2.5*np.log10(PHOTFLAM)-5*np.log10(PHOTPLAM)-2.408
-    hdu = fits.open(image, mode='readonly')
-    inst = self.get_instrument(image).lower()
-    use_hdu = None
-    zpt = None
-
-    # Get hdus that contain PHOTPLAM and PHOTFLAM
-    sci = []
-    for i,h in enumerate(hdu):
-        keys = list(h.header.keys())
-        if ('PHOTPLAM' in keys and 'PHOTFLAM' in keys):
-            sci.append(h)
-
-    if len(sci)==1: use_hdu=sci[0]
-    elif len(sci)>1:
-        chips = []
-        for h in sci:
-            if 'acs' in inst or 'wfc3' in inst:
-                if 'CCDCHIP' in h.header.keys():
-                    if h.header['CCDCHIP']==ccdchip:
-                        chips.append(h)
-            else:
-                if 'DETECTOR' in h.header.keys():
-                    if h.header['DETECTOR']==ccdchip:
-                        chips.append(h)
-        if len(chips)>0: use_hdu = chips[0]
-
-    if use_hdu:
-        photplam = float(use_hdu.header['PHOTPLAM'])
-        photflam = float(use_hdu.header['PHOTFLAM'])
-        if 'ab' in zptype:
-            zpt = -2.5*np.log10(photflam)-5*np.log10(photplam)-2.408
-        elif 'st' in zptype:
-            zpt = -2.5*np.log10(photflam)-21.1
-
-    return(zpt)
+    return self._fits.get_zpt(image, ccdchip=ccdchip, zptype=zptype)
 
   def avg_magnitudes(self, magerrs, counts, exptimes, zpt):
-    # Mask out bad values
-    idx = []
-    for i in np.arange(len(magerrs)):
-        try:
-            if (float(magerrs[i]) <  0.5 and float(counts[i]) > 0.0 and
-                float(exptimes[i]) > 0.0 and float(zpt[i]) > 0.0):
-                idx.append(i)
-        except:
-            pass
-
-    if not idx:
-        return (float('NaN'),float('NaN'))
-
-    magerrs = np.array([float(m) for m in magerrs])[idx]
-    counts = np.array([float(c) for c in counts])[idx]
-    exptimes = np.array([float(e) for e in exptimes])[idx]
-    zpt = np.array([float(z) for z in zpt])[idx]
-
-    # Normalize flux and fluxerr to a common zero point
-    flux = counts / exptimes * 10**(0.4 * (27.5 - zpt))
-    fluxerr = 1./1.086 * magerrs * flux
-
-    # Calculate average and propagate uncertainties weighted by fluxerr
-    average_flux = np.sum(flux*1/fluxerr**2)/np.sum(1/fluxerr**2)
-    average_fluxerr = np.sqrt(np.sum(fluxerr**2)/len(fluxerr))
-
-    # Transform back to magnitude and magnitude error
-    final_mag = 27.5 - 2.5 * np.log10(average_flux)
-    final_magerr = 1.086 * average_fluxerr / average_flux
-
-    return(final_mag, final_magerr)
+    return self._phot.avg_magnitudes(magerrs, counts, exptimes, zpt)
 
   # Given a column description key and image name, return column number from
   # dolphot column file.  Offset is for interpreting fakes file, which is
@@ -287,7 +234,7 @@ class hst123(object):
     rdata = row.split()
 
     # Now grab that piece of data from the row and return
-    if colnum:
+    if colnum is not None:
         if colnum < 0 or colnum > len(rdata)-1:
             error = 'ERROR: tried to use bad column {n} in dolphot output'
             print(error.format(n=colnum))
@@ -468,22 +415,7 @@ class hst123(object):
             self.show_data(avg_photometry, form, header, '', f=f, avg=True)
 
   def get_chip(self, image):
-    # Returns the chip (i.e., 1 for UVIS1, 2 for UVIS2, 1 for WFPC2/PC, 2-4 for
-    # WFPC2/WFC 2-4, etc., default=1 for ambiguous images with more than one
-    # chip in the hdu)
-    hdu = fits.open(image)
-    chip = None
-    for h in hdu:
-        if 'CCDCHIP' in h.header.keys():
-            if not chip: chip=h.header['CCDCHIP']
-            else: chip=1
-        elif 'DETECTOR' in h.header.keys():
-            if not chip: chip=h.header['DETECTOR']
-            else: chip=1
-
-    if not chip: chip=1
-
-    return(chip)
+    return self._fits.get_chip(image)
 
   def try_to_get_image(self, image):
 
@@ -1227,39 +1159,8 @@ class hst123(object):
 
     return(final_phot)
 
-  # Estimate the limiting magnitude given an input list of magnitudes and
-  # errors.  Default is 3-sigma limit.
   def estimate_mag_limit(self, mags, errs, limit=3.0):
-
-    warning = 'WARNING: cannot sample a wide enough range of magnitudes '
-    warning += 'to estimate a limit'
-
-    # First bin signal-to-noise in magnitude, then extrapolate to get 3-sigma
-    try:
-        mags = np.array(mags) ; errs = np.array(errs)
-        bin_mag = np.linspace(np.min(mags), np.max(mags), 100)
-        snr = np.zeros(100)
-    except ValueError:
-        print(warning)
-        return(np.nan)
-
-    for i in np.arange(100):
-        if i==99:
-            snr[i]=snr[i-1]
-        else:
-            idx = np.where((mags > bin_mag[i]) & (mags < bin_mag[i+1]))
-            snr[i] = np.median(1./errs[idx])
-
-    mask = np.array([np.isnan(val) for val in snr])
-    bin_mag = bin_mag[~mask]
-    snr = snr[~mask]
-
-    if len(snr)>10:
-        snr_func = interp1d(snr, bin_mag, fill_value='extrapolate',
-            bounds_error=False)
-        return(snr_func(limit))
-    else:
-        return(np.nan)
+    return self._phot.estimate_mag_limit(mags, errs, limit=limit)
 
   # Sanitizes reference header, gets rid of multiple extensions and only
   # preserves science data.
@@ -1652,61 +1553,20 @@ class hst123(object):
                 return(False)
     return(True)
 
-  # Get a string representing the filter for the input image
   def get_filter(self, image):
-    if 'wfpc2' in str(fits.getval(image, 'INSTRUME')).lower():
-        f = str(fits.getval(image, 'FILTNAM1'))
-        if len(f.strip()) == 0:
-            f = str(fits.getval(image, 'FILTNAM2'))
-    else:
-        try:
-            f = str(fits.getval(image, 'FILTER'))
-        except:
-            f = str(fits.getval(image, 'FILTER1'))
-            if 'clear' in f.lower():
-                f = str(fits.getval(image, 'FILTER2'))
-    return(f.lower())
+    return self._fits.get_filter(image)
 
-  # Get string representing instrument, detectory, and subarray for the input
-  # image
   def get_instrument(self, image):
-    hdu = fits.open(image, mode='readonly')
-    inst = hdu[0].header['INSTRUME'].lower()
-    if inst.upper() == 'WFPC2':
-        det = 'wfpc2'
-        sub = 'full'
-    else:
-        det = hdu[0].header['DETECTOR'].lower()
-        if (str(hdu[0].header['SUBARRAY']) == 'T' or
-           str(hdu[0].header['SUBARRAY']) == 'True'):
-            sub = 'sub'
-        else:
-            sub = 'full'
-    out = f'{inst}_{det}_{sub}'
-    return(out)
+    return self._fits.get_instrument(image)
 
-  # Glob all of the input images from working directory
   def get_input_images(self, pattern=None, workdir=None):
-    if workdir == None:
-        workdir = '.'
-    if pattern == None:
-        pattern = ['*c1m.fits','*c0m.fits','*flc.fits','*flt.fits']
-    return([s for p in pattern for s in glob.glob(os.path.join(workdir,p))])
+    return self._fits.get_input_images(pattern=pattern, workdir=workdir)
 
   def get_split_images(self, pattern=None, workdir=None):
-    if workdir == None:
-        workdir = '.'
-    if pattern == None:
-        pattern = ['*c0m.chip?.fits', '*flc.chip?.fits', '*flt.chip?.fits']
-    return([s for p in pattern for s in glob.glob(os.path.join(workdir,p))])
+    return self._fits.get_split_images(pattern=pattern, workdir=workdir)
 
-  # Get the data quality image for dolphot mask routine.  This is entirely for
-  # WFPC2 since mask routine requires additional input for this instrument
-  def get_dq_image(self,image):
-    if self.get_instrument(image).split('_')[0].upper() == 'WFPC2':
-        return(image.replace('c0m.fits','c1m.fits'))
-    else:
-        return('')
+  def get_dq_image(self, image):
+    return self._fits.get_dq_image(image)
 
   # Run the dolphot splitgroups routine
   def split_groups(self, image, delete_non_science=True):
@@ -2219,10 +2079,10 @@ class hst123(object):
         add_im_base = [im.split('.')[0]
             for im in self.options['args'].drizzle_add.split(',')]
 
-        if ',' in self.options['args'].drizmask:
-            ramask, decmask = self.options['args'].drizmask.split(',')
+        if ',' in self.options['args'].drizzle_mask:
+            ramask, decmask = self.options['args'].drizzle_mask.split(',')
         else:
-            ramask, decmask = self.options['args'].drizmask.split()
+            ramask, decmask = self.options['args'].drizzle_mask.split()
 
         maskcoord = Util.parse_coord(ramask, decmask)
 
@@ -3862,7 +3722,7 @@ class hst123(object):
                     sn.append(float(data[scol]))
                     mags.append(float(data[mcol]))
 
-if __name__ == '__main__':
+def main():
     # Start timer, create hst123 class obj, parse args
     start = time.time()
     hst = hst123()
@@ -4031,3 +3891,7 @@ if __name__ == '__main__':
     message = 'Finished with: {cmd}\n'
     message += 'It took {time} seconds to complete this script.'
     Util.make_banner(message.format(cmd=hst.command, time=time.time()-start))
+
+
+if __name__ == '__main__':
+    main()

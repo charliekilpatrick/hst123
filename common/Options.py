@@ -51,7 +51,7 @@ def add_options(parser=None, usage=None):
     parser.add_argument('--no-large-reduction', default=False,
         action='store_true', help='Exit if input list is >large_num images.')
     parser.add_argument('--large-num', default=200, type=int,
-        help='Large number of images to skip when --no_large_reduction used.')
+        help='Large number of images to skip when --no-large-reduction is used.')
     
     # Reference image parameters
     parser.add_argument('--reference','--ref', default='',
@@ -67,7 +67,7 @@ def add_options(parser=None, usage=None):
     parser.add_argument('--tweak-search', default=None, type=float,
         help='Default search radius for tweakreg.')
     parser.add_argument('--tweak-min-obj', default=None, type=int,
-        help='Default search radius for tweakreg.')
+        help='Minimum number of objects for tweakreg matching.')
     parser.add_argument('--tweak-nbright', default=None, type=int,
         help='Default number of bright sources to try to use for alignment.')
     parser.add_argument('--tweak-thresh', default=None, type=float,
