@@ -1,0 +1,19 @@
+# Conda environment for hst123 (Conda + pip install).
+# Create env:  conda env create -f environment.yml
+# Activate:    conda activate hst123
+# Then:        pip install drizzlepac stwcs && pip install -e .
+name: hst123
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - astropy
+  - astroquery
+  - astroscrappy
+  - numpy
+  - scipy
+  - requests
+  - python-dateutil
+  # progressbar33, drizzlepac, stwcs: install via pip after activating
