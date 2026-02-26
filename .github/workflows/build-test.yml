@@ -4,30 +4,31 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [ master ]
-
+    branches: [master]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.12]
+    defaults:
+      run:
+        # Required so conda env is activated in run steps (setup-miniconda)
+        shell: bash -el {0}
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: true
         fetch-depth: 0
         persist-credentials: false
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - name: Set up Conda with Python 3.10
+      uses: conda-incubator/setup-miniconda@v3
       with:
-        python-version: ${{ matrix.python-version }}
+        environment-file: environment.yml
+        activate-environment: hst123
+        auto-update-conda: true
     - name: Install the package and dependencies
       run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install .
+        python -m pip install --upgrade pip setuptools wheel
+        python -m pip install .[test]
     - name: Run tests
       run: |
-          pip install .[test]
-          pytest
+        python -m pytest tests/ -v --tb=short
