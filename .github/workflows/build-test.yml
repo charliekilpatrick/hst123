@@ -9,6 +9,10 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Required so conda env is activated in run steps (setup-miniconda)
+        shell: bash -el {0}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -24,7 +28,7 @@ jobs:
     - name: Install the package and dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
-        pip install .[test]
+        python -m pip install .[test]
     - name: Run tests
       run: |
-        pytest tests/ -v --tb=short
+        python -m pytest tests/ -v --tb=short
