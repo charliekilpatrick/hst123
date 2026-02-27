@@ -1,7 +1,7 @@
 """Unit tests for common.Settings (structure and expected keys)."""
 import pytest
 
-from common import Settings
+from hst123.common import Settings
 
 
 class TestGlobalDefaults:

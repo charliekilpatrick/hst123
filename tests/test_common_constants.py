@@ -1,7 +1,7 @@
 """Unit tests for common.Constants."""
 import pytest
 
-from common import Constants
+from hst123.common import Constants
 
 
 class TestConstants:

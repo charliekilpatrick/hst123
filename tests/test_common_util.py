@@ -2,7 +2,7 @@
 import pytest
 from astropy.coordinates import SkyCoord
 
-from common import Util
+from hst123.common import Util
 
 
 class TestIsNumber:

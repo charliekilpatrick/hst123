@@ -2,9 +2,9 @@
 import numpy as np
 import pytest
 
-from primitives import BasePrimitive, FitsHelper, PhotometryHelper
-from primitives.photometry import weighted_avg_flux_to_mag, estimate_limit_from_snr_bins
-from primitives.fits import _instrument_from_header, _phot_zero_point_ab
+from hst123.primitives import BasePrimitive, FitsHelper, PhotometryHelper
+from hst123.primitives.photometry import weighted_avg_flux_to_mag, estimate_limit_from_snr_bins
+from hst123.primitives.fits import _instrument_from_header, _phot_zero_point_ab
 
 
 class TestBasePrimitive:

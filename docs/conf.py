@@ -4,8 +4,12 @@
 project = "hst123"
 copyright = "2025"
 author = "C. D. Kilpatrick"
-release = "1.0.7"
-version = "1.0.7"
+try:
+    from importlib.metadata import version
+    release = version("hst123")
+except Exception:
+    release = "0.0.0"
+version = ".".join(release.split(".")[:2])  # short version for docs
 
 extensions = []
 

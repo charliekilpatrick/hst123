@@ -1,7 +1,7 @@
 """Unit tests for common.Options."""
 import pytest
 
-from common import Options
+from hst123.common import Options
 
 
 class TestAddOptions:

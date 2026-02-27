@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-# Ensure repo root is on path so "common" and "hst123" can be imported when running tests
+# Ensure repo root is on path so the hst123 package can be imported when running tests
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -42,7 +42,7 @@ def hst123_instance():
     except Exception as e:
         pytest.skip(f"hst123 not importable (need drizzlepac/stwcs): {e}")
     import argparse
-    from common import Options
+    from hst123.common import Options
 
     parser = argparse.ArgumentParser()
     parser = Options.add_options(parser)
