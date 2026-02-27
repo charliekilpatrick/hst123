@@ -3135,11 +3135,10 @@ def main():
 
             hst.reference = hst.handle_reference(obstable, opt.reference)
 
-            # Run main tweakreg to register to the reference.  Skipping tweakreg
-            # will speed up analysis if only running scrape-dolphot
+            # Run main alignment (tweakreg or jhat per --align-with)
             if not opt.skip_tweakreg:
-                make_banner('Running main tweakreg')
-                error, _ = hst._astrom.run_tweakreg(obstable, hst.reference)
+                make_banner('Running main alignment ({})'.format(opt.align_with))
+                error, _ = hst._astrom.run_alignment(obstable, hst.reference)
 
             # Drizzle all visit/filter pairs if drizzleall
             # Handle this first, especially if doing hierarchical alignment

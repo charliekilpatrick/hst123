@@ -331,6 +331,59 @@ class AstrometryPrimitive(BasePrimitive):
             if key in from_hdu.header.keys():
                 to_hdu.header[key] = from_hdu.header[key]
 
+    def run_alignment(
+        self,
+        obstable,
+        reference,
+        do_cosmic=True,
+        skip_wcs=False,
+        search_radius=None,
+        update_hdr=True,
+    ):
+        """Run alignment (tweakreg or jhat) per --align-with; return (message, shift_table)."""
+        align_with = getattr(
+            self._p.options["args"], "align_with", "tweakreg"
+        ).lower()
+        if align_with == "jhat":
+            return self.run_jhat_align(obstable, reference)
+        return self.run_tweakreg(
+            obstable,
+            reference,
+            do_cosmic=do_cosmic,
+            skip_wcs=skip_wcs,
+            search_radius=search_radius,
+            update_hdr=update_hdr,
+        )
+
+    def run_jhat_align(self, obstable, reference):
+        """
+        Run JHAT to align each image in obstable to Gaia.
+        Returns (message, None) for compatibility with run_tweakreg.
+        """
+        from hst123.primitives.astrometry.jhat import run_jhat
+
+        p = self._p
+        outdir = p.options["args"].work_dir if p.options["args"].work_dir else "."
+        os.chdir(outdir)
+        params = getattr(settings, "jhat_params", None) or {}
+        for image in obstable["image"]:
+            if not os.path.exists(image):
+                log.warning("Skipping missing image for JHAT: %s", image)
+                continue
+            log.info("Running JHAT on %s (align to Gaia)", image)
+            try:
+                run_jhat(
+                    image,
+                    outdir=outdir,
+                    params=params,
+                    gaia=True,
+                    verbose=False,
+                )
+            except Exception as e:
+                log.error("JHAT failed for %s: %s", image, e)
+                return ("jhat failure", None)
+        return ("jhat success", None)
+
     def run_tweakreg(
         self,
         obstable,
