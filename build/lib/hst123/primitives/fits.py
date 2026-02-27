@@ -10,7 +10,7 @@ import os
 import numpy as np
 from astropy.io import fits
 
-from primitives.base import BasePrimitive
+from hst123.primitives.base import BasePrimitive
 
 
 def _instrument_from_header(header):

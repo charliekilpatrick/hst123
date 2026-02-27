@@ -67,11 +67,11 @@ from stwcs import updatewcs
 from scipy.interpolate import interp1d
 
 # Internal dependencies
-from common import Constants
-from common import Options
-from common import Settings
-from common import Util
-from primitives import FitsHelper, PhotometryHelper
+from hst123.common import Constants
+from hst123.common import Options
+from hst123.common import Settings
+from hst123.common import Util
+from hst123.primitives import FitsHelper, PhotometryHelper
 
 @contextmanager
 def suppress_stdout():

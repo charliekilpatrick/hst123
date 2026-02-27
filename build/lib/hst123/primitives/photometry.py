@@ -7,7 +7,7 @@ and estimate_mag_limit.
 import numpy as np
 from scipy.interpolate import interp1d
 
-from primitives.base import BasePrimitive
+from hst123.primitives.base import BasePrimitive
 
 
 def weighted_avg_flux_to_mag(flux, fluxerr):
@@ -45,7 +45,16 @@ def estimate_limit_from_snr_bins(mags, errs, snr_target=3.0, n_bins=100):
     snr = snr[mask]
     if len(snr) <= 10:
         return np.nan
-    snr_func = interp1d(snr, bin_mag, fill_value="extrapolate", bounds_error=False)
+    # Ensure strictly increasing snr so scipy interp1d doesn't divide by zero (x_hi - x_lo)
+    order = np.argsort(snr)
+    snr_s = snr[order]
+    bin_mag_s = bin_mag[order]
+    keep = np.concatenate([[True], snr_s[1:] > snr_s[:-1]])
+    snr_u = snr_s[keep]
+    bin_mag_u = bin_mag_s[keep]
+    if len(snr_u) < 2:
+        return np.nan
+    snr_func = interp1d(snr_u, bin_mag_u, fill_value="extrapolate", bounds_error=False)
     return float(snr_func(snr_target))
 
 
