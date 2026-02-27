@@ -17,4 +17,4 @@ dependencies:
   - scipy>=1.10,<2      # pin to avoid ABI mismatch with numpy (wrong-signature errors)
   - requests>=2.32
   - python-dateutil>=2.8.2
-  # progressbar33, drizzlepac, stwcs: install via pip (pip install .[test])
+  # progressbar33, drizzlepac, stwcs, jhat: install via pip (pip install .[test])

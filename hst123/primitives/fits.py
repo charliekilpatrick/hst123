@@ -31,9 +31,6 @@ def _phot_zero_point_ab(photflam, photplam):
 class FitsHelper(BasePrimitive):
     """FITS metadata and image discovery (get_zpt, get_chip, get_filter, get_instrument, etc.)."""
 
-    def __init__(self, pipeline):
-        super().__init__(pipeline)
-
     def get_zpt(self, image, ccdchip=1, zptype="abmag"):
         hdu = fits.open(image, mode="readonly")
         inst = self.get_instrument(image).lower()

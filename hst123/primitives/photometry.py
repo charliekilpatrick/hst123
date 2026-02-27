@@ -4,10 +4,14 @@ Photometry math and limit-estimation primitives.
 PhotometryHelper is used by the main hst123 pipeline for avg_magnitudes
 and estimate_mag_limit.
 """
+import logging
+
 import numpy as np
 from scipy.interpolate import interp1d
 
 from hst123.primitives.base import BasePrimitive
+
+log = logging.getLogger(__name__)
 
 
 def weighted_avg_flux_to_mag(flux, fluxerr):
@@ -61,9 +65,6 @@ def estimate_limit_from_snr_bins(mags, errs, snr_target=3.0, n_bins=100):
 class PhotometryHelper(BasePrimitive):
     """Photometry math and limits (avg_magnitudes, estimate_mag_limit)."""
 
-    def __init__(self, pipeline):
-        super().__init__(pipeline)
-
     def avg_magnitudes(self, magerrs, counts, exptimes, zpt):
         idx = []
         for i in np.arange(len(magerrs)):
@@ -96,9 +97,9 @@ class PhotometryHelper(BasePrimitive):
             mags = np.array(mags)
             errs = np.array(errs)
         except ValueError:
-            print(warning)
+            log.warning(warning)
             return np.nan
         result = estimate_limit_from_snr_bins(mags, errs, snr_target=limit)
         if np.isnan(result):
-            print(warning)
+            log.warning(warning)
         return result

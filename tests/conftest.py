@@ -42,10 +42,10 @@ def hst123_instance():
     except Exception as e:
         pytest.skip(f"hst123 not importable (need drizzlepac/stwcs): {e}")
     import argparse
-    from hst123.common import Options
+    from hst123.utils import options
 
     parser = argparse.ArgumentParser()
-    parser = Options.add_options(parser)
+    parser = options.add_options(parser)
     args = parser.parse_args(["0", "0"])  # ra dec positional
     hst = _hst.hst123()
     hst.options["args"] = args

@@ -1,8 +1,8 @@
-"""Tests for primitives package (BasePrimitive, FitsHelper, PhotometryHelper and their primitives)."""
+"""Tests for primitives package (BasePrimitive, FitsHelper, PhotometryHelper, run_jhat and their primitives)."""
 import numpy as np
 import pytest
 
-from hst123.primitives import BasePrimitive, FitsHelper, PhotometryHelper
+from hst123.primitives import BasePrimitive, FitsHelper, PhotometryHelper, run_jhat
 from hst123.primitives.photometry import weighted_avg_flux_to_mag, estimate_limit_from_snr_bins
 from hst123.primitives.fits import _instrument_from_header, _phot_zero_point_ab
 
@@ -80,3 +80,20 @@ class TestPhotometryHelper:
         mag, err = h.avg_magnitudes([0.1], [1000.0], [100.0], [25.0])
         assert np.isfinite(mag)
         assert np.isfinite(err)
+
+
+class TestJhatPrimitive:
+    """run_jhat primitive (from jwst123); requires jhat package at runtime."""
+
+    def test_run_jhat_is_callable(self):
+        assert callable(run_jhat)
+
+    def test_run_jhat_requires_jhat_package(self):
+        # Calling run_jhat triggers import of jhat; without jhat we get ImportError
+        try:
+            import jhat  # noqa: F401
+            pytest.skip("jhat is installed; cannot test ImportError")
+        except ImportError:
+            pass
+        with pytest.raises(ImportError, match="jhat"):
+            run_jhat("dummy.fits", "/tmp/out", {}, gaia=True)

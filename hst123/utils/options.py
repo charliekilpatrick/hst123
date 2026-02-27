@@ -3,7 +3,7 @@ def add_options(parser=None, usage=None):
     import argparse
     if parser == None:
         parser = argparse.ArgumentParser(usage=usage,conflict_handler='resolve')
-    
+
     # Basic arguments and options
     parser.add_argument('ra', type=str,
         help='Right ascension to reduce the HST images')
@@ -32,7 +32,7 @@ def add_options(parser=None, usage=None):
         help='Skip copying files from archive if --archive is used.')
     parser.add_argument('--by-visit', default=False, action='store_true',
         help='Reduce images by visit number.')
-    
+
     # Options for selecting files to reduce/analyze
     parser.add_argument('--before', default=None, type=str,
         help='Reject obs after this date.')
@@ -52,7 +52,7 @@ def add_options(parser=None, usage=None):
         action='store_true', help='Exit if input list is >large_num images.')
     parser.add_argument('--large-num', default=200, type=int,
         help='Large number of images to skip when --no-large-reduction is used.')
-    
+
     # Reference image parameters
     parser.add_argument('--reference','--ref', default='',
         type=str, help='Name of the reference image.')
@@ -79,7 +79,7 @@ def add_options(parser=None, usage=None):
     parser.add_argument('--hierarchical', default=False, action='store_true',
         help='Drizzle all visit/filter pairs then use them as basis to'+\
         ' perform alignment on the sub-frames.')
-    parser.add_argument('--hierarchical-test', default=False, 
+    parser.add_argument('--hierarchical-test', default=False,
         action='store_true',
         help='Testing for hierarchical alignment mode so the script exits'+\
         ' after tweakreg alignment is performed on drz files.')
@@ -120,7 +120,7 @@ def add_options(parser=None, usage=None):
         'the original position angle.')
     parser.add_argument('--no-mask', default=False, action='store_true',
         help='Do not add extra masking based on other input files.')
-    
+
     # dolphot options
     parser.add_argument('--run-dolphot', default=False, action='store_true',
         help='Run dolphot as part of this hst123 run.')
@@ -141,7 +141,7 @@ def add_options(parser=None, usage=None):
         help='Add the cosmic ray mask to the image DQ mask for dolphot.')
     parser.add_argument('--include-all-splits', default=False, action='store_true',
         help='Include all split images in the dolphot parameter files.')
-    
+
     # Scrape dolphot options
     parser.add_argument('--scrape-dolphot','--sd', default=False,
         action='store_true', help='Scrape photometry from the dolphot '+\
@@ -158,5 +158,5 @@ def add_options(parser=None, usage=None):
     parser.add_argument('--brightest', default=False, action='store_true',
         help='Sort output source files by signal-to-noise in reference image.')
 
-    
+
     return(parser)
