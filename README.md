@@ -4,45 +4,68 @@ An all-in-one script for downloading, registering, and drizzling HST images, run
 
 ## Installation
 
-### Mac OS X
+**Recommended: Conda + pip.** Create a dedicated environment from `environment.yml`, then install drizzlepac/stwcs and hst123 with pip.
 
-It is easiest to install hst123 dependencies using conda and pip:
+### 1. Create and activate the Conda environment
 
+From the **hst123 repository root**:
+
+```bash
+conda env create -f environment.yml
+conda activate hst123
 ```
-conda create -n hst python=3.10 astropy pip astroquery astroscrappy numpy progressbar33 requests scipy
-conda activate hst
+
+This installs Python 3.10 and conda-available dependencies (astropy, astroquery, astroscrappy, numpy, scipy, requests, python-dateutil).
+
+### 2. Install drizzlepac, stwcs, and hst123 with pip
+
+```bash
 pip install drizzlepac stwcs
+cd /path/to/hst123
+pip install -e .
 ```
 
-On recent installations, I received a HDF5 error when installing the "tables" dependency of drizzlepac:
+Replace `/path/to/hst123` with the actual path to the cloned repo. After this, the `hst123` command is available.
 
-```
-ERROR:: Could not find a local HDF5 installation.
-You may need to explicitly state where your local HDF5 headers and
-library can be found by setting the ``HDF5_DIR`` environment
-variable or by using the ``--hdf5`` command-line option.
-```
+### 3. (Mac only) If pip install drizzlepac fails with an HDF5 error
 
-To solve this issue, use homebrew to install hdf5 and c-blosc (see: https://stackoverflow.com/questions/73029883/could-not-find-hdf5-installation-for-pytables-on-m1-mac):
+Install HDF5 and c-blosc via Homebrew, then retry:
 
-```
+```bash
 pip install cython
-brew install hdf5
-brew install c-blosc
-export HDF5_DIR=/opt/homebrew/opt/hdf5 
+brew install hdf5 c-blosc
+export HDF5_DIR=/opt/homebrew/opt/hdf5
 export BLOSC_DIR=/opt/homebrew/opt/c-blosc
-```
-
-Then re-run `pip install drizzlepac stwcs`.
-
-### Linux
-
-Follow the same instructions above with:
-
-```
-conda create -n hst python=3.10 astropy pip astroquery astroscrappy numpy progressbar33 requests scipy
-conda activate hst
 pip install drizzlepac stwcs
+```
+
+Then run `pip install -e .` from the hst123 repo directory.
+
+### Running hst123
+
+```bash
+hst123 12:30:00 -45.0 --download
+# or:  python -m hst123 12:30:00 -45.0 --download
+```
+
+### Alternative: pip only (no Conda)
+
+If you prefer a virtualenv instead of Conda:
+
+```bash
+cd /path/to/hst123
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+You may need to install drizzlepac/stwcs system dependencies (e.g. HDF5) separately. Run with `hst123` or `python -m hst123` as above.
+
+### Optional: tests and docs
+
+```bash
+pip install -e ".[test]"    # then:  pytest
+pip install -e ".[docs]"    # then:  cd docs && make html
 ```
 
 ## Description
