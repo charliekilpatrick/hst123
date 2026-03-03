@@ -2,7 +2,7 @@
 
 **hst123** is a Python package for HST data: download from MAST, align (tweakreg/jhat), drizzle, run DOLPHOT, and scrape photometry. Optimized for point-source photometry across multiple visits and filters.
 
-**Issues:** Report bugs and feature requests via the [project issue tracker](https://github.com/ckilpatrick/hst123/issues). Other questions or publications using hst123: [Contact](#citing-and-contact).
+**Issues:** Report bugs and feature requests via the project issue tracker. Other questions or publications using hst123: [Contact](#citing-and-contact).
 
 ---
 
