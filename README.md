@@ -107,10 +107,10 @@ You can provide **`--reference`** or let hst123 build one from the data. Alignme
 
 ## Documentation
 
-- **`docs/changelog.md`** — Version history
-- **`docs/zeropoints.md`** — AB vs Vega, zero-point formula
-- **`docs/stwcs_dependency_analysis.md`** — Why stwcs is required
-- **`docs/index.md`** — Doc index and Sphinx build
+- **[docs/changelog.md](docs/changelog.md)** — Version history
+- **[docs/zeropoints.md](docs/zeropoints.md)** — AB vs Vega, zero-point formula
+- **[docs/stwcs_dependency_analysis.md](docs/stwcs_dependency_analysis.md)** — Why stwcs is required
+- **[docs/index.md](docs/index.md)** — Doc index and Sphinx build
 
 ---
 
