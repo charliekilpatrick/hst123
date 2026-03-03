@@ -2,18 +2,18 @@
 
 **hst123** is a Python package for HST data: download from MAST, align (tweakreg/jhat), drizzle, run DOLPHOT, and scrape photometry. Optimized for point-source photometry across multiple visits and filters.
 
-**Issues:** Report bugs and feature requests via the project issue tracker. Other questions or publications using hst123: [Contact](#contact).
+**Issues:** Report bugs and feature requests via the [project issue tracker](https://github.com/ckilpatrick/hst123/issues). Other questions or publications using hst123: [Contact](#citing-and-contact).
 
 ---
 
 ## Repository status
 
-- **Package:** Install with `pip install -e .`; provides the `hst123` CLI and the `hst123-install-dolphot` helper. Run as a module: `python -m hst123`. Import in code: `import hst123` (e.g. `hst123.hst123()`, `hst123.main()`).
+- **Current release:** v1.1.0 (see [changelog](docs/changelog.md)). Version is set from git tags (setuptools-scm); run `hst123 --version` after install.
+- **Package:** Install with `pip install -e .` (or `pip install .`); provides the `hst123` CLI and `hst123-install-dolphot`. Run as a module: `python -m hst123`. Programmatic use: `import hst123` then `hst123.hst123()` (pipeline class) or `hst123.main()` (CLI entry point).
 - **Python:** 3.8+
-- **Versioning:** From git tags (setuptools-scm); `hst123 --version`
-- **Layout:** Main pipeline in `hst123/_pipeline.py`; helpers in `hst123/primitives/` (FITS, photometry, astrometry, DOLPHOT, scrape) and `hst123/utils/` (options, logging, display, visit, WCS)
-- **Tests:** `pytest` in `tests/`; optional markers `network`, `dolphot` (see pyproject.toml)
-- **Docs:** `docs/` (changelog, zeropoints, stwcs); Sphinx with `pip install -e ".[docs]"` then `cd docs && make html`
+- **Layout:** Pipeline in `hst123/_pipeline.py`; primitives in `hst123/primitives/` (FITS, photometry, astrometry, DOLPHOT, scrape); utilities in `hst123/utils/` (options, logging, display, visit, WCS).
+- **Tests:** From repo root: `pytest tests/ -v --tb=short`. Optional markers `network` and `dolphot` (skip with `-m "not dolphot and not network"`); see `pyproject.toml`.
+- **Docs:** [docs/](docs/) — [changelog](docs/changelog.md), [zeropoints](docs/zeropoints.md), [stwcs dependency](docs/stwcs_dependency_analysis.md), [index](docs/index.md). Sphinx: `pip install -e ".[docs]"` then `cd docs && make html`.
 
 ---
 
