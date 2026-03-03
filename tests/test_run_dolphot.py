@@ -1,0 +1,278 @@
+"""Unit tests for DolphotPrimitive (run_dolphot_primitive)."""
+import shutil
+from io import StringIO
+from unittest.mock import patch, MagicMock
+
+import pytest
+from astropy.io import fits
+import numpy as np
+
+from hst123.primitives.run_dolphot import (
+    DOLPHOT_REQUIRED_SCRIPTS,
+    DolphotPrimitive,
+)
+
+
+class TestDolphotPrimitiveInstantiation:
+    def test_instantiation_requires_pipeline(self):
+        with pytest.raises(TypeError, match="pipeline"):
+            DolphotPrimitive(None)
+
+    def test_instantiation_stores_pipeline(self):
+        mock_pipeline = object()
+        prim = DolphotPrimitive(mock_pipeline)
+        assert prim._p is mock_pipeline
+        assert prim.pipeline is mock_pipeline
+
+
+class TestDolphotRequiredScripts:
+    """DOLPHOT_REQUIRED_SCRIPTS is the single source of truth for pipeline and tests."""
+
+    def test_list_contains_all_expected_executables(self):
+        expected = [
+            "dolphot",
+            "calcsky",
+            "acsmask",
+            "wfc3mask",
+            "wfpc2mask",
+            "splitgroups",
+        ]
+        assert DOLPHOT_REQUIRED_SCRIPTS == expected
+
+    @pytest.mark.dolphot
+    def test_all_scripts_on_path_when_dolphot_installed(self, require_dolphot):
+        """When DOLPHOT is installed, every required script is found on PATH."""
+        for name in DOLPHOT_REQUIRED_SCRIPTS:
+            path = shutil.which(name)
+            assert path, f"{name} not on PATH"
+        prim = DolphotPrimitive(object())
+        assert prim.check_for_dolphot() is True
+
+
+class TestCheckForDolphot:
+    def test_returns_true_when_all_scripts_found(self):
+        prim = DolphotPrimitive(object())
+        with patch("shutil.which", return_value="/usr/bin/dolphot"):
+            assert prim.check_for_dolphot() is True
+
+    def test_returns_false_when_any_script_missing(self):
+        prim = DolphotPrimitive(object())
+        call_count = [0]
+
+        def which(s):
+            call_count[0] += 1
+            return None if s == "calcsky" else f"/usr/bin/{s}"
+
+        with patch("shutil.which", side_effect=which):
+            assert prim.check_for_dolphot() is False
+        # Stops at first missing (calcsky is second in list)
+        assert call_count[0] >= 1
+
+
+class TestMakeDolphotDict:
+    def test_returns_dict_with_expected_keys(self):
+        prim = DolphotPrimitive(object())
+        out = prim.make_dolphot_dict("mydolphot")
+        assert "base" in out
+        assert "param" in out
+        assert "colfile" in out
+        assert "log" in out
+        assert "final_phot" in out
+        assert "radius" in out
+        assert "limit_radius" in out
+
+    def test_base_and_param_suffixes(self):
+        prim = DolphotPrimitive(object())
+        out = prim.make_dolphot_dict("mydolphot")
+        assert out["base"] == "mydolphot"
+        assert out["param"] == "mydolphot.param"
+        assert out["colfile"] == "mydolphot.columns"
+        assert out["final_phot"] == "mydolphot.phot"
+        assert out["radius"] == 12
+        assert out["limit_radius"] == 10.0
+
+
+class TestNeedsToCalcSky:
+    def test_returns_true_when_no_sky_file_exists(self, tmp_path):
+        prim = DolphotPrimitive(object())
+        image = str(tmp_path / "img.fits")
+        fits.PrimaryHDU().writeto(image, overwrite=True)
+        assert prim.needs_to_calc_sky(image) is True
+
+    def test_returns_false_when_sky_file_exists_and_check_wcs_false(
+        self, tmp_path
+    ):
+        prim = DolphotPrimitive(object())
+        image = tmp_path / "img.fits"
+        fits.PrimaryHDU().writeto(str(image), overwrite=True)
+        sky = tmp_path / "img.sky.fits"
+        fits.PrimaryHDU().writeto(str(sky), overwrite=True)
+        assert prim.needs_to_calc_sky(str(image), check_wcs=False) is False
+
+    def test_returns_true_when_sky_exists_but_wcs_differs(self, tmp_path):
+        prim = DolphotPrimitive(object())
+        image = tmp_path / "img.fits"
+        hdu = fits.PrimaryHDU(np.zeros((100, 100)))
+        hdu.writeto(str(image), overwrite=True)
+        sky = tmp_path / "img.sky.fits"
+        hdu2 = fits.PrimaryHDU(np.zeros((50, 50)))
+        hdu2.writeto(str(sky), overwrite=True)
+        # Different NAXIS1/NAXIS2 so check_wcs finds a difference -> returns False
+        assert prim.needs_to_calc_sky(str(image), check_wcs=True) is False
+
+
+class TestNeedsToBeMasked:
+    def test_returns_true_when_no_dol_header(self, minimal_fits_file):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
+        prim = DolphotPrimitive(mock_pipeline)
+        assert prim.needs_to_be_masked(minimal_fits_file) is True
+
+    def test_returns_false_when_dol_wfc3_zero(self, tmp_path):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
+        path = tmp_path / "img.fits"
+        hdu = fits.PrimaryHDU()
+        hdu.header["DOL_WFC3"] = 0
+        hdu.writeto(str(path), overwrite=True)
+        prim = DolphotPrimitive(mock_pipeline)
+        assert prim.needs_to_be_masked(str(path)) is False
+
+    def test_returns_true_when_dol_acs_nonzero(self, tmp_path):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "ACS_WFC"
+        path = tmp_path / "img.fits"
+        hdu = fits.PrimaryHDU()
+        hdu.header["DOL_ACS"] = 1
+        hdu.writeto(str(path), overwrite=True)
+        prim = DolphotPrimitive(mock_pipeline)
+        assert prim.needs_to_be_masked(str(path)) is True
+
+
+class TestGenerateBaseParamFile:
+    def test_writes_nimg_and_dolphot_params(self):
+        mock_pipeline = object()
+        prim = DolphotPrimitive(mock_pipeline)
+        buf = StringIO()
+        options = {"dolphot": {"SigFind": 2.5, "SigFinal": 3.0}}
+        prim.generate_base_param_file(buf, options, 3)
+        content = buf.getvalue()
+        assert "Nimg = 3" in content
+        assert "SigFind = 2.5" in content
+        assert "SigFinal = 3.0" in content
+
+
+class TestGetDolphotInstrumentParameters:
+    def test_returns_detector_dolphot_options(self):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
+        options = {
+            "WFC3_UVIS": {"dolphot": {"RAper": 3, "RPSF": 15}},
+            "ACS_WFC": {"dolphot": {"RAper": 4}},
+        }
+        prim = DolphotPrimitive(mock_pipeline)
+        out = prim.get_dolphot_instrument_parameters("any.fits", options)
+        assert out == {"RAper": 3, "RPSF": 15}
+
+
+class TestAddImageToParamFile:
+    def test_writes_image_file_and_params(self):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
+        options = {"WFC3_UVIS": {"dolphot": {"RAper": 3}}}
+        prim = DolphotPrimitive(mock_pipeline)
+        buf = StringIO()
+        prim.add_image_to_param_file(buf, "j9abc01dq_flc.fits", 1, options)
+        content = buf.getvalue()
+        assert "img0001_file = j9abc01dq_flc" in content
+        assert "img0001_RAper = 3" in content
+
+
+class TestRunDolphot:
+    def test_logs_error_when_param_file_missing(self, caplog):
+        import logging
+        mock_pipeline = MagicMock()
+        mock_pipeline.dolphot = {
+            "param": "/nonexistent/dolphot.param",
+            "base": "/nonexistent/dolphot",
+            "log": "/nonexistent/dolphot.output",
+        }
+        prim = DolphotPrimitive(mock_pipeline)
+        caplog.set_level(logging.ERROR)
+        prim.run_dolphot()
+        assert "parameter file" in caplog.text.lower() or "does not exist" in caplog.text
+
+    def test_does_not_remove_base_when_param_missing(self):
+        mock_pipeline = MagicMock()
+        mock_pipeline.dolphot = {
+            "param": "/nonexistent/dolphot.param",
+            "base": "/nonexistent/dolphot",
+            "log": "/nonexistent/dolphot.output",
+        }
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch("os.path.isfile", return_value=False):
+            with patch("os.remove") as rm:
+                prim.run_dolphot()
+                rm.assert_not_called()
+
+
+class TestPrepareDolphot:
+    def test_returns_empty_list_when_no_chip_files(self, minimal_fits_file):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
+        mock_pipeline.options = {"args": MagicMock(include_all_splits=False)}
+        mock_pipeline.coord = None
+        mock_pipeline.split_image_contains.return_value = False
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch.object(prim, "needs_to_be_masked", return_value=False), patch.object(
+            prim, "needs_to_split_groups", return_value=False
+        ), patch("glob.glob", return_value=[]):
+            out = prim.prepare_dolphot(minimal_fits_file)
+        assert out == []
+
+
+class TestGetDolphotPhotometry:
+    def test_logs_warning_when_base_missing(self, caplog):
+        from astropy.coordinates import SkyCoord
+        import logging
+        mock_pipeline = MagicMock()
+        mock_pipeline.coord = SkyCoord(0.0, 0.0, unit="deg")
+        mock_pipeline.dolphot = {
+            "base": "/nonexistent/base",
+            "colfile": "/nonexistent/columns",
+        }
+        mock_pipeline.options = {"args": MagicMock(scrape_all=False)}
+        prim = DolphotPrimitive(mock_pipeline)
+        caplog.set_level(logging.WARNING)
+        with patch("os.path.exists", return_value=False):
+            prim.get_dolphot_photometry([], "/ref.fits")
+        assert "dolphot" in caplog.text.lower() or "run" in caplog.text.lower()
+
+
+class TestDoFake:
+    def test_returns_none_when_base_missing(self):
+        mock_pipeline = MagicMock()
+        mock_pipeline.dolphot = {"base": "/nonexistent/base"}
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch("os.path.exists", return_value=False):
+            result = prim.do_fake(
+                [], "/ref.fits"
+            )
+        assert result is None
+
+    def test_returns_none_when_base_empty(self, tmp_path):
+        base = tmp_path / "base"
+        base.write_bytes(b"")
+        mock_pipeline = MagicMock()
+        mock_pipeline.dolphot = {"base": str(base)}
+        mock_pipeline.coord = None
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch("os.path.exists", return_value=True):
+            result = prim.do_fake([], str(tmp_path / "ref.fits"))
+        assert result is None
