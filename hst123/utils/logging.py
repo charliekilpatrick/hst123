@@ -1,10 +1,4 @@
-"""
-Logging configuration and status message formatting for the pipeline.
-
-Provides stdlib logging setup (LogConfig, logging_context, get_logger, get_queue)
-similar to HISPEC DRP, plus make_banner and optional format_success/format_failure
-for terminal-style status lines.
-"""
+"""Logging setup (LogConfig, get_logger, make_banner) and status formatting."""
 import logging
 import multiprocessing as mp
 import os
@@ -24,6 +18,19 @@ DEFAULT_FILENAME_PREFIX = "hst123_log"
 
 
 def _get_level(level):
+    """
+    Resolve a logging level name or number to an integer level.
+
+    Parameters
+    ----------
+    level : int or str
+        Level (e.g. 20, "INFO"). Invalid names fall back to INFO.
+
+    Returns
+    -------
+    int
+        logging level constant (e.g. logging.INFO).
+    """
     if isinstance(level, int):
         return level
     result = logging.getLevelName(str(level).upper())
@@ -31,6 +38,14 @@ def _get_level(level):
 
 
 def _make_formatter():
+    """
+    Create the default log formatter ([timestamp][name][level]: message).
+
+    Returns
+    -------
+    logging.Formatter
+        Formatter with datefmt %Y-%m-%dT%H:%M:%S.
+    """
     return logging.Formatter(
         "[%(asctime)s]"
         "[%(name)s]"
@@ -40,13 +55,43 @@ def _make_formatter():
 
 
 class RunIdFilter(logging.Filter):
+    """Add run_id attribute to log records (current RUN_ID)."""
+
     def filter(self, record):
+        """
+        Set record.run_id and allow the record.
+
+        Parameters
+        ----------
+        record : logging.LogRecord
+            Log record to modify.
+
+        Returns
+        -------
+        bool
+            True (record is always allowed).
+        """
         record.run_id = RUN_ID
         return True
 
 
 class PackageCaptureFilter(logging.Filter):
+    """Allow records from ROOT_LOGGER or LOG_CAPTURE_PACKAGES; drop others when capturing."""
+
     def filter(self, record):
+        """
+        Allow record if name starts with ROOT_LOGGER or any LOG_CAPTURE_PACKAGES prefix.
+
+        Parameters
+        ----------
+        record : logging.LogRecord
+            Log record to test.
+
+        Returns
+        -------
+        bool
+            True if record should be logged.
+        """
         for pkg in LOG_CAPTURE_PACKAGES:
             if record.name.startswith(pkg):
                 return True
@@ -54,6 +99,13 @@ class PackageCaptureFilter(logging.Filter):
 
 
 class LogConfig:
+    """
+    Logging configuration: level, stdout/file handlers, rotation, and filters.
+
+    Uses env vars HST123_LOG_LEVEL, HST123_LOG_ENABLE_STDOUT, HST123_LOG_ENABLE_FILE,
+    HST123_LOG_DIR when options are None. Apply with apply() or context().
+    """
+
     def __init__(
         self,
         *,
@@ -66,6 +118,28 @@ class LogConfig:
         max_bytes=50_000_000,
         backup_count=5,
     ):
+        """
+        Build LogConfig from arguments and environment.
+
+        Parameters
+        ----------
+        level : int or str, optional
+            Logging level (default from HST123_LOG_LEVEL or INFO).
+        enable_stdout : bool, optional
+            Add StreamHandler to stdout (default from HST123_LOG_ENABLE_STDOUT or True).
+        enable_file : bool, optional
+            Add file handler (default from HST123_LOG_ENABLE_FILE or False).
+        log_dir : str, optional
+            Directory for log files (default ~/hst123_logs when enable_file True).
+        filename_prefix : str, optional
+            Prefix for log filename. Default "hst123_log".
+        rotate : bool, optional
+            Use RotatingFileHandler. Default False.
+        max_bytes : int, optional
+            Max bytes per file when rotating. Default 50_000_000.
+        backup_count : int, optional
+            Number of backup files when rotating. Default 5.
+        """
         if level is None:
             level = os.getenv("HST123_LOG_LEVEL", "INFO")
         self.level = _get_level(level)
@@ -104,6 +178,18 @@ class LogConfig:
         self.capture_filter = PackageCaptureFilter()
 
     def _make_file_handler(self, path):
+        """
+        Create a file handler for the given path (rotating or plain).
+
+        Parameters
+        ----------
+        path : str
+            Log file path.
+
+        Returns
+        -------
+        logging.FileHandler or logging.handlers.RotatingFileHandler
+        """
         if self.rotate:
             return RotatingFileHandler(
                 path,
@@ -114,6 +200,7 @@ class LogConfig:
         return logging.FileHandler(path, mode="a")
 
     def _setup_handlers(self):
+        """Build stdout and/or file handlers with formatter and filters."""
         handlers = []
 
         if self.enable_stdout:
@@ -138,6 +225,14 @@ class LogConfig:
         self.handlers = handlers
 
     def apply(self, log_names=None):
+        """
+        Attach handlers to loggers and set level.
+
+        Parameters
+        ----------
+        log_names : list of str, optional
+            Logger names to configure; default [ROOT_LOGGER]. Also applies to LOG_CAPTURE_PACKAGES.
+        """
         if not self.handlers:
             self._setup_handlers()
 
@@ -161,6 +256,16 @@ class LogConfig:
                         logger.addHandler(h)
 
     def undo(self, log_names=None, close_handlers=True):
+        """
+        Remove handlers from loggers and restore previous levels.
+
+        Parameters
+        ----------
+        log_names : list of str, optional
+            Logger names; default [ROOT_LOGGER].
+        close_handlers : bool, optional
+            Close handlers after removal. Default True.
+        """
         if log_names is None:
             log_names = [ROOT_LOGGER]
 
@@ -187,6 +292,14 @@ class LogConfig:
 
     @contextmanager
     def context(self, log_names=None):
+        """
+        Context manager: apply config on enter, undo on exit.
+
+        Parameters
+        ----------
+        log_names : list of str, optional
+            Passed to apply() and undo().
+        """
         self.apply(log_names)
         try:
             yield
@@ -195,6 +308,16 @@ class LogConfig:
 
 
 def _start_listener(queue, config: LogConfig):
+    """
+    Start the QueueListener with config handlers (for multiprocessing logging).
+
+    Parameters
+    ----------
+    queue : multiprocessing.Queue
+        Queue for log records.
+    config : LogConfig
+        Config whose handlers are used by the listener.
+    """
     global _LISTENER
 
     if not config.handlers:
@@ -205,6 +328,7 @@ def _start_listener(queue, config: LogConfig):
 
 
 def _stop_listener():
+    """Stop the global QueueListener if it was started."""
     global _LISTENER
     if _LISTENER is not None:
         _LISTENER.stop()
@@ -212,6 +336,16 @@ def _stop_listener():
 
 
 def _configure_process(queue, level):
+    """
+    Configure root logger for a worker process to send records to queue.
+
+    Parameters
+    ----------
+    queue : multiprocessing.Queue
+        Queue to send log records to.
+    level : int or str
+        Root logger level.
+    """
     root = logging.getLogger()
     root.setLevel(_get_level(level))
     root.handlers.clear()
@@ -220,7 +354,20 @@ def _configure_process(queue, level):
 
 @contextmanager
 def logging_context(config_dict=None, queue=None):
-    """Context manager to configure logging (optionally with a multiprocessing queue)."""
+    """
+    Context manager to configure logging (optionally with a multiprocessing queue).
+
+    Parameters
+    ----------
+    config_dict : dict, optional
+        Config dict; "logging" key used for LogConfig (level, enable_stdout, etc.).
+    queue : multiprocessing.Queue, optional
+        If provided, used instead of creating a new queue (e.g. for multiprocessing).
+
+    Yields
+    ------
+    None
+    """
     global _QUEUE, _CONFIGURED
 
     if not _CONFIGURED:
@@ -259,17 +406,34 @@ def logging_context(config_dict=None, queue=None):
 
 
 def get_queue():
+    """
+    Return the global logging queue (set by logging_context).
+
+    Returns
+    -------
+    multiprocessing.Queue or None
+        The queue used by the listener, or None if not configured.
+    """
     return _QUEUE
 
 
 def get_logger(name=None):
-    """Return a logger for the given name (default ROOT_LOGGER)."""
+    """
+    Return a logger for the given name (default ROOT_LOGGER).
+
+    Parameters
+    ----------
+    name : str, optional
+        Logger name; default ROOT_LOGGER ("hst123").
+
+    Returns
+    -------
+    logging.Logger
+    """
     return logging.getLogger(name if name is not None else ROOT_LOGGER)
 
 
-# ---------------------------------------------------------------------------
-# Pipeline status helpers (ANSI colors and banner)
-# ---------------------------------------------------------------------------
+# ANSI colors and banner for pipeline status
 
 green = "\033[1;32;40m"
 red = "\033[1;31;40m"
@@ -277,7 +441,14 @@ end = "\033[0;0m"
 
 
 def make_banner(message):
-    """Log a banner message (section header with # lines)."""
+    """
+    Log a banner message (section header with # lines).
+
+    Parameters
+    ----------
+    message : str
+        Banner text; logged with 80-char # lines above and below.
+    """
     _banner_logger = logging.getLogger(ROOT_LOGGER)
     _banner_logger.info("\n\n%s\n%s\n%s\n\n", message, "#" * 80, "#" * 80)
 

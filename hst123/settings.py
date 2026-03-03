@@ -1,8 +1,7 @@
+"""Pipeline settings: paths, DOLPHOT/tweakreg defaults, instruments, filters, catalog."""
 from astropy import units as u
 
-# ---------------------------------------------------------------------------
-# Global defaults: archive paths, URLs, reference keys, pipeline defaults
-# ---------------------------------------------------------------------------
+# Global defaults: archive, MAST/CRDS URLs, reference keys, visit, radius, dolphot params
 
 global_defaults = {
     # Paths and URLs
@@ -91,9 +90,7 @@ global_defaults = {
     },
 }
 
-# ---------------------------------------------------------------------------
-# AstroDrizzle defaults
-# ---------------------------------------------------------------------------
+# AstroDrizzle
 
 drizzle_defaults = {
     "num_cores": 8,
@@ -107,9 +104,7 @@ drizzle_defaults = {
     "driz_cr_ctegrow": 0,
 }
 
-# ---------------------------------------------------------------------------
-# TweakReg alignment defaults
-# ---------------------------------------------------------------------------
+# TweakReg alignment
 
 tweakreg_defaults = {
     "threshold_min": 3.0,
@@ -124,9 +119,7 @@ tweakreg_defaults = {
     },
 }
 
-# ---------------------------------------------------------------------------
-# Catalog / source detection (e.g. tweakreg)
-# ---------------------------------------------------------------------------
+# Catalog / source detection (tweakreg)
 
 catalog_pars = {
     "skysigma": 0.0,
@@ -154,9 +147,7 @@ catalog_pars = {
     "_RULES_": {"_rule_1": "True", "_rule2_": "False"},
 }
 
-# ---------------------------------------------------------------------------
-# Instrument defaults (env_ref, crpars for cosmic-ray rejection)
-# ---------------------------------------------------------------------------
+# Instrument defaults (env_ref, cosmic-ray pars)
 
 instrument_defaults = {
     "wfc3": {
@@ -194,11 +185,7 @@ instrument_defaults = {
     },
 }
 
-# ---------------------------------------------------------------------------
-# Detector-specific defaults (drizzle, dolphot, pixel scale)
-# ---------------------------------------------------------------------------
-
-# Shared dolphot_sky patterns to avoid repetition
+# Detector-specific (drizzle, dolphot, pixel scale). Shared dolphot_sky patterns:
 _DOLPHOT_SKY_WFC = {"r_in": 15, "r_out": 35, "step": 4, "sigma_low": 2.25, "sigma_high": 2.00}
 _DOLPHOT_SKY_IR = {"r_in": 10, "r_out": 25, "step": 2, "sigma_low": 2.25, "sigma_high": 2.00}
 
@@ -257,9 +244,7 @@ detector_defaults = {
     },
 }
 
-# ---------------------------------------------------------------------------
-# Acceptable filters (deduplicated)
-# ---------------------------------------------------------------------------
+# Acceptable filters
 
 acceptable_filters = [
     "F098M", "F1042M", "F105W", "F110W", "F122M", "F125W", "F126N", "F127M",
@@ -275,9 +260,7 @@ acceptable_filters = [
     "F850LP", "F892N", "F953N",
 ]
 
-# ---------------------------------------------------------------------------
 # Pipeline file patterns and table names
-# ---------------------------------------------------------------------------
 
 pipeline_products = [
     "*chip?.fits", "*chip?.sky.fits", "*rawtmp.fits", "*drz.fits", "*drz.sky.fits",

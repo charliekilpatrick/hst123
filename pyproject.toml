@@ -49,19 +49,27 @@ docs = [
 
 [project.scripts]
 hst123 = "hst123:main"
+hst123-install-dolphot = "hst123.dolphot_install:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hst123*"]
 
 [tool.setuptools_scm]
-# Version from git tag (e.g. 1.0.7); fallback when not in a git repo or no tags
-fallback_version = "0.0.0+unknown"
+# Version from git tag (e.g. 1.1.0); fallback when not in a git repo or no tags
+fallback_version = "1.1.0"
+# Write version into package for runtime and editable installs
+write_to = "hst123/_version.py"
+write_to_template = "__version__ = \"{version}\"\n"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "network: marks tests that require network access (deselect with '-m \"not network\"')",
+    "dolphot: marks tests that require DOLPHOT executables on PATH (dolphot, calcsky, acsmask, wfc3mask, wfpc2mask, splitgroups); skip with '-m \"not dolphot\"'",
+]
 filterwarnings = [
     "ignore::pyparsing.util.PyparsingDeprecationWarning",
 ]

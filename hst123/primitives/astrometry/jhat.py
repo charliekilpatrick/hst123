@@ -1,9 +1,4 @@
-"""
-JHAT primitive: run JHAT to align JWST images to Gaia or a JWST source catalog.
-
-Extracted from jwst123 (https://github.com/aswinsuresh24/jwst123).
-Requires the optional `jhat` package (not installed with hst123 by default).
-"""
+"""Run JHAT to align JWST images to Gaia or a JWST catalog. Requires optional `jhat` package."""
 
 
 def run_jhat(

@@ -1,8 +1,18 @@
-# Arguments and options for hst123
-def add_options(parser=None, usage=None):
+"""CLI options: RA/Dec, work dir, download, tweakreg, drizzle, DOLPHOT, scrape-dolphot."""
+
+
+def add_options(parser=None, usage=None, version=None):
+    """Register hst123 arguments on an argparse parser. Returns the parser."""
     import argparse
     if parser == None:
-        parser = argparse.ArgumentParser(usage=usage,conflict_handler='resolve')
+        parser = argparse.ArgumentParser(usage=usage, conflict_handler='resolve')
+
+    if version is not None:
+        parser.add_argument(
+            '--version',
+            action='version',
+            version='%(prog)s ' + version,
+        )
 
     # Basic arguments and options
     parser.add_argument('ra', type=str,

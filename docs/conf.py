@@ -1,15 +1,17 @@
-# Configuration file for the Sphinx documentation builder.
-# See https://www.sphinx-doc.org/en/master/usage/configuration.html
-
+# Sphinx config for hst123. See https://www.sphinx-doc.org/en/master/usage/configuration.html
 project = "hst123"
 copyright = "2025"
 author = "C. D. Kilpatrick"
 try:
-    from importlib.metadata import version
-    release = version("hst123")
+    from hst123 import __version__
+    release = __version__
 except Exception:
-    release = "0.0.0"
-version = ".".join(release.split(".")[:2])  # short version for docs
+    try:
+        from importlib.metadata import version
+        release = version("hst123")
+    except Exception:
+        release = "0.0.0+unknown"
+version = ".".join(release.split(".")[:2]) if release else "0.0"
 
 extensions = []
 

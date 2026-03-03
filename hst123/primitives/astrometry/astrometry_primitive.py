@@ -1,12 +1,4 @@
-"""
-Astrometry primitive: TweakReg-based image alignment and WCS registration.
-
-Holds all logic for preparing references for tweakreg, checking/setting
-TWEAKSUC, threshold estimation, running TweakReg, and copying WCS keys.
-Also provides parse_coord helper for RA/Dec parsing.
-Depends on BasePrimitive and the pipeline for get_instrument, get_filter,
-update_image_wcs, run_cosmic, pick_deepest_images, input_list, sanitize_reference.
-"""
+"""Image alignment (TweakReg/JHAT), WCS updates, reference prep. parse_coord for RA/Dec."""
 
 import copy
 import glob
@@ -30,7 +22,19 @@ from hst123.primitives.base import BasePrimitive
 
 
 def _is_number(num):
-    """Return True if num can be interpreted as a number."""
+    """
+    Return True if num can be interpreted as a number.
+
+    Parameters
+    ----------
+    num : any
+        Value to check (e.g. str or float).
+
+    Returns
+    -------
+    bool
+        True if float(num) does not raise ValueError or TypeError.
+    """
     try:
         float(num)
         return True
@@ -70,7 +74,6 @@ def parse_coord(ra, dec):
         log.error("Cannot parse coordinates: %s %s", ra, dec)
         return None
 
-# Optional heavy imports (same as pipeline)
 try:
     from drizzlepac import tweakreg, catalogs
     import stwcs
@@ -81,10 +84,22 @@ except ImportError:
 
 
 class AstrometryPrimitive(BasePrimitive):
-    """Image alignment and astrometry (TweakReg, WCS)."""
+    """TweakReg (HST) or JHAT (JWST/Gaia) alignment, reference prep, WCS updates."""
 
     def prepare_reference_tweakreg(self, reference):
-        """Prepare reference image for tweakreg. Requires specific HDU layout."""
+        """
+        Prepare reference image for TweakReg (specific HDU layout).
+
+        Parameters
+        ----------
+        reference : str
+            Path to reference FITS file.
+
+        Returns
+        -------
+        bool
+            True if preparation succeeded and file was written.
+        """
         if not os.path.exists(reference):
             log.error("tried to sanitize non-existence ref %s", reference)
             return False
@@ -152,7 +167,19 @@ class AstrometryPrimitive(BasePrimitive):
         return True
 
     def check_images_for_tweakreg(self, run_images):
-        """Return list of images that do not yet have TWEAKSUC=1."""
+        """
+        Return list of images that do not yet have TWEAKSUC=1 in header.
+
+        Parameters
+        ----------
+        run_images : list of str
+            Paths to FITS images.
+
+        Returns
+        -------
+        list of str or None
+            Subset of run_images without TWEAKSUC=1; None if empty or run_images empty.
+        """
         if not run_images:
             return None
 
@@ -171,7 +198,21 @@ class AstrometryPrimitive(BasePrimitive):
         return images
 
     def get_nsources(self, image, thresh):
-        """Return number of sources detected in image at given threshold."""
+        """
+        Return number of sources detected in image at given threshold.
+
+        Parameters
+        ----------
+        image : str
+            Path to FITS image.
+        thresh : float
+            Detection threshold for catalog generation.
+
+        Returns
+        -------
+        int
+            Total number of sources from catalog.
+        """
         imghdu = fits.open(image)
         nsources = 0
         log.info("Getting number of sources in %s at threshold=%s", image, thresh)
@@ -197,7 +238,19 @@ class AstrometryPrimitive(BasePrimitive):
         return nsources
 
     def count_nsources(self, images):
-        """Count catalog sources from coo files (tagged with threshold)."""
+        """
+        Count catalog sources from coo files (tagged with threshold).
+
+        Parameters
+        ----------
+        images : list of str
+            Base image paths; coo files are found by replacing .fits with _sci*_xy_catalog.coo.
+
+        Returns
+        -------
+        int
+            Total line count from matching coo files (excluding "threshold" lines).
+        """
         cat_str = "_sci*_xy_catalog.coo"
         n = 0
         for im in images:
@@ -209,7 +262,21 @@ class AstrometryPrimitive(BasePrimitive):
         return n
 
     def get_tweakreg_thresholds(self, image, target):
-        """Estimate threshold vs. source count for image to reach target nobj."""
+        """
+        Estimate threshold vs. source count for image to reach target nobj.
+
+        Parameters
+        ----------
+        image : str
+            Path to FITS image.
+        target : int or float
+            Target number of sources.
+
+        Returns
+        -------
+        list of tuple
+            (nobj, threshold) pairs from sampling thresholds.
+        """
         log.info("Getting tweakreg threshold for %s.  Target nobj=%s", image, target)
         inp_data = []
         for t in np.flip([3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 80.0]):
@@ -225,7 +292,23 @@ class AstrometryPrimitive(BasePrimitive):
         return inp_data
 
     def add_thresh_data(self, thresh_data, image, inp_data):
-        """Append threshold/source-count row to thresh_data table."""
+        """
+        Append threshold/source-count row to thresh_data table.
+
+        Parameters
+        ----------
+        thresh_data : astropy.table.Table or None
+            Existing table; if None, a new table is created.
+        image : str
+            Image path for the "file" column.
+        inp_data : list of tuple
+            (nobj, threshold) pairs.
+
+        Returns
+        -------
+        astropy.table.Table
+            Table with file column and one column per threshold.
+        """
         if not thresh_data:
             keys = []
             data = []
@@ -255,7 +338,21 @@ class AstrometryPrimitive(BasePrimitive):
         return thresh_data
 
     def get_best_tweakreg_threshold(self, thresh_data, target):
-        """Interpolate threshold for target source count; clamp to settings."""
+        """
+        Interpolate threshold for target source count; clamp to settings.
+
+        Parameters
+        ----------
+        thresh_data : astropy.table.Table
+            Table with threshold keys and source counts.
+        target : float
+            Target number of sources.
+
+        Returns
+        -------
+        float
+            Threshold value (clamped to tweakreg_defaults threshold_min/max).
+        """
         thresh = []
         nsources = []
         thresh_data = Table(thresh_data)
@@ -286,8 +383,20 @@ class AstrometryPrimitive(BasePrimitive):
         return threshold
 
     def get_shallow_param(self, image):
-        """Return (filter, pivot_wavelength, exptime) for shallow-image checks."""
-        filt = self._p.get_filter(image)
+        """
+        Return (filter, pivot_wavelength, exptime) for shallow-image checks.
+
+        Parameters
+        ----------
+        image : str
+            Path to FITS image.
+
+        Returns
+        -------
+        tuple
+            (filter_name, pivot_wavelength, exptime).
+        """
+        filt = self._p._fits.get_filter(image)
         hdu = fits.open(image)
         pivot = 0.0
         for h in hdu:
@@ -302,7 +411,14 @@ class AstrometryPrimitive(BasePrimitive):
         return (filt, pivot, exptime)
 
     def tweakreg_error(self, exception):
-        """Log tweakreg failure banner."""
+        """
+        Log TweakReg failure banner.
+
+        Parameters
+        ----------
+        exception : Exception
+            The exception raised by TweakReg.
+        """
         log.warning(
             "tweakreg failed: %s\n%s\nAdjusting thresholds and images...",
             exception.__class__.__name__,
@@ -310,7 +426,14 @@ class AstrometryPrimitive(BasePrimitive):
         )
 
     def apply_tweakreg_success(self, shifts):
-        """Set TWEAKSUC=1 in header for files with valid shifts."""
+        """
+        Set TWEAKSUC=1 in header for files with valid shifts.
+
+        Parameters
+        ----------
+        shifts : astropy.table.Table or iterable
+            Rows with "file", "xoffset", "yoffset"; non-NaN offsets get TWEAKSUC=1.
+        """
         for row in shifts:
             if ~np.isnan(row["xoffset"]) and ~np.isnan(row["yoffset"]):
                 file = row["file"]
@@ -322,7 +445,16 @@ class AstrometryPrimitive(BasePrimitive):
                 hdu.close()
 
     def copy_wcs_keys(self, from_hdu, to_hdu):
-        """Copy WCS header keys from one HDU to another."""
+        """
+        Copy WCS header keys from one HDU to another.
+
+        Parameters
+        ----------
+        from_hdu : astropy.io.fits.HDU
+            Source HDU (e.g. CRPIX1, CRVAL1, CD matrix, CTYPE).
+        to_hdu : astropy.io.fits.HDU
+            Target HDU to update.
+        """
         for key in [
             "CRPIX1", "CRPIX2", "CRVAL1", "CRVAL2",
             "CD1_1", "CD1_2", "CD2_1", "CD2_2",
@@ -340,7 +472,29 @@ class AstrometryPrimitive(BasePrimitive):
         search_radius=None,
         update_hdr=True,
     ):
-        """Run alignment (tweakreg or jhat) per --align-with; return (message, shift_table)."""
+        """
+        Run alignment (TweakReg or JHAT) per --align-with; return (message, shift_table).
+
+        Parameters
+        ----------
+        obstable : astropy.table.Table or dict
+            Table with "image" column of paths.
+        reference : str
+            Reference image path.
+        do_cosmic : bool, optional
+            Run cosmic-ray rejection on non-reference images. Default True.
+        skip_wcs : bool, optional
+            Skip WCS update step. Default False.
+        search_radius : float, optional
+            Override search radius (arcsec). Default from options.
+        update_hdr : bool, optional
+            Update FITS headers with new WCS. Default True.
+
+        Returns
+        -------
+        tuple
+            (message_str, shift_table or None). e.g. ("tweakreg success", shift_table).
+        """
         align_with = getattr(
             self._p.options["args"], "align_with", "tweakreg"
         ).lower()
@@ -358,7 +512,18 @@ class AstrometryPrimitive(BasePrimitive):
     def run_jhat_align(self, obstable, reference):
         """
         Run JHAT to align each image in obstable to Gaia.
-        Returns (message, None) for compatibility with run_tweakreg.
+
+        Parameters
+        ----------
+        obstable : astropy.table.Table or dict
+            Table with "image" column of paths.
+        reference : str
+            Reference image (unused; JHAT aligns to Gaia).
+
+        Returns
+        -------
+        tuple
+            (message_str, None) for compatibility with run_tweakreg.
         """
         from hst123.primitives.astrometry.jhat import run_jhat
 
@@ -393,7 +558,29 @@ class AstrometryPrimitive(BasePrimitive):
         search_radius=None,
         update_hdr=True,
     ):
-        """Run TweakReg on images in obstable; return (success, shift_table)."""
+        """
+        Run TweakReg on images in obstable; return (success, shift_table).
+
+        Parameters
+        ----------
+        obstable : astropy.table.Table or dict
+            Table with "image" column of paths.
+        reference : str
+            Reference image path.
+        do_cosmic : bool, optional
+            Run cosmic-ray rejection. Default True.
+        skip_wcs : bool, optional
+            Skip WCS update. Default False.
+        search_radius : float, optional
+            Override search radius. Default from options.
+        update_hdr : bool, optional
+            Update FITS headers. Default True.
+
+        Returns
+        -------
+        tuple
+            (success_bool, shift_table).
+        """
         p = self._p
         if p.options["args"].work_dir:
             outdir = p.options["args"].work_dir
@@ -424,7 +611,7 @@ class AstrometryPrimitive(BasePrimitive):
         tmp_images = []
         for image in run_images:
             if p.updatewcs and not skip_wcs:
-                det = "_".join(p.get_instrument(image).split("_")[:2])
+                det = "_".join(p._fits.get_instrument(image).split("_")[:2])
                 wcsoptions = p.options["detector_defaults"][det]
                 p.update_image_wcs(image, wcsoptions)
 
@@ -432,7 +619,7 @@ class AstrometryPrimitive(BasePrimitive):
                 tmp_images.append(image)
                 continue
 
-            if image == reference or "wfc3_ir" in p.get_instrument(image):
+            if image == reference or "wfc3_ir" in p._fits.get_instrument(image):
                 log.info("Skipping adjustments for %s as WFC3/IR or reference", image)
                 tmp_images.append(image)
                 continue
@@ -444,7 +631,7 @@ class AstrometryPrimitive(BasePrimitive):
                 continue
 
             shutil.copyfile(image, rawtmp)
-            inst = p.get_instrument(image).split("_")[0]
+            inst = p._fits.get_instrument(image).split("_")[0]
             crpars = p.options["instrument_defaults"][inst]["crpars"]
             p.run_cosmic(rawtmp, crpars)
 
@@ -530,11 +717,11 @@ class AstrometryPrimitive(BasePrimitive):
             iconv = trd["conv_width"]
             tol = trd["tolerance"]
             for detkey, overrides in trd["detector_overrides"].items():
-                if detkey in p.get_instrument(reference):
+                if detkey in p._fits.get_instrument(reference):
                     rconv = overrides["conv_width"]
                     break
             for detkey, overrides in trd["detector_overrides"].items():
-                if all(detkey in p.get_instrument(i) for i in tweak_img):
+                if all(detkey in p._fits.get_instrument(i) for i in tweak_img):
                     iconv = overrides["conv_width"]
                     tol = overrides["tolerance"]
                     break
@@ -635,7 +822,7 @@ class AstrometryPrimitive(BasePrimitive):
             tweaksuc = (
                 "TWEAKSUC" in rawhdu[0].header.keys() and rawhdu[0].header["TWEAKSUC"] == 1
             )
-            if "wfc3_ir" in p.get_instrument(image):
+            if "wfc3_ir" in p._fits.get_instrument(image):
                 continue
             for i, h in enumerate(rawhdu):
                 if (
@@ -649,7 +836,7 @@ class AstrometryPrimitive(BasePrimitive):
 
         if not skip_wcs:
             for image in run_images:
-                if image == reference or "wfc3_ir" in p.get_instrument(image):
+                if image == reference or "wfc3_ir" in p._fits.get_instrument(image):
                     continue
                 log.info("Updating image data for image: %s", image)
                 rawtmp = image.replace(".fits", ".rawtmp.fits")
@@ -672,7 +859,7 @@ class AstrometryPrimitive(BasePrimitive):
                                 self.copy_wcs_keys(rawhdu[i], maskhdu[i])
                                 maskhdu.writeto(maskfile, overwrite=True)
 
-                    if "wfpc2" in p.get_instrument(image).lower() and h.name == "WCSCORR":
+                    if "wfpc2" in p._fits.get_instrument(image).lower() and h.name == "WCSCORR":
                         continue
 
                     ver = int(h.ver)
@@ -694,7 +881,7 @@ class AstrometryPrimitive(BasePrimitive):
                     log.debug("Copy extension %s,%s,%s", idx, name, ver)
                     newhdu.append(copy.copy(rawhdu[idx]))
 
-                if "wfpc2" in p.get_instrument(image).lower():
+                if "wfpc2" in p._fits.get_instrument(image).lower():
                     newhdu[0].header["NEXTEND"] = 4
 
                 log.info("New image info:")

@@ -1,4 +1,7 @@
 *.pyc
 __pycache__
 *.egg-info/
+build/
 docs/build/
+# Setuptools-scm writes this at build time; do not commit
+hst123/_version.py

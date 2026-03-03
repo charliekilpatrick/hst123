@@ -1,10 +1,4 @@
-"""
-Pipeline helper primitives: FITS, photometry, astrometry (TweakReg, JHAT), etc.
-
-All helpers inherit from BasePrimitive and are composed by the main hst123
-pipeline. AstrometryPrimitive holds TweakReg/alignment logic; run_jhat (JWST
-alignment) is optional and requires the jhat package.
-"""
+"""Pipeline primitives: FitsHelper, PhotometryHelper, AstrometryPrimitive; run_jhat optional (JWST)."""
 from hst123.primitives.base import BasePrimitive
 from hst123.primitives.fits import FitsHelper
 from hst123.primitives.photometry import PhotometryHelper

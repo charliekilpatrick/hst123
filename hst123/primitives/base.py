@@ -1,20 +1,8 @@
-"""
-Base primitive class for all pipeline helper primitives.
-
-Every helper (FitsHelper, PhotometryHelper, etc.) inherits from BasePrimitive
-and receives the main hst123 pipeline instance so it can read options, state,
-and delegate back to the pipeline when needed.
-"""
+"""Base class for pipeline primitives; subclasses get the pipeline as self._p."""
 
 
 class BasePrimitive:
-    """
-    Base class for primitive helpers used by the hst123 pipeline.
-
-    Subclasses receive the pipeline instance and store it as _p. Use
-    self._p to access pipeline options (e.g. self._p.options), state
-    (e.g. self._p.coord), or other helpers (e.g. self._p._fits).
-    """
+    """Primitive helpers attach to the pipeline and use self._p for options/state."""
 
     def __init__(self, pipeline):
         if pipeline is None:
@@ -23,5 +11,5 @@ class BasePrimitive:
 
     @property
     def pipeline(self):
-        """The hst123 pipeline instance this primitive is attached to."""
+        """Pipeline instance (same as self._p)."""
         return self._p

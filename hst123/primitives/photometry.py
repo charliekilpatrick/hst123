@@ -1,9 +1,4 @@
-"""
-Photometry math and limit-estimation primitives.
-
-PhotometryHelper is used by the main hst123 pipeline for avg_magnitudes
-and estimate_mag_limit.
-"""
+"""Photometry math and limit estimation (avg_magnitudes, estimate_mag_limit)."""
 import logging
 
 import numpy as np
@@ -15,7 +10,21 @@ log = logging.getLogger(__name__)
 
 
 def weighted_avg_flux_to_mag(flux, fluxerr):
-    """Primitive: convert weighted average flux and error to magnitude and error."""
+    """
+    Convert weighted average flux and flux error to magnitude and magnitude error.
+
+    Parameters
+    ----------
+    flux : array-like
+        Flux values (e.g. count rate).
+    fluxerr : array-like
+        Flux uncertainties; must be > 0.
+
+    Returns
+    -------
+    tuple of float
+        (mag, magerr). Returns (NaN, NaN) if flux is empty or any fluxerr <= 0.
+    """
     if len(flux) == 0 or np.any(fluxerr <= 0):
         return float("NaN"), float("NaN")
     weights = 1.0 / fluxerr**2
@@ -28,8 +37,23 @@ def weighted_avg_flux_to_mag(flux, fluxerr):
 
 def estimate_limit_from_snr_bins(mags, errs, snr_target=3.0, n_bins=100):
     """
-    Primitive: estimate limiting magnitude by binning in mag and extrapolating
-    to a target S/N (e.g. 3-sigma).
+    Estimate limiting magnitude by binning in magnitude and interpolating to target S/N.
+
+    Parameters
+    ----------
+    mags : array-like
+        Magnitudes of sources.
+    errs : array-like
+        Magnitude errors (same length as mags).
+    snr_target : float, optional
+        Target signal-to-noise for the limit (e.g. 3 for 3-sigma). Default 3.0.
+    n_bins : int, optional
+        Number of magnitude bins. Default 100.
+
+    Returns
+    -------
+    float
+        Estimated limiting magnitude at snr_target; np.nan if insufficient data.
     """
     try:
         mags = np.array(mags)
@@ -63,9 +87,33 @@ def estimate_limit_from_snr_bins(mags, errs, snr_target=3.0, n_bins=100):
 
 
 class PhotometryHelper(BasePrimitive):
-    """Photometry math and limits (avg_magnitudes, estimate_mag_limit)."""
+    """
+    Photometry math and limit estimation for the hst123 pipeline.
+
+    Provides avg_magnitudes (weighted average flux to mag) and estimate_mag_limit
+    (limit from S/N bins). Used when scraping dolphot or reporting final photometry.
+    """
 
     def avg_magnitudes(self, magerrs, counts, exptimes, zpt):
+        """
+        Compute weighted average magnitude and error from multi-epoch counts and zero points.
+
+        Parameters
+        ----------
+        magerrs : array-like
+            Magnitude uncertainties per measurement.
+        counts : array-like
+            Counts (or count rates) per measurement.
+        exptimes : array-like
+            Exposure times per measurement.
+        zpt : array-like
+            Zero points per measurement.
+
+        Returns
+        -------
+        tuple of float
+            (mag, magerr). (NaN, NaN) if no valid measurements (e.g. magerr < 0.5, counts > 0).
+        """
         idx = []
         for i in np.arange(len(magerrs)):
             try:
@@ -89,6 +137,23 @@ class PhotometryHelper(BasePrimitive):
         return weighted_avg_flux_to_mag(flux, fluxerr)
 
     def estimate_mag_limit(self, mags, errs, limit=3.0):
+        """
+        Estimate limiting magnitude at a given S/N (e.g. 3-sigma).
+
+        Parameters
+        ----------
+        mags : array-like
+            Magnitudes of sources.
+        errs : array-like
+            Magnitude errors.
+        limit : float, optional
+            Target S/N for the limit. Default 3.0.
+
+        Returns
+        -------
+        float
+            Limiting magnitude; np.nan if insufficient range or data.
+        """
         warning = (
             "WARNING: cannot sample a wide enough range of magnitudes "
             "to estimate a limit"

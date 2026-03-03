@@ -1,4 +1,5 @@
 """Pytest configuration and shared fixtures."""
+import shutil
 import sys
 from pathlib import Path
 
@@ -8,6 +9,30 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+
+def _dolphot_scripts_available():
+    """Return True if all DOLPHOT executables are on PATH."""
+    from hst123.primitives.run_dolphot import DOLPHOT_REQUIRED_SCRIPTS
+    return all(shutil.which(s) for s in DOLPHOT_REQUIRED_SCRIPTS)
+
+
+@pytest.fixture
+def require_dolphot():
+    """
+    Fixture that skips the test if DOLPHOT executables are not on PATH.
+
+    Required: dolphot, calcsky, acsmask, wfc3mask, wfpc2mask, splitgroups.
+    Install with: hst123-install-dolphot --dolphot-dir <dir> && make && export PATH.
+    """
+    if not _dolphot_scripts_available():
+        from hst123.primitives.run_dolphot import DOLPHOT_REQUIRED_SCRIPTS
+        pytest.skip(
+            "DOLPHOT executables not on PATH: {}. "
+            "Install with hst123-install-dolphot and add the build dir to PATH.".format(
+                ", ".join(DOLPHOT_REQUIRED_SCRIPTS)
+            )
+        )
 
 
 @pytest.fixture

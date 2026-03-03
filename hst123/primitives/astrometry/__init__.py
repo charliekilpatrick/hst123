@@ -1,10 +1,4 @@
-"""
-Astrometry primitive: image alignment and WCS registration.
-
-Contains AstrometryPrimitive (tweakreg and related logic), parse_coord (RA/Dec
-parsing), and run_jhat (JWST/JHAT alignment). Requires drizzlepac; run_jhat
-requires the optional jhat package.
-"""
+"""AstrometryPrimitive (TweakReg), parse_coord, run_jhat (JWST; optional jhat package)."""
 from hst123.primitives.astrometry.astrometry_primitive import (
     AstrometryPrimitive,
     parse_coord,
