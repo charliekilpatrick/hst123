@@ -1,77 +1,75 @@
-# Guide (user-friendly):
-# https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
-
-# Specification (technical, formal):
-# https://packaging.python.org/en/latest/specifications/pyproject-toml/
-
-
-# Choosing a build backend:
-# https://packaging.python.org/en/latest/tutorials/packaging-projects/#choosing-a-build-backend
 [build-system]
-requires = ["setuptools>=38.3.0", "wheel", "setuptools_scm>=8"]
+requires = ["setuptools>=64.0", "setuptools-scm>=8.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools_scm]
-version_file = "hst123/_version.py"
-version_scheme = "post-release"
-local_scheme = "no-local"
-
-
 [project]
-name = "hispecdrp"
+name = "hst123"
 dynamic = ["version"]
-description = "A data reduction pipeline for downloading, aligning, drizzling, and performing high-precision photometry in images from HST/WFPC2, ACS, and WFC3."
+description = "An all-in-one script for downloading, registering, and drizzling HST images, running dolphot, and scraping data from dolphot catalogs."
 readme = "README.md"
-requires-python = ">=3.10.0"
-license = {file = "LICENSE.txt"}
-
-authors = [
-  {name = "Charlie Kilpatrick", email = "ckilpatrick@northwestern.edu" }
-]
-
-maintainers = [
-  {name = "Charlie Kilpatrick", email = "ckilpatrick@northwestern.edu" }
-]
-
+requires-python = ">=3.8"
+license = { text = "BSD-3-Clause" }
+keywords = ["astronomy", "HST", "Hubble", "dolphot", "drizzle", "photometry"]
 classifiers = [
-  "Development Status :: 1 - Planning",
-  "Topic :: Scientific/Engineering :: Astronomy",
-  "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3 :: Only",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
 ]
-
 dependencies = [
-  "numpy",
-  "scipy",
-  "matplotlib",
-  "astropy",
-  "gitpython",
+    "setuptools>=64.0,<82",  # stwcs uses pkg_resources; setuptools 82+ removed it
+    "astropy>=5.3,<6",
+    "astroquery>=0.4.6",
+    "astroscrappy>=1.1.0",
+    "drizzlepac>=3.5.1",
+    "numpy>=1.24,<2",
+    "progressbar33>=2.4",
+    "python-dateutil>=2.8.2",
+    "requests>=2.32.0",
+    "scipy>=1.10,<2",
+    "stwcs>=1.7.2",
+    "jhat",
 ]
-
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov", "requests"]
-docs = ["sphinx==8.1.3", "nbsphinx", "sphinx-astropy", "pandoc", "sphinx-multiversion", "sphinxawesome-theme"]
+test = [
+    "pytest>=7.0",
+]
+docs = [
+    "sphinx>=5.0",
+    "sphinx-rtd-theme>=1.2",
+]
 
-[project.urls]
-"Documentation" = "https://charliekilpatrick.github.io/hst123/"
-"Source" = "https://github.com/charliekilpatrick/hst123"
-
-[tool.setuptools]
-include-package-data = true
+[project.scripts]
+hst123 = "hst123:main"
+hst123-install-dolphot = "hst123.dolphot_install:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hst123*"]
-namespaces = false
 
-[tool.setuptools.package-data]
-# hst123 = ["."]
-
-# [tool.pytest.ini_options]
-# pythonpath = ["."]
+[tool.setuptools_scm]
+# Version from git tag (e.g. 1.1.0); fallback when not in a git repo or no tags
+fallback_version = "1.1.0"
+# Write version into package for runtime and editable installs
+write_to = "hst123/_version.py"
+write_to_template = "__version__ = \"{version}\"\n"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "network: marks tests that require network access (deselect with '-m \"not network\"')",
+    "dolphot: marks tests that require DOLPHOT executables on PATH (dolphot, calcsky, acsmask, wfc3mask, wfpc2mask, splitgroups); skip with '-m \"not dolphot\"'",
+]
+filterwarnings = [
+    "ignore::pyparsing.util.PyparsingDeprecationWarning",
+]
