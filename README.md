@@ -87,7 +87,7 @@ Use the package in a directory that will hold (or already holds) your images. Wi
 | WFC3/UVIS | flc.fits |
 | WFC3/IR | flt.fits |
 
-You can provide **`--reference`** or let hst123 build one from the data. Alignment: **tweakreg** (default) or **jhat** (**`--align-with`**). Photometry is reported in AB mag by default; see `docs/zeropoints.md`.
+You can provide **`--reference`** or let hst123 build one from the data. Alignment: **tweakreg** (default) or **jhat** (**`--align-with`**). Photometry is reported in AB mag by default; see [docs/zeropoints.md](docs/zeropoints.md).
 
 ---
 
