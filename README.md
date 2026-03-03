@@ -75,8 +75,6 @@ hst123 12:30:00 -45.0 --download
 
 Use the package in a directory that will hold (or already holds) your images. Without `--download`, hst123 uses existing files in the working directory. Full option list: **`hst123 --help`**.
 
-**Programmatic use:** `import hst123` then `hst123.hst123()` for the pipeline class or `hst123.main()` for the entry point (same as the CLI).
-
 ---
 
 ## Supported instruments
