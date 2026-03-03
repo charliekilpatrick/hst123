@@ -1,7 +1,7 @@
 # Conda environment for hst123 (Conda + pip install).
 # Create env:  conda env create -f environment.yml
 # Activate:    conda activate hst123
-# Then:        pip install drizzlepac stwcs && pip install -e .
+# Then:        pip install .[test]  (or: pip install drizzlepac stwcs && pip install -e .)
 name: hst123
 channels:
   - conda-forge
@@ -9,11 +9,12 @@ channels:
 dependencies:
   - python=3.10
   - pip
-  - astropy
-  - astroquery
-  - astroscrappy
-  - numpy
-  - scipy
-  - requests
-  - python-dateutil
-  # progressbar33, drizzlepac, stwcs: install via pip after activating
+  - setuptools>=64,<82   # stwcs needs pkg_resources (removed in setuptools 82+)
+  - astropy>=5.3,<6
+  - astroquery>=0.4.6
+  - astroscrappy>=1.1.0
+  - numpy>=1.24,<2      # match pyproject; numpy 2 has ABI/API changes
+  - scipy>=1.10,<2      # pin to avoid ABI mismatch with numpy (wrong-signature errors)
+  - requests>=2.32
+  - python-dateutil>=2.8.2
+  # progressbar33, drizzlepac, stwcs, jhat: install via pip (pip install .[test])
