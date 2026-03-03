@@ -13,7 +13,7 @@
 - **Python:** 3.8+
 - **Layout:** Pipeline in `hst123/_pipeline.py`; primitives in `hst123/primitives/` (FITS, photometry, astrometry, DOLPHOT, scrape); utilities in `hst123/utils/` (options, logging, display, visit, WCS).
 - **Tests:** From repo root: `pytest tests/ -v --tb=short`. Optional markers `network` and `dolphot` (skip with `-m "not dolphot and not network"`); see `pyproject.toml`.
-- **Docs:** [docs/](docs/) — [changelog](docs/changelog.md), [zeropoints](docs/zeropoints.md), [stwcs dependency](docs/stwcs_dependency_analysis.md), [index](docs/index.md). Sphinx: `pip install -e ".[docs]"` then `cd docs && make html`.
+- **Docs:** [docs/](docs/) — [changelog](docs/changelog.md), [zeropoints](docs/zeropoints.md), [index](docs/index.md). Sphinx: `pip install -e ".[docs]"` then `cd docs && make html`.
 
 ---
 
@@ -107,7 +107,6 @@ You can provide **`--reference`** or let hst123 build one from the data. Alignme
 
 - **[docs/changelog.md](docs/changelog.md)** — Version history
 - **[docs/zeropoints.md](docs/zeropoints.md)** — AB vs Vega, zero-point formula
-- **[docs/stwcs_dependency_analysis.md](docs/stwcs_dependency_analysis.md)** — Why stwcs is required
 - **[docs/index.md](docs/index.md)** — Doc index and Sphinx build
 
 ---
