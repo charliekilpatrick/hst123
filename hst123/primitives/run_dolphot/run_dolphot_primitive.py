@@ -1,8 +1,9 @@
 """Run DOLPHOT, prepare images (calcsky, splitgroups, *mask), param files, fake stars. Scraping is in ScrapeDolphotPrimitive."""
 import glob
-import logging
 import os
 import shutil
+import signal
+import tempfile
 import time
 
 import numpy as np
@@ -10,8 +11,17 @@ from astropy.io import fits
 import astropy.wcs as wcs
 
 from hst123.primitives.base import BasePrimitive
+from hst123.utils.dolphot_sky import (
+    calcsky_max_pixels_external,
+    primary_array_pixel_count,
+    sky_fits_path,
+    summarize_primary_for_calcsky,
+    write_calcsky_sanitized_input,
+    write_sky_fits_fallback,
+)
+from hst123.utils.logging import get_logger, log_calls, make_banner, run_external_command
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 DOLPHOT_REQUIRED_SCRIPTS = [
     "dolphot",
@@ -80,10 +90,11 @@ class DolphotPrimitive(BasePrimitive):
             True if calcsky should be run for this image.
         """
         p = self._p
-        log.info("Checking for %s", image.replace(".fits", ".sky.fits"))
-        files = glob.glob(image.replace(".fits", ".sky.fits"))
-        if len(files) == 0:
+        sky_path = sky_fits_path(image)
+        log.debug("calcsky check sky_path=%s science=%s", sky_path, image)
+        if not os.path.exists(sky_path):
             return True
+        files = [sky_path]
         if check_wcs:
             imhdu = fits.open(image)
             skhdu = fits.open(files[0])
@@ -159,7 +170,7 @@ class DolphotPrimitive(BasePrimitive):
             If True, remove split files that are not science extensions. Default True.
         """
         log.info("Running split groups for %s", image)
-        os.system(f"splitgroups {image}")
+        run_external_command(["splitgroups", image], log=log)
         if delete_non_science:
             split_images = glob.glob(
                 image.replace(".fits", ".chip*.fits")
@@ -186,10 +197,45 @@ class DolphotPrimitive(BasePrimitive):
             Instrument name (e.g. "acs", "wfc3", "wfpc2") for *mask command.
         """
         p = self._p
-        maskimage = p.get_dq_image(image)
-        cmd = f"{instrument}mask {image} {maskimage}"
-        log.info("Executing: %s", cmd)
-        os.system(cmd)
+        inst_l = (instrument or "").lower()
+        mask_exe = f"{inst_l}mask"
+        # acsmask reads WFC PAM FITS from the DOLPHOT tree; fail fast with a clear message.
+        if inst_l == "acs":
+            from hst123.dolphot_install import verify_acs_wfc_pam_files
+
+            ok, msgs = verify_acs_wfc_pam_files()
+            if not ok:
+                raise RuntimeError(
+                    "DOLPHOT ACS acsmask needs WFC PAM files (wfc1_pam.fits, wfc2_pam.fits) "
+                    "under .../dolphot3.1/acs/data/. Problems: "
+                    + "; ".join(msgs)
+                    + ". Fix: run hst123-install-dolphot without --no-psfs, or extract "
+                    "ACS_WFC_PAM.tar.gz into the DOLPHOT source tree. "
+                    "If the install lives on cloud storage, ensure files are fully local "
+                    "(not zero-byte placeholders)."
+                )
+        maskimage = p._fits.get_dq_image(image)
+        cmd = [mask_exe, image]
+        if maskimage:
+            if os.path.isfile(maskimage):
+                cmd.append(maskimage)
+            else:
+                log.warning(
+                    "DQ path from get_dq_image is not an existing file (%r); "
+                    "running %s with science image only",
+                    maskimage,
+                    mask_exe,
+                )
+        log.info("Executing: %s", " ".join(cmd))
+        run_external_command(cmd, log=log)
+        wd = os.path.dirname(os.path.abspath(image)) or "."
+        self._primitive_cleanup(
+            "mask_image",
+            work_dir=wd,
+            validate_fits_paths=[os.path.abspath(image)]
+            if os.path.isfile(image)
+            else [],
+        )
 
     def calc_sky(self, image, options):
         """
@@ -202,20 +248,148 @@ class DolphotPrimitive(BasePrimitive):
         options : dict
             detector_defaults dict with [det]["dolphot_sky"] keys.
         """
-        p = self._p
-        det = "_".join(p._fits.get_instrument(image).split("_")[:2])
+        det = "_".join(self._p._fits.get_instrument(image).split("_")[:2]).lower()
         opt = options[det]["dolphot_sky"]
-        cmd = "calcsky {image} {rin} {rout} {step} {sigma_low} {sigma_high}"
-        calc_sky_cmd = cmd.format(
-            image=image.replace(".fits", ""),
-            rin=opt["r_in"],
-            rout=opt["r_out"],
-            step=opt["step"],
-            sigma_low=opt["sigma_low"],
-            sigma_high=opt["sigma_high"],
-        )
-        log.info("Executing: %s", calc_sky_cmd)
-        os.system(calc_sky_cmd)
+        img = os.fspath(image)
+        final_sky = sky_fits_path(img)
+        work_dir = os.path.dirname(os.path.abspath(img)) or "."
+        base = os.path.basename(img)
+        tmp_img = ""
+        tmp_sky_out = ""
+        calcsky_ok = False
+        cp = None
+        try:
+            try:
+                summ = summarize_primary_for_calcsky(img)
+            except Exception as exc:
+                summ = f"(could not summarize: {exc})"
+            log.info("calcsky: %s | %s", base, summ)
+
+            n1, n2, npx = primary_array_pixel_count(img)
+            max_px = calcsky_max_pixels_external()
+            if max_px > 0 and npx > max_px:
+                log.info(
+                    "calcsky: skip external binary %dx%d=%d px > HST123_CALCSKY_MAX_PIXELS=%d "
+                    "(large drizzles often crash calcsky; Python sky map)",
+                    n1,
+                    n2,
+                    npx,
+                    max_px,
+                )
+                write_sky_fits_fallback(
+                    img,
+                    final_sky,
+                    r_in=int(opt["r_in"]),
+                    r_out=int(opt["r_out"]),
+                    step=int(opt["step"]),
+                    sigma_low=float(opt["sigma_low"]),
+                    sigma_high=float(opt["sigma_high"]),
+                )
+                log.info("Wrote sky map (Python, large-image path): %s", final_sky)
+                return
+
+            fd, tmp_img = tempfile.mkstemp(
+                suffix=".fits", prefix=".hst123_calcsky_", dir=work_dir
+            )
+            os.close(fd)
+            tmp_root = tmp_img[:-5] if tmp_img.lower().endswith(".fits") else tmp_img
+            tmp_sky_out = tmp_root + ".sky.fits"
+            calcsky_ok = False
+            cp = None
+            try:
+                try:
+                    write_calcsky_sanitized_input(img, tmp_img)
+                except (OSError, ValueError, TypeError) as exc:
+                    log.warning(
+                        "Could not prepare calcsky input (%s); skipping external calcsky",
+                        exc,
+                    )
+                else:
+                    calc_argv = [
+                        "calcsky",
+                        tmp_root,
+                        str(opt["r_in"]),
+                        str(opt["r_out"]),
+                        str(opt["step"]),
+                        str(opt["sigma_low"]),
+                        str(opt["sigma_high"]),
+                    ]
+                    log.info("calcsky: exec %s", " ".join(calc_argv))
+                    try:
+                        cp = run_external_command(calc_argv, log=log, check=False)
+                    except OSError as exc:
+                        log.warning(
+                            "calcsky could not be executed (%s); using Python sky fallback",
+                            exc,
+                        )
+                        cp = None
+
+                    if (
+                        cp is not None
+                        and cp.returncode == 0
+                        and os.path.isfile(tmp_sky_out)
+                    ):
+                        shutil.move(tmp_sky_out, final_sky)
+                        log.info("calcsky: ok -> %s", os.path.basename(final_sky))
+                        calcsky_ok = True
+                    elif cp is not None and cp.returncode == 0:
+                        log.warning(
+                            "calcsky exited 0 but output missing (%s); using Python sky fallback",
+                            tmp_sky_out,
+                        )
+            finally:
+                for path in (tmp_img, tmp_sky_out):
+                    try:
+                        if path and os.path.isfile(path):
+                            os.unlink(path)
+                    except OSError:
+                        pass
+
+            if calcsky_ok:
+                return
+
+            if cp is not None and cp.returncode < 0:
+                sig = -cp.returncode
+                _Signals = getattr(signal, "Signals", None)
+                if _Signals is not None:
+                    try:
+                        sig_name = _Signals(sig).name
+                    except ValueError:
+                        sig_name = "?"
+                else:
+                    sig_name = "?"
+                log.warning(
+                    "calcsky: abnormal exit %s (signal %s=%s); Python sky fallback",
+                    cp.returncode,
+                    sig,
+                    sig_name,
+                )
+            elif cp is not None:
+                log.warning(
+                    "calcsky: exit %s; Python sky fallback",
+                    cp.returncode,
+                )
+
+            write_sky_fits_fallback(
+                img,
+                final_sky,
+                r_in=int(opt["r_in"]),
+                r_out=int(opt["r_out"]),
+                step=int(opt["step"]),
+                sigma_low=float(opt["sigma_low"]),
+                sigma_high=float(opt["sigma_high"]),
+            )
+            log.info("Wrote sky map (Python fallback): %s", final_sky)
+        finally:
+            vfit = [os.path.abspath(img)]
+            if os.path.isfile(final_sky):
+                vfit.append(os.path.abspath(final_sky))
+            self._primitive_cleanup(
+                "calc_sky",
+                work_dir=work_dir,
+                remove_globs=(".hst123_calcsky_*.fits",),
+                validate_fits_paths=vfit,
+            )
 
     def generate_base_param_file(self, param_file, options, n):
         """
@@ -252,7 +426,7 @@ class DolphotPrimitive(BasePrimitive):
         """
         p = self._p
         instrument_string = p._fits.get_instrument(image)
-        detector_string = "_".join(instrument_string.split("_")[:2])
+        detector_string = "_".join(instrument_string.split("_")[:2]).lower()
         return options[detector_string]["dolphot"]
 
     def add_image_to_param_file(
@@ -318,7 +492,15 @@ class DolphotPrimitive(BasePrimitive):
                 self.add_image_to_param_file(
                     dolphot_file, image, i + 1, dopt
                 )
+        self._primitive_cleanup(
+            "make_dolphot_file",
+            validate_text_paths=[p.dolphot["param"]]
+            if os.path.isfile(p.dolphot["param"])
+            else [],
+            validation_notes={"n_images": len(images), "reference": os.path.basename(reference)},
+        )
 
+    @log_calls
     def run_dolphot(self):
         """
         Execute dolphot using pipeline dolphot param file and base name.
@@ -326,36 +508,58 @@ class DolphotPrimitive(BasePrimitive):
         Writes output to dolphot["base"] and log to dolphot["log"]. Requires
         dolphot["param"] to exist (e.g. from make_dolphot_file).
         """
-        from hst123.utils.logging import make_banner
-
         p = self._p
-        if os.path.isfile(p.dolphot["param"]):
-            if os.path.exists(p.dolphot["base"]):
-                os.remove(p.dolphot["base"])
-            if os.path.exists(p.dolphot["original"]):
-                os.remove(p.dolphot["original"])
-            cmd = "dolphot {base} -p{par} > {log}".format(
-                base=p.dolphot["base"],
-                par=p.dolphot["param"],
-                log=p.dolphot["log"],
-            )
-            make_banner("Running dolphot with cmd={cmd}".format(cmd=cmd))
-            os.system(cmd)
-            time.sleep(10)
-            log.info("dolphot is finished (whew)!")
-            if os.path.exists(p.dolphot["base"]):
-                filesize = (
-                    os.stat(p.dolphot["base"]).st_size / 1024 / 1024
+        try:
+            if os.path.isfile(p.dolphot["param"]):
+                if os.path.exists(p.dolphot["base"]):
+                    os.remove(p.dolphot["base"])
+                if os.path.exists(p.dolphot["original"]):
+                    os.remove(p.dolphot["original"])
+                dolphot_argv = [
+                    "dolphot",
+                    p.dolphot["base"],
+                    f"-p{p.dolphot['param']}",
+                ]
+                banner_cmd = "dolphot {base} -p{par} (log -> {log})".format(
+                    base=p.dolphot["base"],
+                    par=p.dolphot["param"],
+                    log=p.dolphot["log"],
                 )
-                log.info(
-                    "Output dolphot file size is %s MB",
-                    "%.3f" % filesize,
+                make_banner("Running dolphot: {cmd}".format(cmd=banner_cmd))
+                run_external_command(
+                    dolphot_argv,
+                    log=log,
+                    tee_path=p.dolphot["log"],
                 )
-        else:
-            log.error(
-                "ERROR: dolphot parameter file %s does not exist! "
-                "Generate a parameter file first.",
-                p.dolphot["param"],
+                time.sleep(10)
+                log.info("dolphot is finished (whew)!")
+                if os.path.exists(p.dolphot["base"]):
+                    filesize = (
+                        os.stat(p.dolphot["base"]).st_size / 1024 / 1024
+                    )
+                    log.info(
+                        "Output dolphot file size is %s MB",
+                        "%.3f" % filesize,
+                    )
+            else:
+                log.error(
+                    "ERROR: dolphot parameter file %s does not exist! "
+                    "Generate a parameter file first.",
+                    p.dolphot["param"],
+                )
+        finally:
+            vtxt = []
+            if os.path.isfile(p.dolphot.get("base", "")):
+                vtxt.append(p.dolphot["base"])
+            if os.path.isfile(p.dolphot.get("log", "")):
+                vtxt.append(p.dolphot["log"])
+            self._primitive_cleanup(
+                "run_dolphot",
+                validate_text_paths=vtxt,
+                text_min_size=0,
+                validation_notes={
+                    "param_exists": os.path.isfile(p.dolphot["param"]),
+                },
             )
 
     def prepare_dolphot(self, image):
@@ -389,6 +593,18 @@ class DolphotPrimitive(BasePrimitive):
                 if self.needs_to_calc_sky(im):
                     self.calc_sky(im, p.options["detector_defaults"])
                 outimg.append(im)
+        wd = os.path.dirname(os.path.abspath(image)) or "."
+        vfit = [os.path.abspath(x) for x in outimg]
+        for im in outimg:
+            sp = sky_fits_path(im)
+            if os.path.isfile(sp):
+                vfit.append(os.path.abspath(sp))
+        self._primitive_cleanup(
+            "prepare_dolphot",
+            work_dir=wd,
+            remove_globs=(".hst123_calcsky_*.fits",),
+            validate_fits_paths=vfit,
+        )
         return outimg
 
     def get_dolphot_photometry(self, split_images, reference):
@@ -413,39 +629,61 @@ class DolphotPrimitive(BasePrimitive):
         make_banner(f"Starting scrape dolphot for: {ra} {dec}")
         opt = p.options["args"]
         dp = p.dolphot
-        if (
-            os.path.exists(dp["colfile"])
-            and os.path.exists(dp["base"])
-            and os.stat(dp["base"]).st_size > 0
-        ):
-            phot = p._scrape_dolphot.scrapedolphot(
-                p.coord,
-                reference,
-                split_images,
-                dp,
-                get_limits=True,
-                scrapeall=opt.scrape_all,
-                brightest=opt.brightest,
-            )
-            p.final_phot = phot
-            if phot:
-                make_banner(
-                    "Printing out the final photometry for: {ra} {dec}\n"
-                    "There is photometry for {n} sources".format(
-                        ra=ra, dec=dec, n=len(phot)
+        phot = None
+        try:
+            if (
+                os.path.exists(dp["colfile"])
+                and os.path.exists(dp["base"])
+                and os.stat(dp["base"]).st_size > 0
+            ):
+                phot = p._scrape_dolphot.scrapedolphot(
+                    p.coord,
+                    reference,
+                    split_images,
+                    dp,
+                    get_limits=True,
+                    scrapeall=opt.scrape_all,
+                    brightest=opt.brightest,
+                )
+                p.final_phot = phot
+                if phot:
+                    make_banner(
+                        "Printing out the final photometry for: {ra} {dec}\n"
+                        "There is photometry for {n} sources".format(
+                            ra=ra, dec=dec, n=len(phot)
+                        )
                     )
-                )
-                allphot = p.options["args"].scrape_all
-                p._scrape_dolphot.print_final_phot(phot, p.dolphot, allphot=allphot)
+                    allphot = p.options["args"].scrape_all
+                    p._scrape_dolphot.print_final_phot(
+                        phot, p.dolphot, allphot=allphot
+                    )
+                else:
+                    make_banner(
+                        f"WARNING: did not find a source for: {ra} {dec}"
+                    )
             else:
-                make_banner(
-                    f"WARNING: did not find a source for: {ra} {dec}"
+                log.warning(
+                    "WARNING: dolphot did not run. Use the --run-dolphot flag "
+                    "or check your dolphot output for errors before using "
+                    "--scrape-dolphot"
                 )
-        else:
-            log.warning(
-                "WARNING: dolphot did not run. Use the --run-dolphot flag "
-                "or check your dolphot output for errors before using "
-                "--scrape-dolphot"
+        finally:
+            wd = getattr(opt, "work_dir", None) or "."
+            wda = os.path.abspath(os.path.expanduser(wd))
+            vfit = []
+            if reference and os.path.isfile(reference):
+                vfit.append(reference)
+            for s in split_images or []:
+                if s and os.path.isfile(str(s)):
+                    vfit.append(str(s))
+            tmp_left = os.path.join(wda, "tmp")
+            rpaths = [tmp_left] if os.path.isfile(tmp_left) else []
+            self._primitive_cleanup(
+                "get_dolphot_photometry",
+                work_dir=wda,
+                remove_paths=rpaths,
+                validate_fits_paths=vfit,
+                validate_tables=phot if phot is not None else [],
             )
 
     def do_fake(self, obstable, refname):
@@ -471,65 +709,77 @@ class DolphotPrimitive(BasePrimitive):
         p = self._p
         dp = p.dolphot
         gopt = p.options["global_defaults"]["fake"]
-        if not os.path.exists(dp["base"]) or os.path.getsize(dp["base"]) == 0:
-            log.warning(
-                "WARNING: option --do-fake used but dolphot has not been run."
-            )
-            return None
-        flines = 0
-        if os.path.exists(dp["fake"]):
-            with open(dp["fake"], "r") as fake:
-                for i, line in enumerate(fake):
-                    flines = i + 1
-        if not os.path.exists(dp["fake"]) or flines < gopt["nstars"]:
-            images = []
-            imgnums = []
-            with open(dp["param"], "r") as param_file:
-                for line in param_file:
-                    if "_file" in line and "img0000" not in line:
-                        filename = (
-                            line.split("=")[1].strip() + ".fits"
-                        )
-                        imgnum = line.split("=")[0]
-                        imgnum = int(
-                            imgnum.replace("img", "").replace(
-                                "_file", ""
-                            )
-                        )
-                        images.append(filename)
-                        imgnums.append(imgnum)
-            hdu = fits.open(refname)
-            w = wcs.WCS(hdu[0].header)
-            x, y = wcs.utils.skycoord_to_pixel(p.coord, w, origin=1)
-            with open(dp["fakelist"], "w") as fakelist:
-                magmin = gopt["mag_min"]
-                dm = (gopt["mag_max"] - magmin) / gopt["nstars"]
-                for i in np.arange(gopt["nstars"]):
-                    line = "0 1 {x} {y} ".format(x=x, y=y)
-                    for row in obstable:
-                        line += str("{mag} ".format(mag=magmin + i * dm))
-                    fakelist.write(line + "\n")
-            p.options["global_defaults"]["FakeStars"] = dp["fakelist"]
-            p.options["global_defaults"]["FakeOut"] = dp["fake"]
-            defaults = p.options["detector_defaults"]
-            Nimg = len(obstable)
-            with open(dp["param"], "w") as dfile:
-                self.generate_base_param_file(dfile, defaults, Nimg)
-                inst = p._fits.get_instrument(refname)
-                is_wfpc2 = "wfpc2" in inst.lower()
-                self.add_image_to_param_file(
-                    dfile, refname, 0, defaults, is_wfpc2=is_wfpc2
+        try:
+            if not os.path.exists(dp["base"]) or os.path.getsize(dp["base"]) == 0:
+                log.warning(
+                    "WARNING: option --do-fake used but dolphot has not been run."
                 )
-                for i, row in enumerate(obstable):
+                return None
+            flines = 0
+            if os.path.exists(dp["fake"]):
+                with open(dp["fake"], "r") as fake:
+                    for i, line in enumerate(fake):
+                        flines = i + 1
+            if not os.path.exists(dp["fake"]) or flines < gopt["nstars"]:
+                images = []
+                imgnums = []
+                with open(dp["param"], "r") as param_file:
+                    for line in param_file:
+                        if "_file" in line and "img0000" not in line:
+                            filename = (
+                                line.split("=")[1].strip() + ".fits"
+                            )
+                            imgnum = line.split("=")[0]
+                            imgnum = int(
+                                imgnum.replace("img", "").replace(
+                                    "_file", ""
+                                )
+                            )
+                            images.append(filename)
+                            imgnums.append(imgnum)
+                hdu = fits.open(refname)
+                w = wcs.WCS(hdu[0].header)
+                x, y = wcs.utils.skycoord_to_pixel(p.coord, w, origin=1)
+                with open(dp["fakelist"], "w") as fakelist:
+                    magmin = gopt["mag_min"]
+                    dm = (gopt["mag_max"] - magmin) / gopt["nstars"]
+                    for i in np.arange(gopt["nstars"]):
+                        line = "0 1 {x} {y} ".format(x=x, y=y)
+                        for row in obstable:
+                            line += str("{mag} ".format(mag=magmin + i * dm))
+                        fakelist.write(line + "\n")
+                p.options["global_defaults"]["FakeStars"] = dp["fakelist"]
+                p.options["global_defaults"]["FakeOut"] = dp["fake"]
+                defaults = p.options["detector_defaults"]
+                Nimg = len(obstable)
+                with open(dp["param"], "w") as dfile:
+                    self.generate_base_param_file(dfile, defaults, Nimg)
+                    inst = p._fits.get_instrument(refname)
+                    is_wfpc2 = "wfpc2" in inst.lower()
                     self.add_image_to_param_file(
-                        dfile, row["image"], i + 1, defaults
+                        dfile, refname, 0, defaults, is_wfpc2=is_wfpc2
                     )
-            cmd = "dolphot {base} -p{param} > {log}".format(
-                base=dp["base"],
-                param=dp["param"],
-                log=dp["fakelog"],
+                    for i, row in enumerate(obstable):
+                        self.add_image_to_param_file(
+                            dfile, row["image"], i + 1, defaults
+                        )
+                fake_argv = ["dolphot", dp["base"], f"-p{dp['param']}"]
+                log.info("Running: %s (log -> %s)", " ".join(fake_argv), dp["fakelog"])
+                run_external_command(
+                    fake_argv,
+                    log=log,
+                    tee_path=dp["fakelog"],
+                )
+                log.info("dolphot fake stars is finished (whew)!")
+        finally:
+            vtxt = []
+            for key in ("fakelog", "fakelist", "fake"):
+                pth = dp.get(key)
+                if pth and os.path.isfile(pth):
+                    vtxt.append(pth)
+            self._primitive_cleanup(
+                "do_fake",
+                validate_text_paths=vtxt,
+                text_min_size=0,
             )
-            log.info(cmd)
-            os.system(cmd)
-            log.info("dolphot fake stars is finished (whew)!")
         return None

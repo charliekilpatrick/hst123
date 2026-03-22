@@ -99,6 +99,18 @@ class TestNeedsToCalcSky:
         fits.PrimaryHDU().writeto(image, overwrite=True)
         assert prim.needs_to_calc_sky(image) is True
 
+    def test_sky_path_uses_trailing_fits_only(self, tmp_path):
+        """Regression: dirname must not break .fits -> .sky.fits replacement."""
+        sub = tmp_path / "foo.fits"
+        sub.mkdir()
+        image = sub / "bar.drz.fits"
+        fits.PrimaryHDU().writeto(str(image), overwrite=True)
+        prim = DolphotPrimitive(object())
+        assert prim.needs_to_calc_sky(str(image)) is True
+        sky = sub / "bar.drz.sky.fits"
+        fits.PrimaryHDU().writeto(str(sky), overwrite=True)
+        assert prim.needs_to_calc_sky(str(image), check_wcs=False) is False
+
     def test_returns_false_when_sky_file_exists_and_check_wcs_false(
         self, tmp_path
     ):
@@ -119,6 +131,40 @@ class TestNeedsToCalcSky:
         hdu2.writeto(str(sky), overwrite=True)
         # Different NAXIS1/NAXIS2 so check_wcs finds a difference -> returns False
         assert prim.needs_to_calc_sky(str(image), check_wcs=True) is False
+
+
+class TestCalcSkyPythonFallback:
+    def test_uses_fallback_when_calcsky_returns_negative_exit(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "acs_wfc_full"
+        prim = DolphotPrimitive(mock_pipeline)
+        img = tmp_path / "acs.f555w.test.drz.fits"
+        fits.PrimaryHDU(np.zeros((32, 24), dtype=np.float32)).writeto(
+            str(img), overwrite=True
+        )
+        options = {
+            "acs_wfc": {
+                "dolphot_sky": {
+                    "r_in": 15,
+                    "r_out": 35,
+                    "step": 4,
+                    "sigma_low": 2.25,
+                    "sigma_high": 2.0,
+                }
+            }
+        }
+        fake_cp = MagicMock()
+        fake_cp.returncode = -5
+        with patch(
+            "hst123.primitives.run_dolphot.run_dolphot_primitive.run_external_command",
+            return_value=fake_cp,
+        ):
+            prim.calc_sky(str(img), options)
+        sky = tmp_path / "acs.f555w.test.drz.sky.fits"
+        assert sky.is_file()
 
 
 class TestNeedsToBeMasked:
@@ -169,10 +215,10 @@ class TestGetDolphotInstrumentParameters:
     def test_returns_detector_dolphot_options(self):
         mock_pipeline = MagicMock()
         mock_pipeline._fits = MagicMock()
-        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
+        mock_pipeline._fits.get_instrument.return_value = "wfc3_uvis"
         options = {
-            "WFC3_UVIS": {"dolphot": {"RAper": 3, "RPSF": 15}},
-            "ACS_WFC": {"dolphot": {"RAper": 4}},
+            "wfc3_uvis": {"dolphot": {"RAper": 3, "RPSF": 15}},
+            "acs_wfc": {"dolphot": {"RAper": 4}},
         }
         prim = DolphotPrimitive(mock_pipeline)
         out = prim.get_dolphot_instrument_parameters("any.fits", options)
@@ -183,8 +229,8 @@ class TestAddImageToParamFile:
     def test_writes_image_file_and_params(self):
         mock_pipeline = MagicMock()
         mock_pipeline._fits = MagicMock()
-        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
-        options = {"WFC3_UVIS": {"dolphot": {"RAper": 3}}}
+        mock_pipeline._fits.get_instrument.return_value = "wfc3_uvis"
+        options = {"wfc3_uvis": {"dolphot": {"RAper": 3}}}
         prim = DolphotPrimitive(mock_pipeline)
         buf = StringIO()
         prim.add_image_to_param_file(buf, "j9abc01dq_flc.fits", 1, options)
@@ -219,6 +265,56 @@ class TestRunDolphot:
             with patch("os.remove") as rm:
                 prim.run_dolphot()
                 rm.assert_not_called()
+
+
+class TestMaskImage:
+    """acsmask / *mask invocation list (DQ path + ACS PAM preflight)."""
+
+    def test_acs_passes_image_only_when_no_external_dq(self, minimal_fits_file):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_dq_image.return_value = ""
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch(
+            "hst123.primitives.run_dolphot.run_dolphot_primitive.run_external_command"
+        ) as run_ext:
+            with patch(
+                "hst123.dolphot_install.verify_acs_wfc_pam_files",
+                return_value=(True, []),
+            ):
+                prim.mask_image(str(minimal_fits_file), "acs")
+        run_ext.assert_called_once()
+        (cmd,), _kwargs = run_ext.call_args
+        assert cmd == ["acsmask", str(minimal_fits_file)]
+
+    def test_acs_raises_before_acsmask_when_pam_missing(self, minimal_fits_file):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch(
+            "hst123.dolphot_install.verify_acs_wfc_pam_files",
+            return_value=(False, ["missing /tmp/wfc2_pam.fits"]),
+        ):
+            with pytest.raises(RuntimeError, match="WFC PAM"):
+                prim.mask_image(str(minimal_fits_file), "acs")
+
+    def test_wfpc2_appends_c1m_when_get_dq_image_returns_existing_file(
+        self, minimal_fits_file, tmp_path
+    ):
+        dq = tmp_path / "dq.fits"
+        dq.write_bytes(b"simple")
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_dq_image.return_value = str(dq)
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch(
+            "hst123.primitives.run_dolphot.run_dolphot_primitive.run_external_command"
+        ) as run_ext:
+            prim.mask_image(str(minimal_fits_file), "wfpc2")
+        (cmd,), _ = run_ext.call_args
+        assert cmd[0] == "wfpc2mask"
+        assert cmd[1] == str(minimal_fits_file)
+        assert cmd[2] == str(dq)
 
 
 class TestPrepareDolphot:

@@ -70,6 +70,7 @@ markers = [
     "network: marks tests that require network access (deselect with '-m \"not network\"')",
     "dolphot: marks tests that require DOLPHOT executables on PATH (dolphot, calcsky, acsmask, wfc3mask, wfpc2mask, splitgroups); skip with '-m \"not dolphot\"'",
 ]
+# Do not use ``pyparsing.util.PyparsingDeprecationWarning`` (removed/moved in newer pyparsing; breaks pytest on Py3.13+).
 filterwarnings = [
-    "ignore::pyparsing.util.PyparsingDeprecationWarning",
+    "ignore:.*leaveWhitespace.*:DeprecationWarning",
 ]

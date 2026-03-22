@@ -69,9 +69,14 @@ def hst123_instance():
     import argparse
     from hst123.utils import options
 
+    from hst123.utils.paths import normalize_work_and_raw_dirs
+
     parser = argparse.ArgumentParser()
     parser = options.add_options(parser)
     args = parser.parse_args(["0", "0"])  # ra dec positional
+    args.work_dir, args.raw_dir = normalize_work_and_raw_dirs(
+        args.work_dir, args.raw_dir
+    )
     hst = _hst.hst123()
     hst.options["args"] = args
     return hst

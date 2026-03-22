@@ -1,5 +1,8 @@
 *.pyc
 __pycache__
+
+# Local integration / regression data (large FITS, logs); not versioned
+test_data/
 *.egg-info/
 build/
 docs/build/

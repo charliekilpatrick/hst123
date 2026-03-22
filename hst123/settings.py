@@ -8,6 +8,8 @@ global_defaults = {
     "archive": "/data2/ckilpatrick/hst/archive",
     "astropath": "/.astropy/cache/download/py3/urlmap.dir",
     "cdbs": "ftp://ftp.stsci.edu/cdbs/",
+    # HTTPS mirror for CDBS (FTP is often blocked; use jref/ not jref.old/)
+    "cdbs_https": "https://ssb.stsci.edu/cdbs/",
     "mast": "https://mast.stsci.edu/api/v0/download/file?uri=",
     "crds": "https://hst-crds.stsci.edu/unchecked_get/references/hst/",
     # Reference file keys
@@ -263,7 +265,8 @@ acceptable_filters = [
 # Pipeline file patterns and table names
 
 pipeline_products = [
-    "*chip?.fits", "*chip?.sky.fits", "*rawtmp.fits", "*drz.fits", "*drz.sky.fits",
+    "*chip?.fits", "*chip?.sky.fits", "*rawtmp.fits", "*drz.fits", "*drc.fits",
+    "*drz.sky.fits", "*drc.sky.fits",
     "*idc.fits", "*dxy.fits", "*off.fits", "*d2im.fits", "*d2i.fits", "*npl.fits",
     "dp*", "*.log", "*.output", "*sci?.fits", "*wht.fits", "*sci.fits", "*StaticMask.fits",
 ]

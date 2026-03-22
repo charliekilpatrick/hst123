@@ -24,7 +24,7 @@ def format_instrument_display_name(inst):
 def show_photometry_data(phottable, form, header, units, log, file=None, avg=False):
     """Log and optionally write photometry rows (form uses date, inst, filt, exp, mag, err, optional lim)."""
     if avg:
-        log.info("\n# Average Photometry")
+        log.info("# Average photometry")
         if file:
             file.write("\n# Average Photometry \n")
     else:
@@ -66,7 +66,6 @@ def show_photometry_data(phottable, form, header, units, log, file=None, avg=Fal
         if file:
             file.write(line + "\n")
 
-    log.info("")
     if file:
         file.write("\n")
 

@@ -6,6 +6,8 @@ import numpy as np
 from astropy.io import fits
 
 from hst123.primitives.base import BasePrimitive
+from hst123.utils.paths import normalize_fits_path
+from hst123.utils.logging import log_calls
 
 
 def _instrument_from_header(header):
@@ -174,6 +176,7 @@ class FitsHelper(BasePrimitive):
         hdu = fits.open(image, mode="readonly")
         return _instrument_from_header(hdu[0].header)
 
+    @log_calls
     def get_input_images(self, pattern=None, workdir=None):
         """
         Discover input science images (c1m, c0m, flc, flt) in workdir.
@@ -192,7 +195,18 @@ class FitsHelper(BasePrimitive):
         """
         workdir = workdir or "."
         pattern = pattern or ["*c1m.fits", "*c0m.fits", "*flc.fits", "*flt.fits"]
-        return [s for p in pattern for s in glob.glob(os.path.join(workdir, p))]
+        out = [
+            normalize_fits_path(s)
+            for p in pattern
+            for s in glob.glob(os.path.join(workdir, p))
+            if os.path.isfile(s)
+        ]
+        self._primitive_cleanup(
+            "get_input_images",
+            work_dir=workdir,
+            validate_fits_paths=out,
+        )
+        return out
 
     def get_split_images(self, pattern=None, workdir=None):
         """
@@ -212,7 +226,18 @@ class FitsHelper(BasePrimitive):
         """
         workdir = workdir or "."
         pattern = pattern or ["*c0m.chip?.fits", "*flc.chip?.fits", "*flt.chip?.fits"]
-        return [s for p in pattern for s in glob.glob(os.path.join(workdir, p))]
+        out = [
+            normalize_fits_path(s)
+            for p in pattern
+            for s in glob.glob(os.path.join(workdir, p))
+            if os.path.isfile(s)
+        ]
+        self._primitive_cleanup(
+            "get_split_images",
+            work_dir=workdir,
+            validate_fits_paths=out,
+        )
+        return out
 
     def get_dq_image(self, image):
         """
@@ -226,7 +251,9 @@ class FitsHelper(BasePrimitive):
         Returns
         -------
         str
-            Path to DQ file (e.g. c1m for WFPC2); empty string if no DQ image.
+            Path to external DQ file (e.g. c1m for WFPC2). For ACS/WFC3 the DQ
+            lives in the science MEF, so this returns ``""`` and *mask tools are
+            invoked with the science file only.
         """
         if self.get_instrument(image).split("_")[0].upper() == "WFPC2":
             return image.replace("c0m.fits", "c1m.fits")
