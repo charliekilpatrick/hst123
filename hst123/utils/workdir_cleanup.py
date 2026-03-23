@@ -66,6 +66,64 @@ def _archive_file(work_dir: str, basename: str, log: logging.Logger) -> None:
     log.info("Archived pipeline sidecar file: %s -> %s", src, dst)
 
 
+def remove_superseded_instrument_mask_reference_drizzle(
+    logical_drc_path: str | os.PathLike[str],
+    *,
+    log: logging.Logger,
+    keep_artifacts: bool = False,
+) -> None:
+    """
+    Remove the instrument-only reference drizzle produced when ``n_input < 3``.
+
+    :meth:`hst123.hst123.pick_reference` first drizzles to ``{inst}.ref.drc.fits``
+    (e.g. ``acs_wfc_full.ref.drc.fits``) to build static masks, then drizzles again
+    to the filter-named product (e.g. ``acs.f814w.ref_0001.drc.fits``). The first
+    file is interstitial and should be deleted after the final reference succeeds.
+    """
+    if keep_artifacts or not logical_drc_path:
+        return
+    drc = os.path.abspath(os.path.expanduser(os.fspath(logical_drc_path)))
+    if not drc.lower().endswith(".drc.fits"):
+        log.debug("Skip interstitial ref removal (not .drc.fits): %s", drc)
+        return
+
+    from hst123.utils.astrodrizzle_helpers import (
+        drizzle_canonical_weight_mask_paths,
+        drizzle_sidecar_paths,
+    )
+    from hst123.utils.astrodrizzle_paths import logical_driz_to_internal_astrodrizzle
+
+    internal = os.path.abspath(logical_driz_to_internal_astrodrizzle(drc))
+    candidates = [drc, internal]
+    sci, wht, ctx = drizzle_sidecar_paths(internal)
+    candidates.extend([sci, wht, ctx])
+    candidates.extend(drizzle_canonical_weight_mask_paths(internal))
+    # drizzlepac median product: ``{root}_med.fits`` with root ``*.drz``
+    if internal.lower().endswith(".fits"):
+        candidates.append(internal[:-5] + "_med.fits")
+
+    removed: list[str] = []
+    seen: set[str] = set()
+    for p in candidates:
+        if p in seen:
+            continue
+        seen.add(p)
+        if not os.path.isfile(p):
+            continue
+        try:
+            os.remove(p)
+            removed.append(os.path.basename(p))
+        except OSError as exc:
+            log.debug("Could not remove interstitial ref drizzle %s: %s", p, exc)
+
+    if removed:
+        log.info(
+            "Removed superseded instrument-mask reference drizzle (%d file(s)): %s",
+            len(removed),
+            ", ".join(sorted(removed)),
+        )
+
+
 def cleanup_after_astrodrizzle(
     work_dir: str,
     *,

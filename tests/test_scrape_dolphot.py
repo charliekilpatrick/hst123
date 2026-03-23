@@ -1,4 +1,5 @@
 """Unit tests for ScrapeDolphotPrimitive (scrape_dolphot_primitive)."""
+from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
 from astropy.table import Table
@@ -285,11 +286,24 @@ class TestPrintFinalPhot:
         assert any("snana" in w[0] for w in written)
 
 
+def _pipeline_with_scrape_options(tmp_path):
+    """Minimal ``p.options['args']`` used by ``scrapedolphot`` (work_dir + cuts)."""
+    mock_pipeline = type("P", (), {})()
+    mock_pipeline.options = {
+        "args": SimpleNamespace(
+            work_dir=str(tmp_path),
+            no_cuts=True,
+            scrape_radius=None,
+        )
+    }
+    return mock_pipeline
+
+
 class TestScrapedolphot:
     def test_returns_none_when_base_missing(self, tmp_path):
         colfile = tmp_path / "columns"
         colfile.write_text("1. Object X ()\n")
-        mock_pipeline = type("P", (), {})()
+        mock_pipeline = _pipeline_with_scrape_options(tmp_path)
         prim = ScrapeDolphotPrimitive(mock_pipeline)
         dolphot = {
             "base": str(tmp_path / "nonexistent_base"),
@@ -308,7 +322,7 @@ class TestScrapedolphot:
     def test_returns_none_when_colfile_missing(self, tmp_path):
         base = tmp_path / "base"
         base.write_text("1 2 3\n")
-        mock_pipeline = type("P", (), {})()
+        mock_pipeline = _pipeline_with_scrape_options(tmp_path)
         prim = ScrapeDolphotPrimitive(mock_pipeline)
         dolphot = {
             "base": str(base),
@@ -328,7 +342,7 @@ class TestScrapedolphot:
         base.write_text("1 2 3\n")
         colfile = tmp_path / "columns"
         colfile.write_text("1. Object X ()\n2. Object Y ()\n")
-        mock_pipeline = type("P", (), {})()
+        mock_pipeline = _pipeline_with_scrape_options(tmp_path)
         prim = ScrapeDolphotPrimitive(mock_pipeline)
         dolphot = {
             "base": str(base),
@@ -346,7 +360,7 @@ class TestScrapedolphot:
         base.write_text("1 2 3\n")
         colfile = tmp_path / "columns"
         colfile.write_text("1. Object X ()\n2. Object Y ()\n")
-        mock_pipeline = type("P", (), {})()
+        mock_pipeline = _pipeline_with_scrape_options(tmp_path)
         prim = ScrapeDolphotPrimitive(mock_pipeline)
         dolphot = {
             "base": str(base),

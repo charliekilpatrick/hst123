@@ -4,6 +4,7 @@ import logging
 from hst123.utils.workdir_cleanup import (
     cleanup_after_astrodrizzle,
     cleanup_after_tweakreg,
+    remove_superseded_instrument_mask_reference_drizzle,
 )
 
 
@@ -24,6 +25,40 @@ def test_cleanup_after_astrodrizzle_removes_static_mask_and_archives_log(tmp_pat
     assert len(archived) == 1
 
 
+def test_remove_superseded_instrument_mask_ref_drizzle(tmp_path):
+    """``{inst}.ref.drc.fits`` plus internal .drz and sidecars are removed."""
+    wd = tmp_path / "w"
+    wd.mkdir()
+    log = logging.getLogger("test_inst_ref")
+    drc = wd / "acs_wfc_full.ref.drc.fits"
+    drz = wd / "acs_wfc_full.ref.drz.fits"
+    drc.write_bytes(b"0")
+    drz.write_bytes(b"0")
+    (wd / "acs_wfc_full.ref.drz_sci.fits").write_bytes(b"0")
+    (wd / "acs_wfc_full.ref.drz_med.fits").write_bytes(b"0")
+
+    remove_superseded_instrument_mask_reference_drizzle(
+        str(drc), log=log, keep_artifacts=False
+    )
+
+    assert not drc.exists()
+    assert not drz.exists()
+    assert not (wd / "acs_wfc_full.ref.drz_sci.fits").exists()
+    assert not (wd / "acs_wfc_full.ref.drz_med.fits").exists()
+
+
+def test_remove_superseded_instrument_mask_ref_respects_keep(tmp_path):
+    wd = tmp_path / "w"
+    wd.mkdir()
+    log = logging.getLogger("test_inst_ref2")
+    drc = wd / "acs_wfc_full.ref.drc.fits"
+    drc.write_bytes(b"0")
+    remove_superseded_instrument_mask_reference_drizzle(
+        str(drc), log=log, keep_artifacts=True
+    )
+    assert drc.exists()
+
+
 def test_cleanup_respects_keep_artifacts(tmp_path):
     wd = tmp_path / "w"
     wd.mkdir()
@@ -35,7 +70,7 @@ def test_cleanup_respects_keep_artifacts(tmp_path):
     assert (wd / "staticMask.fits").exists()
 
 
-def test_cleanup_after_tweakreg_archives_shifts(tmp_path):
+def test_cleanup_after_tweakreg_ingests_and_removes_shifts(tmp_path):
     wd = tmp_path / "w"
     wd.mkdir()
     (wd / "drizzle_shifts.txt").write_text("# ref\n", encoding="utf-8")
@@ -44,11 +79,11 @@ def test_cleanup_after_tweakreg_archives_shifts(tmp_path):
     cleanup_after_tweakreg(str(wd), log=log, keep_artifacts=False)
 
     assert not (wd / "drizzle_shifts.txt").exists()
-    assert list((wd / "logs").glob("drizzle_shifts_*.txt"))
+    # Ingested into hst123.tweakreg log; no separate copies under logs/
 
 
-def test_cleanup_after_tweakreg_archives_numbered_shift_files(tmp_path):
-    """Per-filter TweakReg writes drizzle_shifts_0.txt, etc."""
+def test_cleanup_after_tweakreg_removes_numbered_shift_files(tmp_path):
+    """Per-filter TweakReg writes drizzle_shifts_0.txt, etc.; ingested then deleted."""
     wd = tmp_path / "w"
     wd.mkdir()
     (wd / "drizzle_shifts_0.txt").write_text("a\n", encoding="utf-8")
@@ -59,6 +94,3 @@ def test_cleanup_after_tweakreg_archives_numbered_shift_files(tmp_path):
 
     assert not (wd / "drizzle_shifts_0.txt").exists()
     assert not (wd / "drizzle_shifts_1.txt").exists()
-    logs = wd / "logs"
-    assert len(list(logs.glob("drizzle_shifts_0_*.txt"))) == 1
-    assert len(list(logs.glob("drizzle_shifts_1_*.txt"))) == 1

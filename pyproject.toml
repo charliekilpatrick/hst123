@@ -68,7 +68,8 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 markers = [
     "network: marks tests that require network access (deselect with '-m \"not network\"')",
-    "dolphot: marks tests that require DOLPHOT executables on PATH (dolphot, calcsky, acsmask, wfc3mask, wfpc2mask, splitgroups); skip with '-m \"not dolphot\"'",
+    "dolphot: marks tests that require DOLPHOT executables on PATH (dolphot, calcsky; splitgroups/masks use Python by default); skip with '-m \"not dolphot\"'",
+    "dolphot_parity: optional C vs Python parity (calcsky, splitgroups, *mask); skips when binaries or DOLPHOT tree missing",
 ]
 # Do not use ``pyparsing.util.PyparsingDeprecationWarning`` (removed/moved in newer pyparsing; breaks pytest on Py3.13+).
 filterwarnings = [

@@ -8,7 +8,11 @@ import pytest
 from astropy.io import fits
 
 from hst123.utils.dolphot_sky import (
+    _calcsky_annulus_offsets,
+    _calcsky_list_capacity,
+    _dolphot_stage2_box_mean,
     calcsky_max_pixels_external,
+    noise_fits_path,
     primary_array_pixel_count,
     sky_fits_path,
     write_calcsky_sanitized_input,
@@ -64,6 +68,10 @@ def test_calcsky_max_pixels_from_env(monkeypatch):
     assert calcsky_max_pixels_external() >= 1_000_000
 
 
+def test_noise_fits_path_trailing_fits_only():
+    assert noise_fits_path("/a/b/stack.drc.fits") == "/a/b/stack.drc.noise.fits"
+
+
 def test_sky_fits_path_trailing_fits_only():
     assert sky_fits_path("/a/b/c/img.fits") == "/a/b/c/img.sky.fits"
     p = "/data/foo.fits/bar.drz.fits"
@@ -72,6 +80,34 @@ def test_sky_fits_path_trailing_fits_only():
 
 def test_sky_fits_path_fit_suffix():
     assert sky_fits_path("/x/y.z.fit") == "/x/y.z.sky.fits"
+
+
+def test_calcsky_annulus_offsets_bounded_by_list_capacity():
+    """Offset count must fit in calcsky list buffer (same as C calloc size)."""
+    rin2, rout2, rsky, step = 0, 35 * 35, 35, 4
+    oy, ox = _calcsky_annulus_offsets(rin2, rout2, rsky, step)
+    cap = _calcsky_list_capacity(rsky, step)
+    assert oy.shape[0] == ox.shape[0] <= cap
+
+
+def test_dolphot_stage2_matches_naive_loop():
+    """Summed-area stage 2 matches explicit C-order loops (float reorder only)."""
+    rng = np.random.default_rng(3)
+    tsky = rng.normal(80.0, 3.0, (24, 32)).astype(np.float64)
+    step = 4
+    ny, nx = tsky.shape
+    naive = np.empty_like(tsky)
+    for y in range(ny):
+        for x in range(nx):
+            n, acc = 0, 0.0
+            for yy in range(y - step + 1, y + step + 1):
+                for xx in range(x - step + 1, x + step + 1):
+                    if 0 <= xx < nx and 0 <= yy < ny:
+                        n += 1
+                        acc += tsky[yy, xx]
+            naive[y, x] = acc / n if n else tsky[y, x]
+    fast = _dolphot_stage2_box_mean(tsky, step)
+    np.testing.assert_allclose(naive, fast, rtol=0, atol=1e-9)
 
 
 def test_write_sky_fits_fallback_shape_and_file(tmp_path):
@@ -181,15 +217,15 @@ def test_calc_sky_skips_external_when_over_pixel_cap(monkeypatch, tmp_path):
 
 
 @pytest.mark.dolphot
-def test_calcsky_cli_vs_python_scipy_sky_correlation(tmp_path, monkeypatch):
+def test_calcsky_cli_vs_python_dolphot_port_correlation(tmp_path, monkeypatch):
     """
-    CLI calcsky vs Python fallback (scipy median path) should agree well in bulk.
+    CLI calcsky vs Python DOLPHOT getsky port should agree closely (same algorithm).
 
-    Algorithms differ (iterative rejection vs median filter), so we check correlation.
+    See DOLPHOT User's Guide §4.1 and ``calcsky.c`` ``getsky``.
     """
     import hst123.utils.dolphot_sky as ds
 
-    monkeypatch.setattr(ds, "_FALLBACK_FAST_PIXELS", 0)
+    monkeypatch.delenv("HST123_CALCSKY_LEGACY", raising=False)
     if not shutil.which("calcsky"):
         pytest.skip("calcsky not on PATH")
     rng = np.random.default_rng(42)
@@ -218,11 +254,35 @@ def test_calcsky_cli_vs_python_scipy_sky_correlation(tmp_path, monkeypatch):
         sigma_low=2.25,
         sigma_high=2.0,
     )
-    a = fits.getdata(str(sky_cli))
-    b = fits.getdata(str(sky_py))
+    a = np.asarray(fits.getdata(str(sky_cli)), dtype=np.float64)
+    b = np.asarray(fits.getdata(str(sky_py)), dtype=np.float64)
     assert a.shape == b.shape
-    corr = float(np.corrcoef(np.asarray(a).ravel(), np.asarray(b).ravel())[0, 1])
-    assert corr > 0.85
+    corr = float(np.corrcoef(a.ravel(), b.ravel())[0, 1])
+    assert corr > 0.999
+    mad = float(np.max(np.abs(a - b)))
+    assert mad < 0.15
+
+
+def test_dolphot_sky_port_numba_matches_python(monkeypatch):
+    """Pure-Python and Numba DOLPHOT sky paths should match on a small grid."""
+    import hst123.utils.dolphot_sky as ds
+
+    try:
+        import numba  # noqa: F401
+    except ImportError:
+        pytest.skip("numba not installed")
+    rng = np.random.default_rng(7)
+    data = rng.normal(50.0, 4.0, (48, 40)).astype(np.float64)
+    monkeypatch.setenv("HST123_CALCSKY_NUMBA", "0")
+    a = ds.compute_sky_map_dolphot(
+        data, r_in=3, r_out=12, step=2, sigma_low=2.25, sigma_high=2.0
+    )
+    monkeypatch.setenv("HST123_CALCSKY_NUMBA", "1")
+    ds._NUMBA_SKY_STAGES = None
+    b = ds.compute_sky_map_dolphot(
+        data, r_in=3, r_out=12, step=2, sigma_low=2.25, sigma_high=2.0
+    )
+    np.testing.assert_allclose(a, b, rtol=1e-5, atol=1e-5)
 
 
 def test_write_sky_fits_fallback_rejects_non_2d(tmp_path):

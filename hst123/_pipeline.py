@@ -67,7 +67,10 @@ from hst123.utils.astrodrizzle_helpers import (
     wcs_image_hdu_index,
     write_drc_multis_extension_if_requested,
 )
-from hst123.utils.workdir_cleanup import cleanup_after_astrodrizzle
+from hst123.utils.workdir_cleanup import (
+    cleanup_after_astrodrizzle,
+    remove_superseded_instrument_mask_reference_drizzle,
+)
 from hst123.utils.reference_download import (
     fetch_calibration_reference,
     ref_prefix_for_header,
@@ -1126,6 +1129,10 @@ class hst123(object):
     if not obstable or len(obstable)==0:
         return(None)
 
+    # Interstitial `{inst}.ref.drc.fits` when n<3 (instrument-mask pass); removed
+    # after the final filter-named reference drizzle succeeds.
+    instrument_mask_ref_path: str | None = None
+
     # If number of images is small, try to use imaging from the same instrument
     # and detector for masking
     if len(obstable)<3 and not self.options['args'].no_mask:
@@ -1136,6 +1143,8 @@ class hst123(object):
         outimage = "{inst}.ref.drc.fits".format(inst=inst)
         if self.options["args"].work_dir:
             outimage = os.path.join(self.options["args"].work_dir, outimage)
+
+        instrument_mask_ref_path = outimage
 
         if not self.options['args'].skip_tweakreg:
             error, shift_table = self._astrom.run_tweakreg(obstable[mask], '')
@@ -1174,7 +1183,16 @@ class hst123(object):
         log.error("Reference drizzle failed for %s", drizname)
         return None
 
-    return(drizname)
+    if instrument_mask_ref_path:
+        remove_superseded_instrument_mask_reference_drizzle(
+            instrument_mask_ref_path,
+            log=log,
+            keep_artifacts=getattr(
+                self.options["args"], "keep_drizzle_artifacts", False
+            ),
+        )
+
+    return drizname
 
   def fix_idcscale(self, image):
 

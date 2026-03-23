@@ -26,10 +26,8 @@ log = get_logger(__name__)
 DOLPHOT_REQUIRED_SCRIPTS = [
     "dolphot",
     "calcsky",
-    "acsmask",
-    "wfc3mask",
-    "wfpc2mask",
-    "splitgroups",
+    # acsmask / wfc3mask / wfpc2mask: hst123.utils.dolphot_mask (Python)
+    # splitgroups: hst123.utils.dolphot_splitgroups (Python)
 ]
 
 
@@ -123,11 +121,13 @@ class DolphotPrimitive(BasePrimitive):
         return False
 
     def needs_to_split_groups(self, image):
-        """Return True if split chip files are missing (count SCI extensions vs .chip?.fits)."""
-        hdu = fits.open(image, mode="readonly")
-        total = sum(1 for h in hdu if h.name == "SCI")
-        hdu.close()
-        return len(glob.glob(image.replace(".fits", ".chip?.fits"))) != total
+        """Return True if per-chip files are missing (SCI extensions or 3-D WFPC2-style primary)."""
+        from hst123.utils.dolphot_splitgroups import count_expected_split_outputs
+
+        expected = count_expected_split_outputs(image)
+        if expected == 0:
+            return False
+        return len(glob.glob(image.replace(".fits", ".chip?.fits"))) != expected
 
     def needs_to_be_masked(self, image):
         """
@@ -170,7 +170,22 @@ class DolphotPrimitive(BasePrimitive):
             If True, remove split files that are not science extensions. Default True.
         """
         log.info("Running split groups for %s", image)
-        run_external_command(["splitgroups", image], log=log)
+        use_ext = os.environ.get(
+            "HST123_DOLPHOT_SPLITGROUPS_EXTERNAL", ""
+        ).strip().lower() in ("1", "true", "yes")
+        if not use_ext:
+            try:
+                from hst123.utils.dolphot_splitgroups import apply_splitgroups
+
+                apply_splitgroups(image, log_=log)
+            except Exception as exc:
+                log.warning(
+                    "Python splitgroups failed (%s); falling back to splitgroups",
+                    exc,
+                )
+                use_ext = True
+        if use_ext:
+            run_external_command(["splitgroups", image], log=log)
         if delete_non_science:
             split_images = glob.glob(
                 image.replace(".fits", ".chip*.fits")
@@ -215,19 +230,44 @@ class DolphotPrimitive(BasePrimitive):
                     "(not zero-byte placeholders)."
                 )
         maskimage = p._fits.get_dq_image(image)
-        cmd = [mask_exe, image]
-        if maskimage:
-            if os.path.isfile(maskimage):
-                cmd.append(maskimage)
-            else:
+        use_ext = os.environ.get("HST123_DOLPHOT_MASK_EXTERNAL", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        dq_arg = maskimage if maskimage and os.path.isfile(maskimage) else None
+        if not use_ext:
+            try:
+                from hst123.utils.dolphot_mask import apply_dolphot_mask_instrument
+
+                apply_dolphot_mask_instrument(
+                    inst_l,
+                    image,
+                    dq_arg,
+                    log_=log,
+                )
+                log.info("DOLPHOT mask (Python): %s %s", inst_l, os.path.basename(image))
+            except Exception as exc:
                 log.warning(
-                    "DQ path from get_dq_image is not an existing file (%r); "
-                    "running %s with science image only",
-                    maskimage,
+                    "Python DOLPHOT mask failed (%s); falling back to %s",
+                    exc,
                     mask_exe,
                 )
-        log.info("Executing: %s", " ".join(cmd))
-        run_external_command(cmd, log=log)
+                use_ext = True
+        if use_ext:
+            cmd = [mask_exe, image]
+            if maskimage:
+                if os.path.isfile(maskimage):
+                    cmd.append(maskimage)
+                else:
+                    log.warning(
+                        "DQ path from get_dq_image is not an existing file (%r); "
+                        "running %s with science image only",
+                        maskimage,
+                        mask_exe,
+                    )
+            log.info("Executing: %s", " ".join(cmd))
+            run_external_command(cmd, log=log)
         wd = os.path.dirname(os.path.abspath(image)) or "."
         self._primitive_cleanup(
             "mask_image",
@@ -315,6 +355,10 @@ class DolphotPrimitive(BasePrimitive):
                         str(opt["sigma_high"]),
                     ]
                     log.info("calcsky: exec %s", " ".join(calc_argv))
+                    log.info(
+                        "calcsky: external binary has no progress API; "
+                        "row-level progress is logged for the Python/Numba sky map path."
+                    )
                     try:
                         cp = run_external_command(calc_argv, log=log, check=False)
                     except OSError as exc:
@@ -553,13 +597,27 @@ class DolphotPrimitive(BasePrimitive):
                 vtxt.append(p.dolphot["base"])
             if os.path.isfile(p.dolphot.get("log", "")):
                 vtxt.append(p.dolphot["log"])
+            args = p.options.get("args")
+            wd = None
+            if args is not None:
+                raw_wd = getattr(args, "work_dir", None)
+                if isinstance(raw_wd, str) and raw_wd.strip():
+                    wd = raw_wd
+            if not wd and os.path.isfile(p.dolphot.get("param", "")):
+                wd = os.path.dirname(os.path.abspath(p.dolphot["param"]))
+            if not wd:
+                wd = os.getcwd()
             self._primitive_cleanup(
                 "run_dolphot",
+                work_dir=wd,
+                remove_globs=("*drc.noise.fits",),
                 validate_text_paths=vtxt,
                 text_min_size=0,
                 validation_notes={
                     "param_exists": os.path.isfile(p.dolphot["param"]),
                 },
+                # Ephemeral sky sidecars; not drizzle debug artifacts
+                respect_keep_artifacts=False,
             )
 
     def prepare_dolphot(self, image):
@@ -668,7 +726,8 @@ class DolphotPrimitive(BasePrimitive):
                     "--scrape-dolphot"
                 )
         finally:
-            wd = getattr(opt, "work_dir", None) or "."
+            raw_wd = getattr(opt, "work_dir", None)
+            wd = raw_wd if isinstance(raw_wd, str) and raw_wd.strip() else "."
             wda = os.path.abspath(os.path.expanduser(wd))
             vfit = []
             if reference and os.path.isfile(reference):
@@ -681,9 +740,11 @@ class DolphotPrimitive(BasePrimitive):
             self._primitive_cleanup(
                 "get_dolphot_photometry",
                 work_dir=wda,
+                remove_globs=("*drc.noise.fits",),
                 remove_paths=rpaths,
                 validate_fits_paths=vfit,
                 validate_tables=phot if phot is not None else [],
+                respect_keep_artifacts=False,
             )
 
     def do_fake(self, obstable, refname):

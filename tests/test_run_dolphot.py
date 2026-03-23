@@ -32,10 +32,6 @@ class TestDolphotRequiredScripts:
         expected = [
             "dolphot",
             "calcsky",
-            "acsmask",
-            "wfc3mask",
-            "wfpc2mask",
-            "splitgroups",
         ]
         assert DOLPHOT_REQUIRED_SCRIPTS == expected
 
@@ -266,6 +262,33 @@ class TestRunDolphot:
                 prim.run_dolphot()
                 rm.assert_not_called()
 
+    def test_run_dolphot_cleanup_removes_drc_noise_fits(self, tmp_path):
+        """Ephemeral *.drc.noise.fits (sky sidecar) is swept after dolphot."""
+        param = tmp_path / "dolphot.param"
+        param.write_text("Nimg = 1\n", encoding="utf-8")
+        base = tmp_path / "phot"
+        base.write_text("", encoding="utf-8")
+        logf = tmp_path / "phot.output"
+        logf.write_text("", encoding="utf-8")
+        noise = tmp_path / "stack.drc.noise.fits"
+        noise.write_bytes(b"x")
+        mock_pipeline = MagicMock()
+        mock_pipeline.dolphot = {
+            "param": str(param),
+            "base": str(base),
+            "log": str(logf),
+            "original": str(tmp_path / "phot.orig"),
+        }
+        args = MagicMock()
+        args.work_dir = str(tmp_path)
+        mock_pipeline.options = {"args": args}
+        prim = DolphotPrimitive(mock_pipeline)
+        with patch(
+            "hst123.primitives.run_dolphot.run_dolphot_primitive.run_external_command",
+        ), patch("hst123.primitives.run_dolphot.run_dolphot_primitive.time.sleep"):
+            prim.run_dolphot()
+        assert not noise.is_file()
+
 
 class TestMaskImage:
     """acsmask / *mask invocation list (DQ path + ACS PAM preflight)."""
@@ -282,9 +305,39 @@ class TestMaskImage:
                 "hst123.dolphot_install.verify_acs_wfc_pam_files",
                 return_value=(True, []),
             ):
-                prim.mask_image(str(minimal_fits_file), "acs")
+                with patch(
+                    "hst123.utils.dolphot_mask.apply_dolphot_mask_instrument",
+                ) as py_mask:
+                    prim.mask_image(str(minimal_fits_file), "acs")
+        py_mask.assert_called_once()
+        run_ext.assert_not_called()
+
+    def test_acs_falls_back_to_external_when_python_mask_fails(
+        self, minimal_fits_file, monkeypatch
+    ):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_dq_image.return_value = ""
+        prim = DolphotPrimitive(mock_pipeline)
+        monkeypatch.delenv("HST123_DOLPHOT_MASK_EXTERNAL", raising=False)
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("no tree")
+
+        with patch(
+            "hst123.primitives.run_dolphot.run_dolphot_primitive.run_external_command"
+        ) as run_ext:
+            with patch(
+                "hst123.dolphot_install.verify_acs_wfc_pam_files",
+                return_value=(True, []),
+            ):
+                with patch(
+                    "hst123.utils.dolphot_mask.apply_dolphot_mask_instrument",
+                    side_effect=_boom,
+                ):
+                    prim.mask_image(str(minimal_fits_file), "acs")
         run_ext.assert_called_once()
-        (cmd,), _kwargs = run_ext.call_args
+        (cmd,), _ = run_ext.call_args
         assert cmd == ["acsmask", str(minimal_fits_file)]
 
     def test_acs_raises_before_acsmask_when_pam_missing(self, minimal_fits_file):
@@ -299,7 +352,7 @@ class TestMaskImage:
                 prim.mask_image(str(minimal_fits_file), "acs")
 
     def test_wfpc2_appends_c1m_when_get_dq_image_returns_existing_file(
-        self, minimal_fits_file, tmp_path
+        self, minimal_fits_file, tmp_path, monkeypatch
     ):
         dq = tmp_path / "dq.fits"
         dq.write_bytes(b"simple")
@@ -307,6 +360,7 @@ class TestMaskImage:
         mock_pipeline._fits = MagicMock()
         mock_pipeline._fits.get_dq_image.return_value = str(dq)
         prim = DolphotPrimitive(mock_pipeline)
+        monkeypatch.setenv("HST123_DOLPHOT_MASK_EXTERNAL", "1")
         with patch(
             "hst123.primitives.run_dolphot.run_dolphot_primitive.run_external_command"
         ) as run_ext:

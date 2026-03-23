@@ -45,7 +45,8 @@ def _fmt_bytes(n: int) -> str:
 # Relative to CONDA_PREFIX: sources, PSFs, and built executables live here.
 CONDA_DOLPHOT_RELATIVE = Path("opt") / "hst123-dolphot"
 
-# Same names as hst123.primitives.run_dolphot.DOLPHOT_REQUIRED_SCRIPTS (avoid import cycle).
+# Binaries linked into conda bin; pipeline only *requires* those in DOLPHOT_REQUIRED_SCRIPTS
+# (dolphot, calcsky). Mask/split C tools remain optional (Python implementations in hst123).
 DOLPHOT_EXECUTABLES = (
     "dolphot",
     "calcsky",
@@ -112,16 +113,80 @@ def dolphot_acs_data_dir(source_dir: Path | str | None = None) -> Path | None:
     Return ``.../acs/data`` under a DOLPHOT source tree if present.
 
     Tries the usual DOLPHOT 3.x layout (``make_root/acs/data``) and a legacy
-    ``dolphot2.0/acs/data`` layout.
+    ``dolphot2.0/acs/data`` layout (upstream ``ACS_WFC_PAM.tar.gz`` still uses
+    the ``dolphot2.0/`` prefix).
+
+    Prefer a directory that already contains both ``wfc1_pam.fits`` and
+    ``wfc2_pam.fits`` so an empty ``acs/data`` from the ACS module does not
+    shadow the real PAM location after extraction.
     """
     root = default_dolphot_install_dir() if source_dir is None else Path(source_dir)
     root = root.resolve()
     make_root = dolphot_make_root(root)
-    for rel in (Path("acs") / "data", Path("dolphot2.0") / "acs" / "data"):
-        cand = make_root / rel
+    candidates = (
+        make_root / "acs" / "data",
+        make_root / "dolphot2.0" / "acs" / "data",
+    )
+    for cand in candidates:
+        if _acs_wfc_pam_files_ok_in_data_dir(cand):
+            return cand
+    for cand in candidates:
         if cand.is_dir():
             return cand
     return None
+
+
+def relocate_acs_wfc_pam_into_canonical_layout(make_root: Path) -> bool:
+    """
+    Ensure ``wfc1_pam.fits`` and ``wfc2_pam.fits`` live under *make_root*/acs/data.
+
+    The upstream ``ACS_WFC_PAM.tar.gz`` extracts to
+    ``dolphot2.0/acs/data/*.fits``; DOLPHOT 3.x and hst123 expect
+    ``<make_root>/acs/data/``. Copies from the legacy tree (or an rglob search)
+    when needed.
+
+    Returns
+    -------
+    bool
+        True if *make_root*/acs/data contains both PAM files after this call.
+    """
+    make_root = Path(make_root).resolve()
+    target = make_root / "acs" / "data"
+    if _acs_wfc_pam_files_ok_in_data_dir(target):
+        return True
+    target.mkdir(parents=True, exist_ok=True)
+
+    legacy = make_root / "dolphot2.0" / "acs" / "data"
+    if _acs_wfc_pam_files_ok_in_data_dir(legacy):
+        for name in ACS_WFC_PAM_FILENAMES:
+            shutil.copy2(legacy / name, target / name)
+        log.info(
+            "ACS WFC PAM: copied %s -> %s (upstream tarball uses dolphot2.0/ prefix)",
+            legacy,
+            target,
+        )
+        _progress(f"  ACS WFC PAM placed under {target} (from {legacy.name} layout).")
+        return True
+
+    found: dict[str, Path] = {}
+    for name in ACS_WFC_PAM_FILENAMES:
+        for p in make_root.rglob(name):
+            if not p.is_file():
+                continue
+            try:
+                if p.stat().st_size >= _MIN_PAM_FILE_BYTES:
+                    found[name] = p
+                    break
+            except OSError:
+                continue
+    if len(found) == len(ACS_WFC_PAM_FILENAMES):
+        for name, src in found.items():
+            shutil.copy2(src, target / name)
+        log.info("ACS WFC PAM: copied discovered files into %s", target)
+        _progress(f"  ACS WFC PAM placed under {target} (search under {make_root.name}).")
+        return _acs_wfc_pam_files_ok_in_data_dir(target)
+
+    return False
 
 
 def _candidate_dolphot_source_roots() -> list[Path]:
@@ -177,8 +242,15 @@ def _acs_wfc_pam_files_ok_in_data_dir(data_dir: Path) -> bool:
 
 
 def _acs_wfc_pam_payload_dir_ok(make_root: Path) -> bool:
-    """True if PAMs are present where ``acsmask`` expects them (``make_root/acs/data``)."""
-    return _acs_wfc_pam_files_ok_in_data_dir(Path(make_root).resolve() / "acs" / "data")
+    """
+    True if both WFC PAM FITS exist under canonical ``make_root/acs/data`` or
+    legacy ``make_root/dolphot2.0/acs/data`` (upstream tarball layout).
+    """
+    make_root = Path(make_root).resolve()
+    for rel in (Path("acs") / "data", Path("dolphot2.0") / "acs" / "data"):
+        if _acs_wfc_pam_files_ok_in_data_dir(make_root / rel):
+            return True
+    return False
 
 
 def verify_acs_wfc_pam_files() -> tuple[bool, list[str]]:
@@ -651,9 +723,14 @@ def _psf_already_satisfied(
     if force_download:
         return False
     # Stale stamp or wrong extract dir: do not skip ACS PAM unless files exist
-    # under ``make_root/acs/data`` (where ``acsmask`` reads them).
+    # under ``make_root/acs/data`` (where ``acsmask`` reads them) or under the
+    # install ``source_dir`` (same layout when Makefile lives in a nested
+    # ``dolphot*`` dir but PAM was placed at the install root).
     if _psf_stem(archive_name) == "ACS_WFC_PAM":
-        if not _acs_wfc_pam_payload_dir_ok(make_root):
+        if not (
+            _acs_wfc_pam_payload_dir_ok(make_root)
+            or _acs_wfc_pam_payload_dir_ok(source_dir)
+        ):
             return False
     if psf_install_recorded(source_dir, archive_name):
         return True
@@ -1009,6 +1086,8 @@ def install_psfs(
                     "(skip download; wrote stamp)"
                 )
                 log.info("Skipping PSF archive (existing files under tree): %s", filename)
+            if _psf_stem(filename) == "ACS_WFC_PAM":
+                relocate_acs_wfc_pam_into_canonical_layout(make_root)
             continue
         url = _url_for(filename)
         local = source_dir / filename
@@ -1025,6 +1104,14 @@ def install_psfs(
                 strip_top_level=True,
                 step_label=f"Unpack {filename}",
             )
+            if _psf_stem(filename) == "ACS_WFC_PAM":
+                if not relocate_acs_wfc_pam_into_canonical_layout(make_root):
+                    log.warning(
+                        "ACS_WFC_PAM.tar.gz was extracted but wfc1_pam.fits / wfc2_pam.fits "
+                        "were not found under %s (or dolphot2.0/acs/data). "
+                        "acsmask / Python ACS mask may fail until these exist.",
+                        make_root / "acs" / "data",
+                    )
             write_psf_stamp(source_dir, filename)
         except (URLError, HTTPError) as e:
             log.warning("Failed to download %s: %s", filename, e)

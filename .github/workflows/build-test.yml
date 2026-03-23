@@ -28,7 +28,9 @@ jobs:
     - name: Install the package and dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
-        python -m pip install .[test]
+        # Editable install: tests and monkeypatches target the checkout, not a
+        # stale copy under site-packages.
+        python -m pip install -e ".[test]"
     - name: Run tests
       run: |
         python -m pytest tests/ -v --tb=short

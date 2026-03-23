@@ -266,6 +266,7 @@ acceptable_filters = [
 
 pipeline_products = [
     "*chip?.fits", "*chip?.sky.fits", "*rawtmp.fits", "*drz.fits", "*drc.fits",
+    "*drc.noise.fits",
     "*drz.sky.fits", "*drc.sky.fits",
     "*idc.fits", "*dxy.fits", "*off.fits", "*d2im.fits", "*d2i.fits", "*npl.fits",
     "dp*", "*.log", "*.output", "*sci?.fits", "*wht.fits", "*sci.fits", "*StaticMask.fits",

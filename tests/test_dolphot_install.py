@@ -30,6 +30,7 @@ from hst123.dolphot_install import (
     install_psfs,
     install_sources,
     link_executables_to_conda_bin,
+    relocate_acs_wfc_pam_into_canonical_layout,
     psf_archive_payload_present,
     psf_install_recorded,
     sources_install_is_complete,
@@ -328,6 +329,11 @@ def test_install_psfs_skips_download_when_psf_stamp_exists(tmp_path, monkeypatch
     src.mkdir()
     fn = ONE_PSF_PER_INSTRUMENT["ACS"]
     write_psf_stamp(src, fn)
+    write_psf_stamp(src, "ACS_WFC_PAM.tar.gz")
+    pam_dir = src / "acs" / "data"
+    pam_dir.mkdir(parents=True)
+    for name in ACS_WFC_PAM_FILENAMES:
+        (pam_dir / name).write_bytes(b"0" * 2048)
 
     def boom(*_a, **_k):
         raise AssertionError("download_file should not be called")
@@ -348,6 +354,8 @@ def test_install_psfs_skips_when_matching_psf_on_disk_no_stamp(tmp_path, monkeyp
     p = src / "dolphot2.0" / "acs" / "data"
     p.mkdir(parents=True)
     (p / "F435W.on_disk.psf").write_bytes(b"x" * 50)
+    for name in ACS_WFC_PAM_FILENAMES:
+        (p / name).write_bytes(b"0" * 2048)
 
     def boom(*_a, **_k):
         raise AssertionError("download_file should not be called")
@@ -360,6 +368,7 @@ def test_install_psfs_skips_when_matching_psf_on_disk_no_stamp(tmp_path, monkeyp
         force_download=False,
     )
     assert psf_install_recorded(src, ONE_PSF_PER_INSTRUMENT["ACS"])
+    assert psf_install_recorded(src, "ACS_WFC_PAM.tar.gz")
 
 
 def test_get_conda_prefix_none(monkeypatch):
@@ -463,6 +472,33 @@ def test_dolphot_acs_data_dir_under_nested_dolphot31(tmp_path):
     assert dolphot_acs_data_dir(root) == data.resolve()
 
 
+def test_dolphot_acs_data_dir_prefers_tree_with_pam_files(tmp_path):
+    """Empty acs/data must not hide wfc*_pam.fits under dolphot2.0/acs/data."""
+    root = tmp_path / "hst123-dolphot"
+    (root / "dolphot3.1" / "acs" / "data").mkdir(parents=True)
+    legacy = root / "dolphot3.1" / "dolphot2.0" / "acs" / "data"
+    legacy.mkdir(parents=True)
+    (root / "dolphot3.1" / "Makefile").write_text("all:\n", encoding="utf-8")
+    for name in ACS_WFC_PAM_FILENAMES:
+        (legacy / name).write_bytes(b"0" * 2048)
+    assert dolphot_acs_data_dir(root) == legacy.resolve()
+
+
+def test_relocate_acs_wfc_pam_into_canonical_layout(tmp_path):
+    """ACS_WFC_PAM tarball layout (dolphot2.0/acs/data) -> make_root/acs/data."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    leg = mr / "dolphot2.0" / "acs" / "data"
+    leg.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    for name in ACS_WFC_PAM_FILENAMES:
+        (leg / name).write_bytes(b"0" * 2048)
+    make_root = dolphot_make_root(root)
+    assert relocate_acs_wfc_pam_into_canonical_layout(make_root) is True
+    for name in ACS_WFC_PAM_FILENAMES:
+        assert (make_root / "acs" / "data" / name).is_file()
+
+
 def test_verify_acs_wfc_pam_files_ok(monkeypatch, tmp_path):
     root = tmp_path / "hst123-dolphot"
     data = root / "dolphot3.1" / "acs" / "data"
@@ -519,6 +555,11 @@ def test_download_single_psf_acs(tmp_path):
     install_psfs(tmp_path, instruments=["ACS"], one_per_instrument=True, timeout=30)
     # After extract, tarball is removed; we expect some extracted content
     assert list(tmp_path.iterdir())  # directory not empty
+    # ACS_WFC_PAM.tar.gz ships files under dolphot2.0/...; installer copies to acs/data/
+    pam_dir = tmp_path / "acs" / "data"
+    for name in ACS_WFC_PAM_FILENAMES:
+        assert (pam_dir / name).is_file(), f"expected {pam_dir / name} after install_psfs"
+        assert (pam_dir / name).stat().st_size >= 512
 
 
 @pytest.mark.network

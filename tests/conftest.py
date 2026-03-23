@@ -22,7 +22,7 @@ def require_dolphot():
     """
     Fixture that skips the test if DOLPHOT executables are not on PATH.
 
-    Required: dolphot, calcsky, acsmask, wfc3mask, wfpc2mask, splitgroups.
+    Required: dolphot, calcsky (splitgroups and *mask use Python by default).
     Install with: hst123-install-dolphot --dolphot-dir <dir> && make && export PATH.
     """
     if not _dolphot_scripts_available():
