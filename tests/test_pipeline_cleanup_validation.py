@@ -10,12 +10,13 @@ Validate that key drizzle sidecars are covered by cleanup paths.
   cleanup via glob ``*drc.noise.fits`` in ``run_dolphot`` /
   ``get_dolphot_photometry`` (``respect_keep_artifacts=False``).
 
-- :data:`hst123.settings.pipeline_products` includes ``*drc.fits`` and
-  ``*drc.noise.fits`` so :meth:`hst123.hst123.make_clean` and the large-run
-  guard in :meth:`hst123.hst123.check_large_reduction` can remove these patterns.
+- :data:`hst123.settings.pipeline_products` lists common pipeline output globs
+  (including ``*drc.fits`` and ``*drc.noise.fits``) for tooling or manual cleanup.
 
-Note: CLI ``--cleanup`` at the end of ``main`` only deletes MAST/input images
-(``hst.input_images``), not drizzle products or noise sidecars.
+Note: CLI ``--cleanup`` removes ``hst.input_images`` and, under ``--work-dir``,
+patterns in :data:`hst123.settings.cleanup_extra_globs` (e.g. ``*.drc.noise.fits``).
+:func:`hst123.utils.workdir_cleanup.remove_files_matching_globs` resolves globs
+under ``--work-dir``, not the shell CWD.
 """
 from __future__ import annotations
 

@@ -12,9 +12,12 @@ Summary (see individual test docstrings for procedure and tolerances)
 **calcsky** (:mod:`hst123.utils.dolphot_sky`)
     Goal: same algorithm as ``calcsky.c`` ``getsky`` (stage 1) + box mean (stage 2).
     **Parity:** On a small sanitized FITS, Python ``compute_sky_map_dolphot`` vs
-    external ``calcsky`` should match within **~1e-4 relative** (float32 I/O and
-    compiler vs NumPy ordering). Numba is disabled in the parity test for a
-    stable baseline. **Not exact** bit-identical: C vs Python float pipeline.
+    external ``calcsky`` should match within **~1e-4 relative** (float32 sky FITS
+    I/O). Stage-1 sky is **quantized to float32** before the box smooth, like the
+    C tool’s float image grid; σ-clip uses the same sequential double sum as
+    ``calcsky.c``. The small-image test disables Numba for a stable baseline; a
+    **1000×1000** test uses Numba with a fresh ``NUMBA_CACHE_DIR``. **Not exact**
+    bit-identical vs every C build.
 
 **splitgroups** (:mod:`hst123.utils.dolphot_splitgroups`)
     Goal: one file per SCI plane (or WFPC2-style 3-D primary), merged headers.
@@ -249,6 +252,91 @@ def test_calcsky_python_matches_c_on_small_image(tmp_path, monkeypatch):
     assert np.allclose(py_sky, c_sky, rtol=1.2e-4, atol=1e-5), (
         "calcsky C vs Python sky map mismatch (see module docstring: float pipeline)"
     )
+
+
+def test_calcsky_python_matches_c_on_1000_image(tmp_path, monkeypatch):
+    """
+    **Parity (approximate):** Same as the small-image test, on **1000×1000** pixels.
+
+    DOLPHOT ``calcsky`` vs :func:`~hst123.utils.dolphot_sky.compute_sky_map_dolphot`
+    with typical annulus parameters (``15 / 35 / 4 / 2.25 / 2.0``). **Numba is
+    required** here: the pure-Python double loop is too slow at this size; Numba
+    matches the Python port (see ``test_dolphot_sky_port_numba_matches_python``).
+    """
+    exe = _which("calcsky")
+    if not exe:
+        pytest.skip("calcsky not on PATH")
+
+    try:
+        import numba  # noqa: F401
+    except ImportError:
+        pytest.skip("numba required for 1000×1000 calcsky parity (runtime)")
+
+    # Fresh Numba cache: stale JIT from older _clip_iter can otherwise match C poorly
+    # while the current source would pass (user-visible symptom: unchanged max_abs).
+    monkeypatch.setenv("NUMBA_CACHE_DIR", str(tmp_path / "numba_cache_calcsky_parity"))
+
+    monkeypatch.delenv("HST123_CALCSKY_NUMBA", raising=False)
+    import hst123.utils.dolphot_sky as dolphot_sky_module
+
+    dolphot_sky_module._NUMBA_SKY_STAGES = None
+
+    from hst123.utils.dolphot_sky import (
+        compute_sky_map_dolphot,
+        parse_calcsky_dataminmax,
+        write_calcsky_sanitized_input,
+    )
+
+    ny, nx = 1000, 1000
+    raw = tmp_path / "sky1k.fits"
+    rng = np.random.default_rng(20260226)
+    data = (rng.random((ny, nx)) * 500 + 10.0).astype(np.float32)
+    fits.PrimaryHDU(data=data).writeto(raw, overwrite=True)
+    san = tmp_path / "san1k.fits"
+    write_calcsky_sanitized_input(str(raw), str(san))
+
+    rin, rout, step, sl, sh = 15, 35, 4, 2.25, 2.0
+    with fits.open(san, memmap=False) as hdul:
+        arr = np.asarray(hdul[0].data, dtype=np.float64)
+        dmin, dmax = parse_calcsky_dataminmax(hdul[0].header)
+    py_sky = compute_sky_map_dolphot(
+        arr,
+        r_in=rin,
+        r_out=rout,
+        step=step,
+        sigma_low=sl,
+        sigma_high=sh,
+        dmin=dmin,
+        dmax=dmax,
+    )
+
+    work = tmp_path / "c_run_1k"
+    work.mkdir()
+    shutil.copy(san, work / "san1k.fits")
+    _run(
+        ["calcsky", "san1k", str(rin), str(rout), str(step), str(sl), str(sh)],
+        cwd=work,
+    )
+    c_sky_path = work / "san1k.sky.fits"
+    assert c_sky_path.is_file()
+    c_sky = _primary_data(c_sky_path).astype(np.float32)
+
+    assert py_sky.shape == c_sky.shape == (ny, nx)
+    diff = np.abs(py_sky.astype(np.float64) - c_sky.astype(np.float64))
+    max_abs = float(np.max(diff))
+    rtol, atol = 1.2e-4, 1e-5
+    ok = np.allclose(py_sky, c_sky, rtol=rtol, atol=atol)
+    if not ok:
+        rel = diff / (np.abs(c_sky.astype(np.float64)) + 1e-12)
+        max_rel = float(np.max(rel))
+        pcts = np.percentile(diff, [50.0, 90.0, 99.0, 99.9, 100.0])
+        pytest.fail(
+            f"calcsky C vs Python (1000×1000) mismatch: max_abs={max_abs:.6g} "
+            f"max_rel={max_rel:.6g} (rtol={rtol}, atol={atol}); "
+            f"|Δ| pctiles 50/90/99/99.9/100% = {pcts.tolist()}. "
+            f"If max_abs is unchanged across edits, clear Numba cache (see NUMBA_CACHE_DIR "
+            f"in this test) or remove ~/.cache/numba."
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -106,6 +107,7 @@ def default_dolphot_install_dir() -> Path:
 # ACS/WFC PAM FITS shipped in ACS_WFC_PAM.tar.gz; ``acsmask`` reads these from the DOLPHOT tree.
 ACS_WFC_PAM_FILENAMES = ("wfc1_pam.fits", "wfc2_pam.fits")
 _MIN_PAM_FILE_BYTES = 512
+_MIN_PSF_FILE_BYTES = 512
 
 
 def dolphot_acs_data_dir(source_dir: Path | str | None = None) -> Path | None:
@@ -187,6 +189,201 @@ def relocate_acs_wfc_pam_into_canonical_layout(make_root: Path) -> bool:
         return _acs_wfc_pam_files_ok_in_data_dir(target)
 
     return False
+
+
+def _legacy_dolphot20_roots(make_root: Path) -> list[Path]:
+    """
+    Roots of legacy ``dolphot2.0/`` trees from upstream tarballs.
+
+    Upstream archives use a ``dolphot2.0/`` prefix. Content may land:
+
+    - Under the Makefile root: ``<make_root>/dolphot2.0/...``
+    - Next to ``dolphot3.1`` (common conda layout): ``<make_root>/../dolphot2.0/...``
+      when ``make_root`` is ``.../opt/hst123-dolphot/dolphot3.1`` and extraction
+      populated ``.../opt/hst123-dolphot/dolphot2.0/...`` instead.
+
+    Returns existing directory roots only (deduplicated).
+    """
+    make_root = Path(make_root).resolve()
+    roots: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(p: Path) -> None:
+        try:
+            r = p.resolve()
+        except OSError:
+            return
+        if r in seen:
+            return
+        seen.add(r)
+        if r.is_dir():
+            roots.append(r)
+
+    add(make_root / "dolphot2.0")
+    parent = make_root.parent
+    if parent.is_dir():
+        add(parent / "dolphot2.0")
+    return roots
+
+
+def _acs_psf_legacy_data_dirs(make_root: Path) -> list[Path]:
+    """
+    Directories that may hold ACS ``*.psf`` from upstream tarballs.
+
+    Upstream archives use a ``dolphot2.0/acs/data`` prefix. Those files may land
+    under nested ``<make_root>/dolphot2.0/acs/data`` or sibling
+    ``<make_root>/../dolphot2.0/acs/data``.
+
+    Order: nested under *make_root* first, then sibling under the install parent.
+    """
+    out: list[Path] = []
+    for root in _legacy_dolphot20_roots(make_root):
+        d = root / "acs" / "data"
+        if d.is_dir():
+            out.append(d)
+    return out
+
+
+def _copy_psf_files_into_canonical_dir(src_dir: Path, dst_dir: Path) -> int:
+    """
+    Copy ``*.psf`` from *src_dir* into *dst_dir* when the destination is missing
+    or too small (same rules as ACS PSF relocation).
+
+    Returns
+    -------
+    int
+        Number of files copied.
+    """
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for src in sorted(src_dir.glob("*.psf")):
+        try:
+            if src.stat().st_size < _MIN_PSF_FILE_BYTES:
+                continue
+        except OSError:
+            continue
+        dst = dst_dir / src.name
+        if dst.is_file():
+            try:
+                if dst.stat().st_size >= _MIN_PSF_FILE_BYTES:
+                    continue
+            except OSError:
+                pass
+        shutil.copy2(src, dst)
+        copied += 1
+    return copied
+
+
+def relocate_acs_psf_into_canonical_layout(make_root: Path) -> int:
+    """
+    Copy ACS ``*.psf`` files from legacy ``dolphot2.0/acs/data`` into
+    ``<make_root>/acs/data`` when needed.
+
+    DOLPHOT 3.x reads ACS reference files from ``acs/data`` under the Makefile
+    root, but PSF tarballs may extract under ``dolphot2.0/acs/data``. Keeping
+    them only in the legacy path causes runtime failures like:
+    ``Cannot open .../acs/data/F814W.wfc1.psf``.
+
+    Returns
+    -------
+    int
+        Number of files copied into canonical ``acs/data``.
+    """
+    make_root = Path(make_root).resolve()
+    target = make_root / "acs" / "data"
+    copied = 0
+    for legacy in _acs_psf_legacy_data_dirs(make_root):
+        copied += _copy_psf_files_into_canonical_dir(legacy, target)
+    if copied:
+        log.info(
+            "ACS PSF: copied %d file(s) into canonical %s (from legacy layout(s))",
+            copied,
+            target,
+        )
+        _progress(f"  ACS PSFs placed under {target} (copied {copied} from legacy layout).")
+    return copied
+
+
+# WFC3 PSFs may live under data/, IR/, and/or UVIS/ in legacy trees.
+_WFC3_PSF_LEGACY_SUBDIRS = ("data", "IR", "UVIS")
+
+
+def relocate_wfc3_psf_into_canonical_layout(make_root: Path) -> int:
+    """
+    Copy WFC3 ``*.psf`` from legacy ``dolphot2.0/wfc3/{data,IR,UVIS}`` into
+    ``<make_root>/wfc3/...`` when needed (nested or sibling ``dolphot2.0``).
+    """
+    make_root = Path(make_root).resolve()
+    copied = 0
+    for leg_root in _legacy_dolphot20_roots(make_root):
+        for sub in _WFC3_PSF_LEGACY_SUBDIRS:
+            src = leg_root / "wfc3" / sub
+            if not src.is_dir():
+                continue
+            dst = make_root / "wfc3" / sub
+            copied += _copy_psf_files_into_canonical_dir(src, dst)
+    if copied:
+        log.info(
+            "WFC3 PSF: copied %d file(s) into canonical %s (from legacy layout(s))",
+            copied,
+            make_root / "wfc3",
+        )
+        _progress(
+            f"  WFC3 PSFs merged under {make_root / 'wfc3'} ({copied} file(s) from legacy layout)."
+        )
+    return copied
+
+
+def relocate_wfpc2_psf_into_canonical_layout(make_root: Path) -> int:
+    """
+    Copy WFPC2 ``*.psf`` from legacy ``dolphot2.0/wfpc2/data`` into
+    ``<make_root>/wfpc2/data`` when needed (nested or sibling ``dolphot2.0``).
+    """
+    make_root = Path(make_root).resolve()
+    copied = 0
+    for leg_root in _legacy_dolphot20_roots(make_root):
+        src = leg_root / "wfpc2" / "data"
+        if not src.is_dir():
+            continue
+        dst = make_root / "wfpc2" / "data"
+        copied += _copy_psf_files_into_canonical_dir(src, dst)
+    if copied:
+        log.info(
+            "WFPC2 PSF: copied %d file(s) into canonical %s (from legacy layout(s))",
+            copied,
+            make_root / "wfpc2" / "data",
+        )
+        _progress(
+            f"  WFPC2 PSFs merged under {make_root / 'wfpc2' / 'data'} "
+            f"({copied} file(s) from legacy layout)."
+        )
+    return copied
+
+
+def relocate_all_legacy_psf_into_canonical_layout(make_root: Path) -> dict[str, int]:
+    """
+    Merge ACS, WFC3, and WFPC2 ``*.psf`` from legacy ``dolphot2.0/...`` trees
+    (nested under *make_root* or sibling under the install parent) into the
+    canonical DOLPHOT 3.x layout under *make_root*.
+
+    Call this after PSF archives are extracted or skipped so runtime lookups
+    under ``acs/data``, ``wfc3/...``, and ``wfpc2/data`` succeed.
+    """
+    make_root = Path(make_root).resolve()
+    counts = {
+        "acs": relocate_acs_psf_into_canonical_layout(make_root),
+        "wfc3": relocate_wfc3_psf_into_canonical_layout(make_root),
+        "wfpc2": relocate_wfpc2_psf_into_canonical_layout(make_root),
+    }
+    total = sum(counts.values())
+    if total:
+        log.info(
+            "Legacy PSF merge into %s: %s (total %d file(s))",
+            make_root,
+            counts,
+            total,
+        )
+    return counts
 
 
 def _candidate_dolphot_source_roots() -> list[Path]:
@@ -418,6 +615,70 @@ def _makefile_thread_libs_line() -> str:
         if libdir.is_dir() and any(libdir.glob("libomp.*")):
             return f"export THREAD_LIBS= -L{libdir} -lomp"
     return "export THREAD_LIBS= -lomp"
+
+
+def apply_dolphot_source_patches(make_root: Path) -> bool:
+    """
+    Apply hst123-specific fixes to upstream DOLPHOT sources before ``make``.
+
+    Upstream ``dolphot.c`` declares ``char str[82];`` in ``main`` and uses it
+    with ``sprintf`` for paths derived from the output basename. Long absolute
+    paths (common on macOS with Dropbox, conda envs, etc.) overflow that stack
+    buffer; libc then aborts with **SIGTRAP** / "trace trap" (**``__chk_fail_overflow``**).
+
+    This patch enlarges the buffer to **4096** bytes and is **idempotent**
+    (safe to run on every install).
+
+    Parameters
+    ----------
+    make_root : pathlib.Path
+        Directory containing ``Makefile`` and ``dolphot.c`` (see ``dolphot_make_root``).
+
+    Returns
+    -------
+    bool
+        True if ``dolphot.c`` was modified, False if already patched or pattern
+        not found.
+    """
+    make_root = Path(make_root).resolve()
+    path = make_root / "dolphot.c"
+    if not path.is_file():
+        log.debug("apply_dolphot_source_patches: no %s", path)
+        return False
+    text = path.read_text(encoding="utf-8", errors="replace")
+    marker = "hst123_dolphot_main_str_buf"
+    if marker in text:
+        log.debug("apply_dolphot_source_patches: already applied (%s)", path)
+        return False
+    # Match upstream DOLPHOT 3.1 main() opening; tolerate spaces after `{`.
+    pattern = re.compile(
+        r"(int main\(int argc,char\*\*argv\) \{\s*)char str\[82\];",
+        re.MULTILINE,
+    )
+    repl = (
+        r"\1/* "
+        + marker
+        + ": avoid sprintf stack overflow on long absolute output paths (macOS). */\n"
+        r"   char str[4096];"
+    )
+    new_text, n_sub = pattern.subn(repl, text, count=1)
+    if n_sub == 0:
+        if "char str[4096]" in text:
+            log.debug(
+                "apply_dolphot_source_patches: dolphot.c already has enlarged buffer"
+            )
+            return False
+        log.warning(
+            "Could not apply hst123 dolphot.c buffer patch (expected "
+            "`char str[82];` after main). Long absolute output paths may crash DOLPHOT."
+        )
+        return False
+    path.write_text(new_text, encoding="utf-8")
+    log.info("Applied hst123 patch: %s main() stack buffer 82 -> 4096 bytes", path.name)
+    _progress(
+        "  Source patch: dolphot.c — enlarged main() path buffer (long absolute paths)."
+    )
+    return True
 
 
 def configure_dolphot_makefile(
@@ -1119,6 +1380,10 @@ def install_psfs(
         finally:
             if local.exists():
                 local.unlink()
+    # PSFs may exist only under legacy ``.../dolphot2.0/...`` (nested under the
+    # Makefile root or sibling next to ``dolphot3.1``, common conda layout).
+    # Always merge ACS / WFC3 / WFPC2 ``*.psf`` into the canonical tree for runtime.
+    relocate_all_legacy_psf_into_canonical_layout(make_root)
     _progress("PSF / PAM step finished.")
 
 
@@ -1339,15 +1604,39 @@ def main():
             "Roman, NIRCam, NIRISS, MIRI, Euclid tarballs and Makefile flags"
         ),
     )
-    parser.add_argument(
-        "--no-threaded",
-        action="store_true",
+    thread_grp = parser.add_mutually_exclusive_group()
+    thread_grp.add_argument(
+        "--threaded",
+        dest="no_threaded",
+        action="store_false",
         help=(
-            "Leave Makefile threading lines commented (no OpenMP); default "
-            "enables THREADED=1 and -fopenmp (with -Xclang on macOS)"
+            "Enable OpenMP threading in the Makefile "
+            "(THREADED=1, THREAD_CFLAGS, THREAD_LIBS)."
         ),
     )
-    parser.set_defaults(run_make=True, link_conda_bin=(conda is not None))
+    thread_grp.add_argument(
+        "--no-threaded",
+        dest="no_threaded",
+        action="store_true",
+        help=(
+            "Compile without OpenMP: leave Makefile threading lines commented "
+            "(default)."
+        ),
+    )
+    parser.add_argument(
+        "--no-source-patches",
+        action="store_true",
+        help=(
+            "Do not patch upstream DOLPHOT sources before build. Default: apply "
+            "a small fix to dolphot.c (main() path buffer) so long absolute output "
+            "paths do not crash with SIGTRAP on macOS."
+        ),
+    )
+    parser.set_defaults(
+        run_make=True,
+        link_conda_bin=(conda is not None),
+        no_threaded=True,
+    )
     args = parser.parse_args()
 
     global _quiet_progress
@@ -1383,7 +1672,8 @@ def main():
         )
         + (" | force-download: yes" if args.force_download else "")
         + (" | HST modules only" if args.hst_modules_only else "")
-        + (" | no threaded build" if args.no_threaded else "")
+        + (" | no threaded build (default)" if args.no_threaded else " | threaded OpenMP build")
+        + (" | no source patches" if args.no_source_patches else " | source patches (dolphot.c buffer)")
     )
 
     if args.psf_only:
@@ -1416,6 +1706,14 @@ def main():
     )
     log.info("DOLPHOT sources installed in %s", source_dir)
     make_root = dolphot_make_root(source_dir)
+    if not args.no_source_patches:
+        try:
+            apply_dolphot_source_patches(make_root)
+        except OSError as exc:
+            log.warning("Could not apply DOLPHOT source patches: %s", exc)
+            _progress(f"  Warning: source patch failed ({exc})")
+    else:
+        _progress("  Skipping source patches (--no-source-patches).")
     try:
         configure_dolphot_makefile(
             make_root,

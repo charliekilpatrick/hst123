@@ -28,8 +28,6 @@ def add_options(parser=None, usage=None, version=None):
         metavar='DIR',
         help='Directory for raw downloads (default: <work-dir>/raw).',
     )
-    parser.add_argument('--make-clean', default=False, action='store_true',
-        help='Clean up all output files from previous runs then exit.')
     parser.add_argument('--download', default=False, action='store_true',
         help='Download the raw data files given input ra and dec.')
     parser.add_argument('--token', default=None, type=str,
@@ -42,7 +40,8 @@ def add_options(parser=None, usage=None, version=None):
     parser.add_argument('--clobber', default=False, action='store_true',
         help='Overwrite files when using download mode.')
     parser.add_argument('--cleanup', default=False, action='store_true',
-        help='Clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
+        help='Clean up interstitial image files (flt/flc/c0m/c1m symlinks) and '
+        'DOLPHOT sky sidecars (*.drc.noise.fits) under --work-dir.')
     parser.add_argument(
         '--keep-drizzle-artifacts',
         default=False,
@@ -71,10 +70,6 @@ def add_options(parser=None, usage=None, version=None):
         help='Keep images with EXPFLAG==INDETERMINATE.')
     parser.add_argument('--keep-tdf-down', default=False, action='store_true',
         help='Keep images with EXPFLAG==TDF-DOWN AT START.')
-    parser.add_argument('--no-large-reduction', default=False,
-        action='store_true', help='Exit if input list is >large_num images.')
-    parser.add_argument('--large-num', default=200, type=int,
-        help='Large number of images to skip when --no-large-reduction is used.')
 
     # Reference image parameters
     parser.add_argument('--reference','--ref', default='',

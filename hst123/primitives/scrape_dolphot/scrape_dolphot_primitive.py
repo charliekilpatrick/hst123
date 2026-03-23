@@ -13,6 +13,8 @@ from astropy.coordinates import SkyCoord
 
 from hst123.primitives.base import BasePrimitive
 from hst123.utils.display import show_photometry as display_show_photometry
+from hst123.utils.dolphot_catalog_hdf5 import parse_column_index_and_description
+from hst123.utils.wcs_utils import wcs_from_fits_hdu
 
 log = logging.getLogger(__name__)
 
@@ -53,9 +55,12 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                     break
         if not coldata:
             return None
+        parsed = parse_column_index_and_description(coldata)
+        if not parsed:
+            return None
+        n1, _desc = parsed
         try:
-            colnum = int(coldata.split(".")[0].strip()) - 1 + offset
-            return colnum
+            return int(n1) - 1 + offset
         except Exception:
             return None
 
@@ -456,22 +461,22 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         else:
             if os.path.exists(dolphot["original"]):
                 shutil.copyfile(dolphot["original"], dolphot["base"])
-        hdu = fits.open(reference)
-        w = wcs.WCS(hdu[0].header)
-        x, y = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
-        ra = coord.ra.degree
-        dec = coord.dec.degree
-        radius = dolphot["radius"]
-        if p.options["args"].scrape_radius:
-            angradius = p.options["args"].scrape_radius / 3600.0
-            dec1 = (
-                coord.dec.degree + angradius
-                if dec < 89
-                else coord.dec.degree - angradius
-            )
-            coord1 = SkyCoord(ra, dec1, unit="deg")
-            x1, y1 = wcs.utils.skycoord_to_pixel(coord1, w, origin=1)
-            radius = np.sqrt((x - x1) ** 2 + (y - y1) ** 2)
+        with fits.open(reference) as hdu:
+            w = wcs_from_fits_hdu(hdu, 0)
+            x, y = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
+            ra = coord.ra.degree
+            dec = coord.dec.degree
+            radius = dolphot["radius"]
+            if p.options["args"].scrape_radius:
+                angradius = p.options["args"].scrape_radius / 3600.0
+                dec1 = (
+                    coord.dec.degree + angradius
+                    if dec < 89
+                    else coord.dec.degree - angradius
+                )
+                coord1 = SkyCoord(ra, dec1, unit="deg")
+                x1, y1 = wcs.utils.skycoord_to_pixel(coord1, w, origin=1)
+                radius = np.sqrt((x - x1) ** 2 + (y - y1) ** 2)
         log.info(
             "Looking for a source around x=%s, y=%s in %s with a radius of %s",
             "%7.2f" % float(x),

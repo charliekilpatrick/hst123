@@ -3,6 +3,7 @@ import glob
 import os
 import shutil
 import signal
+import sys
 import tempfile
 import time
 
@@ -20,6 +21,7 @@ from hst123.utils.dolphot_sky import (
     write_sky_fits_fallback,
 )
 from hst123.utils.logging import get_logger, log_calls, make_banner, run_external_command
+from hst123.utils.wcs_utils import wcs_from_fits_hdu
 
 log = get_logger(__name__)
 
@@ -29,6 +31,38 @@ DOLPHOT_REQUIRED_SCRIPTS = [
     # acsmask / wfc3mask / wfpc2mask: hst123.utils.dolphot_mask (Python)
     # splitgroups: hst123.utils.dolphot_splitgroups (Python)
 ]
+
+
+def dolphot_subprocess_env() -> dict[str, str]:
+    """
+    Environment for ``dolphot`` (and similar OpenMP) subprocesses.
+
+    On **macOS**, multithreaded DOLPHOT often prints ``Using N threads`` then exits
+    with **SIGTRAP** (``zsh: trace trap``) when OpenMP + ``libomp`` do not match the
+    binary (common on Apple Silicon or mixed x86_64/arm64). Forcing a single thread
+    avoids most of these crashes.
+
+    Resolution order:
+
+    1. If ``OMP_NUM_THREADS`` is already set in the environment, it is unchanged.
+    2. Else if ``HST123_DOLPHOT_OMP_THREADS`` is set (e.g. ``4``), use it as
+       ``OMP_NUM_THREADS``.
+    3. Else on ``sys.platform == "darwin"``, set ``OMP_NUM_THREADS=1``.
+
+    For a permanent multi-threaded run after fixing **Homebrew** ``libomp`` and
+    rebuilding DOLPHOT (see README), export ``OMP_NUM_THREADS`` or
+    ``HST123_DOLPHOT_OMP_THREADS`` before running the pipeline.
+    """
+    env = os.environ.copy()
+    if "OMP_NUM_THREADS" in os.environ:
+        return env
+    explicit = os.environ.get("HST123_DOLPHOT_OMP_THREADS")
+    if explicit is not None and str(explicit).strip() != "":
+        env["OMP_NUM_THREADS"] = str(explicit).strip()
+        return env
+    if sys.platform == "darwin":
+        env["OMP_NUM_THREADS"] = "1"
+    return env
 
 
 class DolphotPrimitive(BasePrimitive):
@@ -41,7 +75,7 @@ class DolphotPrimitive(BasePrimitive):
                 return False
         return True
 
-    def make_dolphot_dict(self, dolphot):
+    def make_dolphot_dict(self, dolphot, work_dir=None):
         """
         Build dict of dolphot file paths and parameters (param, log, base, colfile, etc.).
 
@@ -49,6 +83,9 @@ class DolphotPrimitive(BasePrimitive):
         ----------
         dolphot : str
             Base name for dolphot output (e.g. "dp" -> dp.param, dp.output, dp.phot).
+        work_dir : str | None, optional
+            Pipeline work directory. If provided, DOLPHOT products are written
+            under ``<work_dir>/dolphot/``.
 
         Returns
         -------
@@ -56,19 +93,26 @@ class DolphotPrimitive(BasePrimitive):
             Keys: base, param, log, total_objs, colfile, fake, fakelist, fakelog,
             radius, final_phot, limit_radius, original.
         """
+        base = os.fspath(dolphot)
+        if work_dir:
+            wd = os.path.abspath(os.path.expanduser(work_dir))
+            out = os.path.join(wd, "dolphot")
+            os.makedirs(out, exist_ok=True)
+            # Keep only the leaf name under work_dir/dolphot.
+            base = os.path.join(out, os.path.basename(base))
         return {
-            "base": dolphot,
-            "param": dolphot + ".param",
-            "log": dolphot + ".output",
+            "base": base,
+            "param": base + ".param",
+            "log": base + ".output",
             "total_objs": 0,
-            "colfile": dolphot + ".columns",
-            "fake": dolphot + ".fake",
-            "fakelist": dolphot + ".fakelist",
-            "fakelog": dolphot + ".fake.output",
+            "colfile": base + ".columns",
+            "fake": base + ".fake",
+            "fakelist": base + ".fakelist",
+            "fakelog": base + ".fake.output",
             "radius": 12,
-            "final_phot": dolphot + ".phot",
+            "final_phot": base + ".phot",
             "limit_radius": 10.0,
-            "original": dolphot + ".orig",
+            "original": base + ".orig",
         }
 
     def needs_to_calc_sky(self, image, check_wcs=False):
@@ -360,7 +404,12 @@ class DolphotPrimitive(BasePrimitive):
                         "row-level progress is logged for the Python/Numba sky map path."
                     )
                     try:
-                        cp = run_external_command(calc_argv, log=log, check=False)
+                        cp = run_external_command(
+                            calc_argv,
+                            log=log,
+                            check=False,
+                            env=dolphot_subprocess_env(),
+                        )
                     except OSError as exc:
                         log.warning(
                             "calcsky could not be executed (%s); using Python sky fallback",
@@ -492,10 +541,11 @@ class DolphotPrimitive(BasePrimitive):
         is_wfpc2 : bool, optional
             If True, log WFPC2-specific parameter adjustments. Default False.
         """
+        # DOLPHOT expects the path to the FITS *without* the .fits suffix; use an
+        # absolute path so the run is correct even if the process cwd changes.
+        root_no_ext = os.path.splitext(os.path.abspath(os.path.expanduser(image)))[0]
         param_file.write(
-            "img{i}_file = {file}\n".format(
-                i=str(i).zfill(4), file=os.path.splitext(image)[0]
-            )
+            "img{i}_file = {file}\n".format(i=str(i).zfill(4), file=root_no_ext)
         )
         params = self.get_dolphot_instrument_parameters(image, options)
         for par, val in params.items():
@@ -523,8 +573,21 @@ class DolphotPrimitive(BasePrimitive):
         p = self._p
         dopt = p.options["detector_defaults"]
         gopt = p.options["global_defaults"]
-        with open(p.dolphot["param"], "w") as dolphot_file:
-            self.generate_base_param_file(dolphot_file, gopt, len(images))
+        args = p.options.get("args")
+        wd = None
+        if args is not None:
+            raw = getattr(args, "work_dir", None)
+            if isinstance(raw, str) and raw.strip():
+                wd = os.path.abspath(os.path.expanduser(raw))
+        param_rel = p.dolphot["param"]
+        param_path = (
+            os.path.join(wd, param_rel) if wd else param_rel
+        )
+        # DOLPHOT expects Nimg == number of science images (img0001..imgNNNN).
+        # The drizzled reference/template is img0000_file and is not counted.
+        nimg = len(images)
+        with open(param_path, "w", encoding="utf-8") as dolphot_file:
+            self.generate_base_param_file(dolphot_file, gopt, nimg)
             inst = p._fits.get_instrument(reference)
             is_wfpc2 = "wfpc2" in inst.lower()
             log.info("Checking reference %s instrument type %s", reference, inst)
@@ -538,10 +601,14 @@ class DolphotPrimitive(BasePrimitive):
                 )
         self._primitive_cleanup(
             "make_dolphot_file",
-            validate_text_paths=[p.dolphot["param"]]
-            if os.path.isfile(p.dolphot["param"])
+            validate_text_paths=[param_path]
+            if os.path.isfile(param_path)
             else [],
-            validation_notes={"n_images": len(images), "reference": os.path.basename(reference)},
+            validation_notes={
+                "n_images": len(images),
+                "Nimg": nimg,
+                "reference": os.path.basename(reference),
+            },
         )
 
     @log_calls
@@ -553,33 +620,61 @@ class DolphotPrimitive(BasePrimitive):
         dolphot["param"] to exist (e.g. from make_dolphot_file).
         """
         p = self._p
+        args = p.options.get("args")
+        wd = None
+        if args is not None:
+            raw_wd = getattr(args, "work_dir", None)
+            if isinstance(raw_wd, str) and raw_wd.strip():
+                wd = os.path.abspath(os.path.expanduser(raw_wd))
+        param_path = (
+            os.path.join(wd, p.dolphot["param"])
+            if wd
+            else p.dolphot["param"]
+        )
+        log_path = (
+            os.path.join(wd, p.dolphot["log"]) if wd else p.dolphot["log"]
+        )
+        base_name = p.dolphot["base"]
         try:
-            if os.path.isfile(p.dolphot["param"]):
-                if os.path.exists(p.dolphot["base"]):
-                    os.remove(p.dolphot["base"])
-                if os.path.exists(p.dolphot["original"]):
-                    os.remove(p.dolphot["original"])
+            if os.path.isfile(param_path):
+                base_fp = os.path.join(wd, base_name) if wd else base_name
+                orig_fp = os.path.join(wd, p.dolphot["original"]) if wd else p.dolphot["original"]
+                if os.path.exists(base_fp):
+                    os.remove(base_fp)
+                if os.path.exists(orig_fp):
+                    os.remove(orig_fp)
                 dolphot_argv = [
                     "dolphot",
-                    p.dolphot["base"],
-                    f"-p{p.dolphot['param']}",
+                    base_name,
+                    f"-p{param_path}",
                 ]
                 banner_cmd = "dolphot {base} -p{par} (log -> {log})".format(
-                    base=p.dolphot["base"],
-                    par=p.dolphot["param"],
-                    log=p.dolphot["log"],
+                    base=base_name,
+                    par=param_path,
+                    log=log_path,
                 )
                 make_banner("Running dolphot: {cmd}".format(cmd=banner_cmd))
                 run_external_command(
                     dolphot_argv,
                     log=log,
-                    tee_path=p.dolphot["log"],
+                    tee_path=log_path,
+                    cwd=wd,
+                    env=dolphot_subprocess_env(),
                 )
                 time.sleep(10)
                 log.info("dolphot is finished (whew)!")
-                if os.path.exists(p.dolphot["base"]):
+                out_cat = os.path.join(wd, base_name + ".phot") if wd else base_name + ".phot"
+                if os.path.isfile(out_cat):
+                    filesize = os.stat(out_cat).st_size / 1024 / 1024
+                    log.info(
+                        "Output dolphot file size is %s MB",
+                        "%.3f" % filesize,
+                    )
+                elif os.path.isfile(os.path.join(wd, base_name) if wd else base_name):
                     filesize = (
-                        os.stat(p.dolphot["base"]).st_size / 1024 / 1024
+                        os.stat(os.path.join(wd, base_name) if wd else base_name).st_size
+                        / 1024
+                        / 1024
                     )
                     log.info(
                         "Output dolphot file size is %s MB",
@@ -589,32 +684,35 @@ class DolphotPrimitive(BasePrimitive):
                 log.error(
                     "ERROR: dolphot parameter file %s does not exist! "
                     "Generate a parameter file first.",
-                    p.dolphot["param"],
+                    param_path,
                 )
         finally:
             vtxt = []
-            if os.path.isfile(p.dolphot.get("base", "")):
-                vtxt.append(p.dolphot["base"])
-            if os.path.isfile(p.dolphot.get("log", "")):
-                vtxt.append(p.dolphot["log"])
+            phot_out = os.path.join(wd, base_name + ".phot") if wd else base_name + ".phot"
+            if os.path.isfile(phot_out):
+                vtxt.append(phot_out)
+            elif os.path.isfile(os.path.join(wd, base_name) if wd else base_name):
+                vtxt.append(os.path.join(wd, base_name) if wd else base_name)
+            if os.path.isfile(log_path):
+                vtxt.append(log_path)
+            cleanup_wd = wd
             args = p.options.get("args")
-            wd = None
-            if args is not None:
+            if not cleanup_wd and args is not None:
                 raw_wd = getattr(args, "work_dir", None)
                 if isinstance(raw_wd, str) and raw_wd.strip():
-                    wd = raw_wd
-            if not wd and os.path.isfile(p.dolphot.get("param", "")):
-                wd = os.path.dirname(os.path.abspath(p.dolphot["param"]))
-            if not wd:
-                wd = os.getcwd()
+                    cleanup_wd = os.path.abspath(os.path.expanduser(raw_wd))
+            if not cleanup_wd and os.path.isfile(param_path):
+                cleanup_wd = os.path.dirname(os.path.abspath(param_path))
+            if not cleanup_wd:
+                cleanup_wd = os.getcwd()
             self._primitive_cleanup(
                 "run_dolphot",
-                work_dir=wd,
+                work_dir=cleanup_wd,
                 remove_globs=("*drc.noise.fits",),
                 validate_text_paths=vtxt,
                 text_min_size=0,
                 validation_notes={
-                    "param_exists": os.path.isfile(p.dolphot["param"]),
+                    "param_exists": os.path.isfile(param_path),
                 },
                 # Ephemeral sky sidecars; not drizzle debug artifacts
                 respect_keep_artifacts=False,
@@ -798,9 +896,9 @@ class DolphotPrimitive(BasePrimitive):
                             )
                             images.append(filename)
                             imgnums.append(imgnum)
-                hdu = fits.open(refname)
-                w = wcs.WCS(hdu[0].header)
-                x, y = wcs.utils.skycoord_to_pixel(p.coord, w, origin=1)
+                with fits.open(refname) as hdu:
+                    w = wcs_from_fits_hdu(hdu, 0)
+                    x, y = wcs.utils.skycoord_to_pixel(p.coord, w, origin=1)
                 with open(dp["fakelist"], "w") as fakelist:
                     magmin = gopt["mag_min"]
                     dm = (gopt["mag_max"] - magmin) / gopt["nstars"]
@@ -830,6 +928,7 @@ class DolphotPrimitive(BasePrimitive):
                     fake_argv,
                     log=log,
                     tee_path=dp["fakelog"],
+                    env=dolphot_subprocess_env(),
                 )
                 log.info("dolphot fake stars is finished (whew)!")
         finally:

@@ -84,7 +84,8 @@ def test_sky_fits_path_fit_suffix():
 
 def test_calcsky_annulus_offsets_bounded_by_list_capacity():
     """Offset count must fit in calcsky list buffer (same as C calloc size)."""
-    rin2, rout2, rsky, step = 0, 35 * 35, 35, 4
+    # Like calcsky.c for r_out=35, step=4: rout2=35² before rsky→36 alignment.
+    rin2, rout2, rsky, step = 0, 35 * 35, 36, 4
     oy, ox = _calcsky_annulus_offsets(rin2, rout2, rsky, step)
     cap = _calcsky_list_capacity(rsky, step)
     assert oy.shape[0] == ox.shape[0] <= cap

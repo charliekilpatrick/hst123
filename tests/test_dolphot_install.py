@@ -8,6 +8,7 @@ import pytest
 import hst123.dolphot_install as dolphot_install
 from hst123.dolphot_install import (
     ACS_WFC_PAM_FILENAMES,
+    apply_dolphot_source_patches,
     CONDA_DOLPHOT_RELATIVE,
     DOLPHOT_BASE_URL,
     DOLPHOT_EXECUTABLES,
@@ -30,7 +31,11 @@ from hst123.dolphot_install import (
     install_psfs,
     install_sources,
     link_executables_to_conda_bin,
+    relocate_acs_psf_into_canonical_layout,
     relocate_acs_wfc_pam_into_canonical_layout,
+    relocate_all_legacy_psf_into_canonical_layout,
+    relocate_wfc3_psf_into_canonical_layout,
+    relocate_wfpc2_psf_into_canonical_layout,
     psf_archive_payload_present,
     psf_install_recorded,
     sources_install_is_complete,
@@ -85,6 +90,32 @@ def test_configure_dolphot_makefile_uncomments(tmp_path):
     assert "export USEACS=1" in t
     assert "export USEROMAN=1" in t
     assert "#export THREADED=1" not in t
+
+
+def test_apply_dolphot_source_patches_main_buffer(tmp_path):
+    """Installer enlarges main() sprintf buffer so long absolute paths do not SIGTRAP."""
+    dc = tmp_path / "dolphot.c"
+    dc.write_text(
+        "int main(int argc,char**argv) {\n   char str[82];\n   return 0;\n}\n",
+        encoding="utf-8",
+    )
+    assert apply_dolphot_source_patches(tmp_path) is True
+    t = dc.read_text(encoding="utf-8")
+    assert "char str[4096]" in t
+    assert "hst123_dolphot_main_str_buf" in t
+    assert "char str[82]" not in t
+    assert apply_dolphot_source_patches(tmp_path) is False
+
+
+def test_apply_dolphot_source_patches_idempotent_when_already_4096(tmp_path):
+    dc = tmp_path / "dolphot.c"
+    dc.write_text(
+        "int main(int argc,char**argv) {\n"
+        "   /* hst123_dolphot_main_str_buf: x */\n"
+        "   char str[4096];\n}\n",
+        encoding="utf-8",
+    )
+    assert apply_dolphot_source_patches(tmp_path) is False
 
 
 def test_configure_dolphot_makefile_hst_only_skips_extended(tmp_path):
@@ -497,6 +528,115 @@ def test_relocate_acs_wfc_pam_into_canonical_layout(tmp_path):
     assert relocate_acs_wfc_pam_into_canonical_layout(make_root) is True
     for name in ACS_WFC_PAM_FILENAMES:
         assert (make_root / "acs" / "data" / name).is_file()
+
+
+def test_relocate_acs_psf_into_canonical_layout(tmp_path):
+    """Legacy ACS PSFs under dolphot3.1/dolphot2.0/acs/data are copied to acs/data."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    leg = mr / "dolphot2.0" / "acs" / "data"
+    leg.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    (leg / "F814W.wfc1.psf").write_bytes(b"x" * 2048)
+    (leg / "F814W.wfc2.psf").write_bytes(b"x" * 2048)
+    make_root = dolphot_make_root(root)
+    copied = relocate_acs_psf_into_canonical_layout(make_root)
+    assert copied == 2
+    assert (make_root / "acs" / "data" / "F814W.wfc1.psf").is_file()
+    assert (make_root / "acs" / "data" / "F814W.wfc2.psf").is_file()
+
+
+def test_relocate_acs_psf_from_sibling_dolphot20_layout(tmp_path):
+    """PSFs under opt/hst123-dolphot/dolphot2.0/acs/data (sibling of dolphot3.1)."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    mr.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    sib = root / "dolphot2.0" / "acs" / "data"
+    sib.mkdir(parents=True)
+    (sib / "F814W.wfc1.psf").write_bytes(b"x" * 2048)
+    (sib / "F814W.wfc2.psf").write_bytes(b"x" * 2048)
+    make_root = dolphot_make_root(root)
+    copied = relocate_acs_psf_into_canonical_layout(make_root)
+    assert copied == 2
+    assert (make_root / "acs" / "data" / "F814W.wfc1.psf").is_file()
+    assert (make_root / "acs" / "data" / "F814W.wfc2.psf").is_file()
+
+
+def test_relocate_wfc3_psf_into_canonical_layout_nested(tmp_path):
+    """WFC3 PSFs under dolphot3.1/dolphot2.0/wfc3/IR -> wfc3/IR."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    leg = mr / "dolphot2.0" / "wfc3" / "IR"
+    leg.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    (leg / "F105W.ir.psf").write_bytes(b"x" * 2048)
+    make_root = dolphot_make_root(root)
+    assert relocate_wfc3_psf_into_canonical_layout(make_root) == 1
+    assert (make_root / "wfc3" / "IR" / "F105W.ir.psf").is_file()
+
+
+def test_relocate_wfc3_psf_from_sibling_dolphot20_layout(tmp_path):
+    """WFC3 PSFs under sibling dolphot2.0/wfc3/data (next to dolphot3.1)."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    mr.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    sib = root / "dolphot2.0" / "wfc3" / "data"
+    sib.mkdir(parents=True)
+    (sib / "F275W.uvis.psf").write_bytes(b"y" * 2048)
+    make_root = dolphot_make_root(root)
+    assert relocate_wfc3_psf_into_canonical_layout(make_root) == 1
+    assert (make_root / "wfc3" / "data" / "F275W.uvis.psf").is_file()
+
+
+def test_relocate_wfpc2_psf_into_canonical_layout_nested(tmp_path):
+    """WFPC2 PSFs under dolphot3.1/dolphot2.0/wfpc2/data -> wfpc2/data."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    leg = mr / "dolphot2.0" / "wfpc2" / "data"
+    leg.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    (leg / "F555W_WF2.psf").write_bytes(b"z" * 2048)
+    make_root = dolphot_make_root(root)
+    assert relocate_wfpc2_psf_into_canonical_layout(make_root) == 1
+    assert (make_root / "wfpc2" / "data" / "F555W_WF2.psf").is_file()
+
+
+def test_relocate_wfpc2_psf_from_sibling_dolphot20_layout(tmp_path):
+    """WFPC2 PSFs under sibling dolphot2.0/wfpc2/data."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    mr.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    sib = root / "dolphot2.0" / "wfpc2" / "data"
+    sib.mkdir(parents=True)
+    (sib / "F814W_WF3.psf").write_bytes(b"w" * 2048)
+    make_root = dolphot_make_root(root)
+    assert relocate_wfpc2_psf_into_canonical_layout(make_root) == 1
+    assert (make_root / "wfpc2" / "data" / "F814W_WF3.psf").is_file()
+
+
+def test_relocate_all_legacy_psf_into_canonical_layout(tmp_path):
+    """Single merge pass copies ACS, WFC3, and WFPC2 from nested + sibling legacy trees."""
+    root = tmp_path / "hst123-dolphot"
+    mr = root / "dolphot3.1"
+    mr.mkdir(parents=True)
+    (mr / "Makefile").write_text("all:\n", encoding="utf-8")
+    nested = mr / "dolphot2.0"
+    (nested / "acs" / "data").mkdir(parents=True)
+    (nested / "acs" / "data" / "F606W.wfc1.psf").write_bytes(b"a" * 2048)
+    (nested / "wfc3" / "UVIS").mkdir(parents=True)
+    (nested / "wfc3" / "UVIS" / "F336W.uvis.psf").write_bytes(b"b" * 2048)
+    sib = root / "dolphot2.0"
+    (sib / "wfpc2" / "data").mkdir(parents=True)
+    (sib / "wfpc2" / "data" / "F300W_WF4.psf").write_bytes(b"c" * 2048)
+    make_root = dolphot_make_root(root)
+    counts = relocate_all_legacy_psf_into_canonical_layout(make_root)
+    assert counts == {"acs": 1, "wfc3": 1, "wfpc2": 1}
+    assert (make_root / "acs" / "data" / "F606W.wfc1.psf").is_file()
+    assert (make_root / "wfc3" / "UVIS" / "F336W.uvis.psf").is_file()
+    assert (make_root / "wfpc2" / "data" / "F300W_WF4.psf").is_file()
 
 
 def test_verify_acs_wfc_pam_files_ok(monkeypatch, tmp_path):

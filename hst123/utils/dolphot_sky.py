@@ -13,7 +13,9 @@ non-finite pixels replaced by the finite-data median so the external ``calcsky``
 binary can run reliably.  If it still fails, :func:`write_sky_fits_fallback`
 produces ``*.sky.fits`` in-process using a Python port of DOLPHOT's ``getsky``
 from ``calcsky.c`` (same annulus sampling, σ-rejection, and box smooth as the
-C tool; see also ``param/fits.param`` defaults for pixel inclusion).
+C tool; see also ``param/fits.param`` defaults for pixel inclusion). Stage-1 sky
+values are rounded to **float32** before stage 2, matching the C program’s
+float image buffer (avoids a systematic offset vs the binary on large grids).
 
 **Environment**
 
@@ -21,7 +23,10 @@ C tool; see also ``param/fits.param`` defaults for pixel inclusion).
   ``scipy.ndimage.median_filter`` fallback instead of the DOLPHOT port.
 * ``HST123_CALCSKY_NUMBA`` — if ``0``/``false``, disable Numba for stage 1 only
   (stage 2 uses a vectorized summed-area table in both paths). Without Numba,
-  stage 1 remains a pure Python double loop; install ``numba`` for large images.
+  stage 1 remains a pure Python double loop; **install ``numba``** for large
+  images (often **orders of magnitude** faster). Progress lines during stage 1
+  use a **single** update after the parallel pass when Numba is on (batched
+  row-by-row updates would serialize work and ruin performance).
 * ``HST123_CALCSKY_PROGRESS`` / ``HST123_PROGRESS_LOG`` — set to ``0`` to disable
   throttled progress lines during the Python/Numba sky map (see
   :mod:`hst123.utils.progress_log`).
@@ -243,7 +248,16 @@ def parse_calcsky_dataminmax(header) -> tuple[float, float]:
 
 
 def _calcsky_adjust_r_out_step(r_out: int, step: int) -> tuple[int, int]:
-    """Match calcsky.c: rsky>=1, rout2=rsky^2, and rsky multiple of skip."""
+    """
+    Match calcsky.c: ``rsky`` is argv outer radius (≥1), then rounded up to a
+    multiple of ``skip`` for the sampling grid span only.
+
+    **Important:** ``rout2`` used in the annulus test ``rin2 <= r^2 <= rout2`` is
+    ``argv_r_out**2`` **before** this bump (see ``calcsky.c``: ``rout2=rsky*rsky``
+    then ``if (rsky%skip) rsky=…``). Using ``rsky**2`` after the bump wrongly
+    enlarges the outer annulus when ``r_out`` is not divisible by ``step``
+    (e.g. 35 / 4 → grid to 36 px but ``rout2`` stays 35²).
+    """
     s = int(step)
     if s == 0:
         raise ValueError("calcsky step must be nonzero")
@@ -311,6 +325,19 @@ def _dolphot_stage2_box_mean(tsky: np.ndarray, step: int) -> np.ndarray:
     return out
 
 
+def _quantize_stage1_tsky_like_calcsky_c(tsky: np.ndarray) -> np.ndarray:
+    """
+    Align stage 1 → stage 2 with DOLPHOT ``calcsky.c``.
+
+    The C code keeps the first-pass sky map in the same **float** image type as
+    the input (typically IEEE float32 / ``BITPIX=-32``). The box-mean pass then
+    sums those **already-rounded** values. Keeping ``tsky`` in full ``float64``
+    through stage 2 biases the local mean vs the binary and shows up as a
+    **systematic** ~0.2–1 ADU median offset on large grids—not a σ-clip edge case.
+    """
+    return np.asarray(tsky, dtype=np.float32).astype(np.float64)
+
+
 def _dolphot_sigma_clip_iterate(
     list_buf: np.ndarray, n_in: int, siglo: float, sighi: float
 ) -> tuple[float, int]:
@@ -327,7 +354,12 @@ def _dolphot_sigma_clip_iterate(
         if n == 0:
             sky = 0.0
         else:
-            sky = float(np.sum(list_buf[:n])) / n
+            # Match calcsky.c: sequential double accumulation (not np.sum), so σ-clip
+            # thresholds match the C binary; np.sum can differ at rejection edges.
+            sky = 0.0
+            for i in range(n):
+                sky += float(list_buf[i])
+            sky /= n
             sig = 0.0
             for i in range(n):
                 d = float(list_buf[i]) - sky
@@ -390,6 +422,7 @@ def _compute_sky_dolphot_getsky_py(
     if progress is not None:
         progress.complete()
     t_s2 = time.monotonic()
+    tsky = _quantize_stage1_tsky_like_calcsky_c(tsky)
     out = _dolphot_stage2_box_mean(tsky, int(step))
     if progress is not None:
         log.info(
@@ -419,6 +452,7 @@ def _register_numba_calcsky():
 
     @njit(cache=True)
     def _clip_iter(list_buf, n_in, siglo, sighi):
+        # Mean: same sequential sum as calcsky.c and _dolphot_sigma_clip_iterate.
         n = n_in
         xx = 1
         sky = 0.0
@@ -428,8 +462,8 @@ def _register_numba_calcsky():
                 sky = 0.0
             else:
                 sky = 0.0
-                for i in range(n):
-                    sky += list_buf[i]
+                for j in range(n):
+                    sky += list_buf[j]
                 sky /= n
                 sig = 0.0
                 for i in range(n):
@@ -471,26 +505,7 @@ def _register_numba_calcsky():
                 tsky[y, x] = sky
         return tsky
 
-    @njit(parallel=True, cache=True)
-    def _stage1_rows(data, off_y, off_x, siglo, sighi, dmin, dmax, scratch, tsky, y0, y1):
-        ny, nx = data.shape
-        k_n = off_y.shape[0]
-        for y in prange(y0, y1):
-            list_buf = scratch[y]
-            for x in range(nx):
-                n = 0
-                for k in range(k_n):
-                    yy = y + off_y[k]
-                    xx = x + off_x[k]
-                    if 0 <= xx < nx and 0 <= yy < ny:
-                        v = data[yy, xx]
-                        if v > dmin and v < dmax:
-                            list_buf[n] = v
-                            n += 1
-                sky = _clip_iter(list_buf, n, siglo, sighi)
-                tsky[y, x] = sky
-
-    return _stage1, _stage1_rows
+    return _stage1
 
 
 _NUMBA_SKY_STAGES = None
@@ -500,7 +515,7 @@ def _get_numba_sky_stages():
     global _NUMBA_SKY_STAGES
     if _NUMBA_SKY_STAGES is None:
         _NUMBA_SKY_STAGES = _register_numba_calcsky()
-    return _NUMBA_SKY_STAGES
+    return _NUMBA_SKY_STAGES  # single JIT kernel: parallel stage-1 getsky
 
 
 def compute_sky_map_dolphot(
@@ -524,9 +539,11 @@ def compute_sky_map_dolphot(
     lower rejection ``< sky - siglo*σ``), each clamped to ≥ 1 like ``calcsky.c``.
 
     progress
-        Optional :class:`~hst123.utils.progress_log.LoggedProgress` for stage 1
-        (per-row or batched rows). Caller should call ``start()`` before this
-        function. Stage 2 (box mean) logs its own timing when *progress* is set.
+        Optional :class:`~hst123.utils.progress_log.LoggedProgress` for stage 1.
+        Caller should call ``start()`` before this function. With Numba, stage 1
+        logs once at completion (full parallel pass). The pure-Python path still
+        reports row progress. Stage 2 (box mean) logs its own timing when
+        *progress* is set.
     """
     if dmin is None:
         dmin = _DEFAULT_CALCSKY_DMIN
@@ -534,8 +551,10 @@ def compute_sky_map_dolphot(
         dmax = _DEFAULT_CALCSKY_DMAX
     rin_i = max(0, int(r_in))
     rin2 = rin_i * rin_i
+    r_out_arg = max(1, int(r_out))
+    # C: rout2 from argv before rsky is aligned to a multiple of skip (calcsky.c).
+    rout2 = r_out_arg * r_out_arg
     rsky, step_i = _calcsky_adjust_r_out_step(int(r_out), int(step))
-    rout2 = rsky * rsky
     sighi = float(sigma_low)
     if sighi < 1.0:
         sighi = 1.0
@@ -551,35 +570,17 @@ def compute_sky_map_dolphot(
         try:
             cap = _calcsky_list_capacity(rsky, step_i)
             off_y, off_x = _calcsky_annulus_offsets(rin2, rout2, rsky, step_i)
-            s1_full, s1_rows = _get_numba_sky_stages()
+            s1_full = _get_numba_sky_stages()
             ny, nx = arr.shape
             scratch = np.empty((ny, cap), dtype=np.float64)
+            # Always one full parallel pass. Batching rows for per-batch progress
+            # would run many sequential Numba kernels and destroy throughput.
+            tsky = s1_full(arr, off_y, off_x, siglo, sighi, dmin, dmax, scratch)
             if progress is not None:
-                tsky = np.zeros((ny, nx), dtype=np.float64)
-                n_batches = min(56, max(4, ny))
-                batch = max(1, (ny + n_batches - 1) // n_batches)
-                y0 = 0
-                while y0 < ny:
-                    y1 = min(ny, y0 + batch)
-                    s1_rows(
-                        arr,
-                        off_y,
-                        off_x,
-                        siglo,
-                        sighi,
-                        dmin,
-                        dmax,
-                        scratch,
-                        tsky,
-                        y0,
-                        y1,
-                    )
-                    progress.update(y1)
-                    y0 = y1
+                progress.update(ny)
                 progress.complete()
-            else:
-                tsky = s1_full(arr, off_y, off_x, siglo, sighi, dmin, dmax, scratch)
             t_stage2 = time.monotonic()
+            tsky = _quantize_stage1_tsky_like_calcsky_c(tsky)
             out = _dolphot_stage2_box_mean(tsky, step_i)
             if progress is not None:
                 log.info(
