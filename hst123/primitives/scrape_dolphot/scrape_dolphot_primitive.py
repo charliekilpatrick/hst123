@@ -105,6 +105,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             If True, write dp_001.phot, dp_002.phot, etc. Default True.
         """
         p = self._p
+        written = []
         for i, phot in enumerate(final_phot):
             outfile = dolphot["final_phot"]
             if not allphot:
@@ -116,8 +117,9 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             message = "Photometry for source {n} ".format(n=i)
             keys = phot.meta.keys()
             if "x" in keys and "y" in keys and "separation" in keys:
-                message += "at x,y={x},{y}.\nSeparated from input coordinate by {sep} pix."
-                message = message.format(
+                message += (
+                    "at x,y={x},{y}; offset from target {sep} pix"
+                ).format(
                     x=phot.meta["x"],
                     y=phot.meta["y"],
                     sep=phot.meta["separation"],
@@ -125,9 +127,16 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             log.info(message)
             with open(out, "w") as f:
                 display_show_photometry(phot, f=f, coord=p.coord, options=p.options, log=log)
+            written.append(out)
             with open(snana, "w") as f:
                 display_show_photometry(phot, f=f, snana=True, show=False, coord=p.coord, options=p.options, log=log)
-            log.info("")
+            written.append(snana)
+        self._primitive_cleanup(
+            "print_final_phot",
+            validate_text_paths=written,
+            text_min_size=0,
+            validation_notes={"n_sources": len(final_phot)},
+        )
 
     def get_limit_data(self, dolphot, coord, w, x, y, colfile, limit_radius):
         """
@@ -369,6 +378,38 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         import filecmp
 
         p = self._p
+        wd = os.path.abspath(
+            os.path.expanduser(getattr(p.options["args"], "work_dir", None) or ".")
+        )
+
+        def _scrapedolphot_cleanup(
+            phot_tables,
+            *,
+            note: str = "",
+        ) -> None:
+            tmp_path = os.path.join(wd, "tmp")
+            rpaths = [tmp_path] if os.path.isfile(tmp_path) else []
+            vfit = []
+            if reference and os.path.isfile(str(reference)):
+                vfit.append(str(reference))
+            vtxt = []
+            b = dolphot.get("base")
+            c = dolphot.get("colfile")
+            if b and os.path.isfile(b):
+                vtxt.append(b)
+            if c and os.path.isfile(c):
+                vtxt.append(c)
+            self._primitive_cleanup(
+                "scrapedolphot",
+                work_dir=wd,
+                remove_paths=rpaths,
+                validate_fits_paths=vfit,
+                validate_text_paths=vtxt,
+                text_min_size=1,
+                validate_tables=phot_tables if phot_tables is not None else [],
+                validation_notes={"exit": note} if note else {},
+            )
+
         base = dolphot["base"]
         colfile = dolphot["colfile"]
         if not os.path.isfile(base) or not os.path.isfile(colfile):
@@ -377,6 +418,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 "or check your dolphot output for errors",
                 dolphot["base"],
             )
+            _scrapedolphot_cleanup(None, note="missing_dolphot_io")
             return None
         if not reference or not coord:
             log.error(
@@ -473,6 +515,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             dec,
         )
         if len(data) == 0:
+            _scrapedolphot_cleanup(None, note="no_sources_in_radius")
             return None
         if brightest:
             data = sorted(data, key=lambda obj: obj["counts"], reverse=True)
@@ -495,6 +538,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             )
         obstable = p.input_list(images, show=False, save=False)
         if not obstable:
+            _scrapedolphot_cleanup(None, note="empty_obstable")
             return None
         final_phot = []
         for dat in data:
@@ -528,4 +572,5 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 source_phot.meta["dec"] = coord_out.dec.degree
             source_phot.sort(["MJD", "FILTER"])
             final_phot.append(source_phot)
+        _scrapedolphot_cleanup(final_phot, note="ok")
         return final_phot

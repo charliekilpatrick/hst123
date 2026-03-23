@@ -21,8 +21,13 @@ def add_options(parser=None, usage=None, version=None):
         help='Declination to reduce the HST images')
     parser.add_argument('--work-dir', default=None, type=str,
         help='Use the input working directory rather than the current dir.')
-    parser.add_argument('--raw-dir', default='./', type=str,
-        help='Use the input raw data directory rather than the current dir.')
+    parser.add_argument(
+        '--raw-dir',
+        default=None,
+        type=str,
+        metavar='DIR',
+        help='Directory for raw downloads (default: <work-dir>/raw).',
+    )
     parser.add_argument('--make-clean', default=False, action='store_true',
         help='Clean up all output files from previous runs then exit.')
     parser.add_argument('--download', default=False, action='store_true',
@@ -38,6 +43,14 @@ def add_options(parser=None, usage=None, version=None):
         help='Overwrite files when using download mode.')
     parser.add_argument('--cleanup', default=False, action='store_true',
         help='Clean up interstitial image files (i.e., flt,flc,c1m,c0m).')
+    parser.add_argument(
+        '--keep-drizzle-artifacts',
+        default=False,
+        action='store_true',
+        help='Keep AstroDrizzle/TweakReg scratch files (staticMask, shift logs, '
+        'headerlets, etc.) in the work directory; default archives logs to logs/ '
+        'and removes common intermediates.',
+    )
     parser.add_argument('--skip-copy', default=False, action='store_true',
         help='Skip copying files from archive if --archive is used.')
     parser.add_argument('--by-visit', default=False, action='store_true',

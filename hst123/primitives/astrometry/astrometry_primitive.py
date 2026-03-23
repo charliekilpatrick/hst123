@@ -1,6 +1,7 @@
 """Image alignment (TweakReg/JHAT), WCS updates, reference prep. parse_coord for RA/Dec."""
 
 import copy
+import functools
 import glob
 import logging
 import os
@@ -18,7 +19,49 @@ from astropy.table import Table, Column
 from scipy.interpolate import interp1d
 
 from hst123 import settings
+from hst123.utils.paths import normalize_fits_path
+from hst123.utils.stdio import suppress_stdout
+from hst123.utils.logging import format_hdu_list_summary, log_calls
+from hst123.utils.workdir_cleanup import cleanup_after_tweakreg
 from hst123.primitives.base import BasePrimitive
+
+_STWCS_LOGGER_NAMES = (
+    "stwcs",
+    "stwcs.wcsutil",
+    "stwcs.wcsutil.headerlet",
+)
+
+
+def _quiet_stwcs_for_headerlet(fn):
+    """Raise stwcs/headerlet loggers to WARNING for the duration of *fn* (less noise)."""
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        prev = {n: logging.getLogger(n).level for n in _STWCS_LOGGER_NAMES}
+        try:
+            for n in _STWCS_LOGGER_NAMES:
+                logging.getLogger(n).setLevel(logging.WARNING)
+            return fn(*args, **kwargs)
+        finally:
+            for n, lev in prev.items():
+                logging.getLogger(n).setLevel(lev)
+
+    return wrapped
+
+
+def _resolve_work_dir_chdir(work_dir):
+    """
+    Return absolute work directory, create if missing, and chdir into it.
+
+    Relative ``work_dir`` values must not be joined again after ``chdir`` —
+    e.g. ``os.chdir("test_data")`` then ``join("test_data", "x.txt")`` would
+    resolve to ``test_data/test_data/x.txt`` and raise FileNotFoundError.
+    """
+    base = work_dir if work_dir else "."
+    path = os.path.abspath(os.path.expanduser(base))
+    os.makedirs(path, exist_ok=True)
+    os.chdir(path)
+    return path
 
 
 def _is_number(num):
@@ -183,13 +226,27 @@ class AstrometryPrimitive(BasePrimitive):
         if not run_images:
             return None
 
-        images = copy.copy(run_images)
+        images = []
+        for file in run_images:
+            fp = normalize_fits_path(file)
+            if not os.path.isfile(fp):
+                log.warning(
+                    "Skipping missing or unreadable file before tweakreg: %s", file
+                )
+                continue
+            images.append(fp)
+
+        if not images:
+            log.warning("No on-disk images left for tweakreg after filtering.")
+            return None
+
         for file in list(images):
-            log.info("Checking %s for TWEAKSUC=1", file)
-            hdu = fits.open(file, mode="readonly")
-            remove_image = (
-                "TWEAKSUC" in hdu[0].header.keys() and hdu[0].header["TWEAKSUC"] == 1
-            )
+            log.debug("Checking %s for TWEAKSUC=1", file)
+            with fits.open(file, mode="readonly") as hdu:
+                remove_image = (
+                    "TWEAKSUC" in hdu[0].header.keys()
+                    and hdu[0].header["TWEAKSUC"] == 1
+                )
             if remove_image:
                 images.remove(file)
 
@@ -213,28 +270,36 @@ class AstrometryPrimitive(BasePrimitive):
         int
             Total number of sources from catalog.
         """
-        imghdu = fits.open(image)
+        if catalogs is None or stwcs is None:
+            log.warning("drizzlepac/stwcs unavailable; cannot count sources")
+            return 0
         nsources = 0
-        log.info("Getting number of sources in %s at threshold=%s", image, thresh)
-        for i, h in enumerate(imghdu):
-            if h.name == "SCI" or (len(imghdu) == 1 and h.name == "PRIMARY"):
-                filename = "{:s}[{:d}]".format(image, i)
-                wcs = stwcs.wcsutil.HSTWCS(filename)
-                catalog_mode = "automatic"
-                catalog = catalogs.generateCatalog(
-                    wcs,
-                    mode=catalog_mode,
-                    catalog=filename,
-                    threshold=thresh,
-                    **self._p.options["catalog"],
-                )
-                try:
-                    catalog.buildCatalogs()
-                    nsources += catalog.num_objects
-                except Exception:
-                    pass
+        log.debug(
+            "Source count %s threshold=%s",
+            os.path.basename(image),
+            thresh,
+        )
+        with fits.open(image, mode="readonly") as imghdu:
+            for i, h in enumerate(imghdu):
+                if h.name == "SCI" or (len(imghdu) == 1 and h.name == "PRIMARY"):
+                    filename = "{:s}[{:d}]".format(image, i)
+                    wcs = stwcs.wcsutil.HSTWCS(filename)
+                    catalog_mode = "automatic"
+                    catalog = catalogs.generateCatalog(
+                        wcs,
+                        mode=catalog_mode,
+                        catalog=filename,
+                        threshold=thresh,
+                        **self._p.options["catalog"],
+                    )
+                    try:
+                        with suppress_stdout():
+                            catalog.buildCatalogs()
+                        nsources += catalog.num_objects
+                    except Exception:
+                        pass
 
-        log.info("Got %s total sources", nsources)
+        log.debug("Got %s total sources for %s", nsources, os.path.basename(image))
         return nsources
 
     def count_nsources(self, images):
@@ -277,18 +342,28 @@ class AstrometryPrimitive(BasePrimitive):
         list of tuple
             (nobj, threshold) pairs from sampling thresholds.
         """
-        log.info("Getting tweakreg threshold for %s.  Target nobj=%s", image, target)
+        trd = settings.tweakreg_defaults
+        t_min = float(trd["threshold_min"])
+        t_hi = max(80.0, t_min * 2.0)
+        # Fixed small grid (was up to 12 catalog passes per image)
+        grid = np.geomspace(t_hi, t_min, num=5)
         inp_data = []
-        for t in np.flip([3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 80.0]):
-            nobj = self.get_nsources(image, t)
-            if len(inp_data) < 3:
-                inp_data.append((float(nobj), float(t)))
-            elif nobj < inp_data[-1][0]:
-                break
-            else:
-                inp_data.append((float(nobj), float(t)))
-                if nobj > target:
-                    break
+        log.debug(
+            "TweakReg threshold samples for %s target_nobj=%s",
+            os.path.basename(image),
+            target,
+        )
+        for t in grid:
+            nobj = self.get_nsources(image, float(t))
+            inp_data.append((float(nobj), float(t)))
+        inp_data.sort(key=lambda x: x[1])
+        log.info(
+            "TweakReg threshold curve %s: %d samples, nobj range %.0f–%.0f",
+            os.path.basename(image),
+            len(inp_data),
+            min(x[0] for x in inp_data),
+            max(x[0] for x in inp_data),
+        )
         return inp_data
 
     def add_thresh_data(self, thresh_data, image, inp_data):
@@ -368,19 +443,73 @@ class AstrometryPrimitive(BasePrimitive):
         thresh = thresh[mask]
         nsources = nsources[mask]
 
-        thresh_func = interp1d(
-            nsources, thresh, kind="linear", bounds_error=False, fill_value="extrapolate"
-        )
-        threshold = thresh_func(target)
-
         trd = settings.tweakreg_defaults
+        if len(thresh) == 0:
+            return float(trd["threshold_min"])
+        if len(thresh) == 1:
+            threshold = float(thresh[0])
+        else:
+            thresh_func = interp1d(
+                nsources,
+                thresh,
+                kind="linear",
+                bounds_error=False,
+                fill_value="extrapolate",
+            )
+            threshold = float(thresh_func(target))
+
         if threshold < trd["threshold_min"]:
             threshold = trd["threshold_min"]
         if threshold > trd["threshold_max"]:
             threshold = trd["threshold_max"]
 
-        log.info("Using threshold: %s", threshold)
+        log.debug("Interpolated TweakReg threshold: %s", threshold)
         return threshold
+
+    def _build_tweakreg_batches(self, tmp_images, reference):
+        """
+        Split working copies by filter so TweakReg uses a spectrally matched reference.
+
+        Aligning e.g. F555W exposures to an F814W reference yields too few cross-band
+        matches; each filter aligns to the user reference when filters match, else to
+        the deepest exposure in that filter.
+        """
+        if not tmp_images:
+            return []
+
+        def _filt_of(tp):
+            orig = tp.replace(".rawtmp.fits", ".fits")
+            return self._p._fits.get_filter(orig)
+
+        by_filt = {}
+        for tp in tmp_images:
+            by_filt.setdefault(_filt_of(tp), []).append(tp)
+
+        ref_ok = bool(
+            reference
+            and reference != "dummy.fits"
+            and os.path.isfile(reference)
+        )
+        ref_filt = self._p._fits.get_filter(reference) if ref_ok else None
+
+        batches = []
+        for filt in sorted(by_filt.keys(), key=str):
+            paths = by_filt[filt]
+            if len(paths) < 2:
+                log.info(
+                    "TweakReg: skip filter %s — need ≥2 images (have %d)",
+                    filt,
+                    len(paths),
+                )
+                continue
+            if ref_filt is not None and filt == ref_filt:
+                batches.append((reference, paths))
+            else:
+                deepest = sorted(
+                    paths, key=lambda im: fits.getval(im, "EXPTIME")
+                )[-1]
+                batches.append((deepest, paths))
+        return batches
 
     def get_shallow_param(self, image):
         """
@@ -435,14 +564,16 @@ class AstrometryPrimitive(BasePrimitive):
             Rows with "file", "xoffset", "yoffset"; non-NaN offsets get TWEAKSUC=1.
         """
         for row in shifts:
-            if ~np.isnan(row["xoffset"]) and ~np.isnan(row["yoffset"]):
-                file = row["file"]
-                if not os.path.exists(file):
-                    log.warning("%s does not exist", file)
-                    continue
-                hdu = fits.open(file, mode="update")
+            xo, yo = row["xoffset"], row["yoffset"]
+            if np.isnan(xo) or np.isnan(yo):
+                continue
+            file = row["file"]
+            if not os.path.exists(file):
+                log.warning("%s does not exist", file)
+                continue
+            with fits.open(file, mode="update") as hdu:
                 hdu[0].header["TWEAKSUC"] = 1
-                hdu.close()
+                hdu.flush()
 
     def copy_wcs_keys(self, from_hdu, to_hdu):
         """
@@ -463,6 +594,7 @@ class AstrometryPrimitive(BasePrimitive):
             if key in from_hdu.header.keys():
                 to_hdu.header[key] = from_hdu.header[key]
 
+    @log_calls
     def run_alignment(
         self,
         obstable,
@@ -499,15 +631,24 @@ class AstrometryPrimitive(BasePrimitive):
             self._p.options["args"], "align_with", "tweakreg"
         ).lower()
         if align_with == "jhat":
-            return self.run_jhat_align(obstable, reference)
-        return self.run_tweakreg(
-            obstable,
-            reference,
-            do_cosmic=do_cosmic,
-            skip_wcs=skip_wcs,
-            search_radius=search_radius,
-            update_hdr=update_hdr,
+            result = self.run_jhat_align(obstable, reference)
+        else:
+            result = self.run_tweakreg(
+                obstable,
+                reference,
+                do_cosmic=do_cosmic,
+                skip_wcs=skip_wcs,
+                search_radius=search_radius,
+                update_hdr=update_hdr,
+            )
+        self._primitive_cleanup(
+            "run_alignment",
+            validation_notes={
+                "align_with": align_with,
+                "message": result[0] if result else None,
+            },
         )
+        return result
 
     def run_jhat_align(self, obstable, reference):
         """
@@ -528,8 +669,7 @@ class AstrometryPrimitive(BasePrimitive):
         from hst123.primitives.astrometry.jhat import run_jhat
 
         p = self._p
-        outdir = p.options["args"].work_dir if p.options["args"].work_dir else "."
-        os.chdir(outdir)
+        outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
         params = getattr(settings, "jhat_params", None) or {}
         for image in obstable["image"]:
             if not os.path.exists(image):
@@ -546,9 +686,26 @@ class AstrometryPrimitive(BasePrimitive):
                 )
             except Exception as e:
                 log.error("JHAT failed for %s: %s", image, e)
+                self._primitive_cleanup(
+                    "run_jhat_align",
+                    work_dir=outdir,
+                    validation_notes={"status": "failed", "image": str(image)},
+                )
                 return ("jhat failure", None)
+        vpaths = [
+            normalize_fits_path(str(im))
+            for im in obstable["image"]
+            if os.path.isfile(str(im))
+        ]
+        self._primitive_cleanup(
+            "run_jhat_align",
+            work_dir=outdir,
+            validate_fits_paths=vpaths,
+        )
         return ("jhat success", None)
 
+    @log_calls
+    @_quiet_stwcs_for_headerlet
     def run_tweakreg(
         self,
         obstable,
@@ -582,17 +739,27 @@ class AstrometryPrimitive(BasePrimitive):
             (success_bool, shift_table).
         """
         p = self._p
-        if p.options["args"].work_dir:
-            outdir = p.options["args"].work_dir
-        else:
-            outdir = "."
-
-        os.chdir(outdir)
+        outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
+        outshifts = os.path.join(outdir, "drizzle_shifts.txt")
         options = p.options["global_defaults"]
+
+        def _tweakreg_cleanup_and_return(result):
+            vpaths = [
+                normalize_fits_path(str(im))
+                for im in obstable["image"]
+                if os.path.isfile(str(im))
+            ]
+            self._primitive_cleanup(
+                "run_tweakreg",
+                work_dir=outdir,
+                remove_globs=(".hst123_calcsky_*.fits",),
+                validate_fits_paths=vpaths,
+            )
+            return result
 
         run_images = self.check_images_for_tweakreg(list(obstable["image"]))
         if not run_images:
-            return ("tweakreg success", None)
+            return _tweakreg_cleanup_and_return(("tweakreg success", None))
         if reference in run_images:
             run_images.remove(reference)
 
@@ -603,7 +770,7 @@ class AstrometryPrimitive(BasePrimitive):
 
         if not run_images:
             log.warning("All images have been run through tweakreg.")
-            return (True, shift_table)
+            return _tweakreg_cleanup_and_return((True, shift_table))
 
         log.info("Need to run tweakreg for images:")
         p.input_list(obstable["image"], show=True, save=False)
@@ -650,170 +817,284 @@ class AstrometryPrimitive(BasePrimitive):
         else:
             modified = True
 
+        if tweakreg is None:
+            log.error("drizzlepac.tweakreg is not installed; skipping alignment")
+            return _tweakreg_cleanup_and_return(("tweakreg failure", shift_table))
+
         log.info("Tweakreg is executing...")
         start_tweak = time.time()
 
-        tweakreg_success = False
-        tweak_img = copy.copy(tmp_images)
-        ithresh = p.threshold
-        rthresh = p.threshold
-        shallow_img = []
-        thresh_data = None
-        tries = 0
+        batches = self._build_tweakreg_batches(tmp_images, reference)
+        if not batches:
+            log.warning(
+                "TweakReg: no filter group with ≥2 images; aligning full list once"
+            )
+            batches = [(reference, tmp_images)]
 
-        while not tweakreg_success and tries < 10:
-            tweak_img = self.check_images_for_tweakreg(tweak_img)
-            if not tweak_img:
-                break
-
-            if shallow_img:
-                for img in shallow_img:
-                    if img in tweak_img:
-                        tweak_img.remove(img)
-
-            if len(tweak_img) == 0:
-                log.error("removed all images as shallow")
-                tweak_img = copy.copy(tmp_images)
-                tweak_img = self.check_images_for_tweakreg(tweak_img)
-
-            success = list(set(tmp_images) ^ set(tweak_img))
-            if tries > 1 and reference == "dummy.fits" and len(success) > 0:
-                n = len(success) - 1
-                shutil.copyfile(success[random.randint(0, n)], "dummy.fits")
-
-            log.info("Reference image: %s  Images: %s", reference, ",".join(tweak_img))
-
-            deepest = sorted(tweak_img, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
-
-            if not thresh_data or deepest not in thresh_data["file"]:
-                inp_data = self.get_tweakreg_thresholds(deepest, options["nbright"] * 4)
-                thresh_data = self.add_thresh_data(thresh_data, deepest, inp_data)
-            mask = thresh_data["file"] == deepest
-            inp_thresh = thresh_data[mask][0]
-            log.info("Getting image threshold...")
-            new_ithresh = self.get_best_tweakreg_threshold(inp_thresh, options["nbright"] * 4)
-
-            if not thresh_data or reference not in thresh_data["file"]:
-                inp_data = self.get_tweakreg_thresholds(reference, options["nbright"] * 4)
-                thresh_data = self.add_thresh_data(thresh_data, reference, inp_data)
-            mask = thresh_data["file"] == reference
-            inp_thresh = thresh_data[mask][0]
-            log.info("Getting reference threshold...")
-            new_rthresh = self.get_best_tweakreg_threshold(inp_thresh, options["nbright"] * 4)
-
-            if not rthresh:
-                rthresh = p.threshold
-            if not ithresh:
-                ithresh = p.threshold
-
-            nbright = options["nbright"]
-            minobj = options["minobj"]
-            search_rad = int(np.round(options["search_rad"]))
-            if search_radius:
-                search_rad = search_radius
-
-            trd = settings.tweakreg_defaults
-            rconv = trd["conv_width"]
-            iconv = trd["conv_width"]
-            tol = trd["tolerance"]
-            for detkey, overrides in trd["detector_overrides"].items():
-                if detkey in p._fits.get_instrument(reference):
-                    rconv = overrides["conv_width"]
-                    break
-            for detkey, overrides in trd["detector_overrides"].items():
-                if all(detkey in p._fits.get_instrument(i) for i in tweak_img):
-                    iconv = overrides["conv_width"]
-                    tol = overrides["tolerance"]
-                    break
-
-            if (new_ithresh >= ithresh or new_rthresh >= rthresh) and tries > 1:
-                log.info("Decreasing threshold and increasing tolerance...")
-                ithresh = np.max([new_ithresh * (0.95 ** tries), trd["threshold_min"]])
-                rthresh = np.max([new_rthresh * (0.95 ** tries), trd["threshold_min"]])
-                tol = tol * 1.3 ** tries
-                search_rad = search_rad * 1.2 ** tries
-            else:
-                ithresh = new_ithresh
-                rthresh = new_rthresh
-
-            if tries > 7:
-                minobj = trd["minobj_fallback"]
-
+        if len(batches) > 1:
             log.info(
-                "Adjusting thresholds: Reference threshold=%s Image threshold=%s Tolerance=%s Search radius=%s",
-                "%2.4f" % rthresh,
-                "%2.4f" % ithresh,
-                "%2.4f" % tol,
-                "%2.4f" % search_rad,
+                "TweakReg: %d filter batch(es) (same-band reference per batch)",
+                len(batches),
             )
 
-            outshifts = os.path.join(outdir, "drizzle_shifts.txt")
+        tweakreg_success = True
+        thresh_data = None
+        max_tries = 6
 
-            try:
-                tweakreg.TweakReg(
-                    files=tweak_img,
-                    refimage=reference,
-                    verbose=False,
-                    interactive=False,
-                    clean=True,
-                    writecat=True,
-                    updatehdr=update_hdr,
-                    reusename=True,
-                    rfluxunits="counts",
-                    minobj=minobj,
-                    wcsname="TWEAK",
-                    searchrad=search_rad,
-                    searchunits="arcseconds",
-                    runfile="",
-                    tolerance=tol,
-                    refnbright=nbright,
-                    nbright=nbright,
-                    separation=trd["separation"],
-                    residplot="No plot",
-                    see2dplot=False,
-                    fitgeometry="shift",
-                    imagefindcfg={"threshold": ithresh, "conv_width": iconv, "use_sharp_round": True},
-                    refimagefindcfg={"threshold": rthresh, "conv_width": rconv, "use_sharp_round": True},
-                    shiftfile=True,
-                    outshifts=outshifts,
+        for bi, (ref_use, batch_imgs) in enumerate(batches):
+            out_this = (
+                outshifts
+                if len(batches) == 1
+                else os.path.join(outdir, "drizzle_shifts_%d.txt" % bi)
+            )
+            batch_ok = False
+            tweak_img = copy.copy(batch_imgs)
+            ithresh = p.threshold
+            rthresh = p.threshold
+            shallow_img = []
+            tries = 0
+
+            while not batch_ok and tries < max_tries:
+                tweak_img = self.check_images_for_tweakreg(tweak_img)
+                if not tweak_img:
+                    batch_ok = True
+                    break
+
+                if shallow_img:
+                    for img in shallow_img:
+                        if img in tweak_img:
+                            tweak_img.remove(img)
+
+                if len(tweak_img) == 0:
+                    log.error("removed all images as shallow in batch %d", bi)
+                    tweak_img = copy.copy(batch_imgs)
+                    tweak_img = self.check_images_for_tweakreg(tweak_img)
+
+                success = list(set(batch_imgs) ^ set(tweak_img))
+                if tries > 1 and ref_use == "dummy.fits" and len(success) > 0:
+                    n = len(success) - 1
+                    shutil.copyfile(success[random.randint(0, n)], "dummy.fits")
+
+                log.info(
+                    "TweakReg batch %d: ref=%s  n=%d  %s",
+                    bi,
+                    os.path.basename(ref_use),
+                    len(tweak_img),
+                    ", ".join(os.path.basename(x) for x in tweak_img[:6])
+                    + (" …" if len(tweak_img) > 6 else ""),
                 )
-                shallow_img = []
 
-            except AssertionError as e:
-                self.tweakreg_error(e)
-                log.info("Re-running tweakreg with shallow images removed:")
-                for img in tweak_img:
-                    nsources = self.get_nsources(img, ithresh)
-                    if nsources < 1000:
-                        shallow_img.append(img)
+                deepest = sorted(tweak_img, key=lambda im: fits.getval(im, "EXPTIME"))[
+                    -1
+                ]
 
-            except TypeError as e:
-                self.tweakreg_error(e)
+                if not thresh_data or deepest not in thresh_data["file"]:
+                    inp_data = self.get_tweakreg_thresholds(
+                        deepest, options["nbright"] * 4
+                    )
+                    thresh_data = self.add_thresh_data(thresh_data, deepest, inp_data)
+                mask = thresh_data["file"] == deepest
+                inp_thresh = thresh_data[mask][0]
+                log.debug("Image threshold fit for %s", os.path.basename(deepest))
+                new_ithresh = self.get_best_tweakreg_threshold(
+                    inp_thresh, options["nbright"] * 4
+                )
 
-            log.info("Reading in shift file: %s", outshifts)
-            shifts = Table.read(
-                outshifts,
-                format="ascii",
-                names=("file", "xoffset", "yoffset", "rotation1", "rotation2", "scale1", "scale2"),
-            )
+                if not thresh_data or ref_use not in thresh_data["file"]:
+                    inp_data = self.get_tweakreg_thresholds(
+                        ref_use, options["nbright"] * 4
+                    )
+                    thresh_data = self.add_thresh_data(thresh_data, ref_use, inp_data)
+                mask = thresh_data["file"] == ref_use
+                inp_thresh = thresh_data[mask][0]
+                log.debug("Reference threshold fit for %s", os.path.basename(ref_use))
+                new_rthresh = self.get_best_tweakreg_threshold(
+                    inp_thresh, options["nbright"] * 4
+                )
 
-            self.apply_tweakreg_success(shifts)
+                if not rthresh:
+                    rthresh = p.threshold
+                if not ithresh:
+                    ithresh = p.threshold
 
-            for row in shifts:
-                filename = os.path.basename(row["file"])
-                filename = filename.replace(".rawtmp.fits", "").replace(".fits", "")
-                idx = [i for i, r in enumerate(shift_table) if filename in r["file"]]
-                if len(idx) == 1:
-                    shift_table[idx[0]]["xoffset"] = row["xoffset"]
-                    shift_table[idx[0]]["yoffset"] = row["yoffset"]
+                nbright = options["nbright"]
+                minobj = options["minobj"]
+                search_rad = int(np.round(options["search_rad"]))
+                if search_radius:
+                    search_rad = search_radius
 
-            if not self.check_images_for_tweakreg(tmp_images):
-                tweakreg_success = True
+                trd = settings.tweakreg_defaults
+                rconv = trd["conv_width"]
+                iconv = trd["conv_width"]
+                tol = trd["tolerance"]
+                for detkey, overrides in trd["detector_overrides"].items():
+                    if detkey in p._fits.get_instrument(ref_use):
+                        rconv = overrides["conv_width"]
+                        break
+                for detkey, overrides in trd["detector_overrides"].items():
+                    if all(detkey in p._fits.get_instrument(i) for i in tweak_img):
+                        iconv = overrides["conv_width"]
+                        tol = overrides["tolerance"]
+                        break
 
-            tries += 1
+                if (new_ithresh >= ithresh or new_rthresh >= rthresh) and tries > 1:
+                    log.debug(
+                        "Relaxing TweakReg thresholds (try %d): image/ref thresh, tol, searchrad",
+                        tries,
+                    )
+                    ithresh = np.max(
+                        [new_ithresh * (0.95 ** tries), trd["threshold_min"]]
+                    )
+                    rthresh = np.max(
+                        [new_rthresh * (0.95 ** tries), trd["threshold_min"]]
+                    )
+                    tol = tol * 1.3 ** tries
+                    search_rad = search_rad * 1.2 ** tries
+                else:
+                    ithresh = new_ithresh
+                    rthresh = new_rthresh
 
-        log.info("Tweakreg took %s seconds to execute.", time.time() - start_tweak)
-        log.info("Shift table: %s", shift_table)
+                if tries > 4:
+                    minobj = trd["minobj_fallback"]
+
+                log.debug(
+                    "TweakReg params: ref_thresh=%.4f img_thresh=%.4f tol=%.4f searchrad=%.4f minobj=%s",
+                    rthresh,
+                    ithresh,
+                    tol,
+                    search_rad,
+                    minobj,
+                )
+
+                try:
+                    with suppress_stdout():
+                        tweakreg.TweakReg(
+                            files=tweak_img,
+                            refimage=ref_use,
+                            verbose=False,
+                            interactive=False,
+                            clean=True,
+                            writecat=True,
+                            updatehdr=update_hdr,
+                            reusename=True,
+                            rfluxunits="counts",
+                            minobj=minobj,
+                            wcsname="TWEAK",
+                            searchrad=search_rad,
+                            searchunits="arcseconds",
+                            runfile="",
+                            tolerance=tol,
+                            refnbright=nbright,
+                            nbright=nbright,
+                            separation=trd["separation"],
+                            residplot="No plot",
+                            see2dplot=False,
+                            fitgeometry="shift",
+                            imagefindcfg={
+                                "threshold": ithresh,
+                                "conv_width": iconv,
+                                "use_sharp_round": True,
+                            },
+                            refimagefindcfg={
+                                "threshold": rthresh,
+                                "conv_width": rconv,
+                                "use_sharp_round": True,
+                            },
+                            shiftfile=True,
+                            outshifts=out_this,
+                        )
+                    shallow_img = []
+
+                except AssertionError as e:
+                    self.tweakreg_error(e)
+                    max_et = max(
+                        fits.getval(im, "EXPTIME") for im in tweak_img
+                    )
+                    shallow_img = [
+                        im
+                        for im in tweak_img
+                        if fits.getval(im, "EXPTIME") < 0.5 * max_et
+                    ]
+                    if not shallow_img:
+                        shallow_img = [
+                            sorted(
+                                tweak_img,
+                                key=lambda im: fits.getval(im, "EXPTIME"),
+                            )[0]
+                        ]
+                    log.debug(
+                        "Removing %d shallow exposure(s) from batch (EXPTIME heuristic)",
+                        len(shallow_img),
+                    )
+
+                except TypeError as e:
+                    self.tweakreg_error(e)
+
+                log.debug("Reading shift file: %s", out_this)
+                if not os.path.isfile(out_this):
+                    log.warning("Missing shift file %s after TweakReg", out_this)
+                    tries += 1
+                    continue
+
+                shifts = Table.read(
+                    out_this,
+                    format="ascii",
+                    names=(
+                        "file",
+                        "xoffset",
+                        "yoffset",
+                        "rotation1",
+                        "rotation2",
+                        "scale1",
+                        "scale2",
+                    ),
+                )
+
+                self.apply_tweakreg_success(shifts)
+
+                for row in shifts:
+                    filename = os.path.basename(row["file"])
+                    filename = filename.replace(".rawtmp.fits", "").replace(
+                        ".fits", ""
+                    )
+                    idx = [
+                        i
+                        for i, r in enumerate(shift_table)
+                        if filename in r["file"]
+                    ]
+                    if len(idx) == 1:
+                        shift_table[idx[0]]["xoffset"] = row["xoffset"]
+                        shift_table[idx[0]]["yoffset"] = row["yoffset"]
+
+                if not self.check_images_for_tweakreg(batch_imgs):
+                    batch_ok = True
+
+                tries += 1
+
+            if not batch_ok:
+                log.warning("TweakReg batch %d did not converge after %d tries", bi, max_tries)
+                tweakreg_success = False
+
+        log.info("Tweakreg finished in %.2fs", time.time() - start_tweak)
+        log.debug("Shift table: %s", shift_table)
+        try:
+            parts = []
+            for row in shift_table:
+                bn = os.path.basename(str(row["file"]))
+                parts.append(
+                    "%s dx=%s dy=%s" % (bn, row["xoffset"], row["yoffset"])
+                )
+            log.info("Tweakreg offsets (%d): %s", len(parts), "; ".join(parts[:8]) + (" …" if len(parts) > 8 else ""))
+        except Exception:
+            log.info("Tweakreg: %d shift row(s)", len(shift_table))
+
+        cleanup_after_tweakreg(
+            outdir,
+            log=log,
+            keep_artifacts=getattr(
+                p.options["args"], "keep_drizzle_artifacts", False
+            ),
+        )
 
         # Fix CRVAL/CRPIX indexing after tweakreg
         for image in tmp_images:
@@ -838,14 +1119,15 @@ class AstrometryPrimitive(BasePrimitive):
             for image in run_images:
                 if image == reference or "wfc3_ir" in p._fits.get_instrument(image):
                     continue
-                log.info("Updating image data for image: %s", image)
                 rawtmp = image.replace(".fits", ".rawtmp.fits")
                 rawhdu = fits.open(rawtmp, mode="readonly")
                 hdu = fits.open(image, mode="readonly")
+                log.info(
+                    "Merge WCS/data %s | %s",
+                    os.path.basename(image),
+                    format_hdu_list_summary(hdu),
+                )
                 newhdu = fits.HDUList()
-
-                log.info("Current image info:")
-                hdu.info()
 
                 for i, h in enumerate(hdu):
                     if h.name == "SCI":
@@ -884,9 +1166,10 @@ class AstrometryPrimitive(BasePrimitive):
                 if "wfpc2" in p._fits.get_instrument(image).lower():
                     newhdu[0].header["NEXTEND"] = 4
 
-                log.info("New image info:")
-                newhdu.info()
+                log.debug("After merge: %s", format_hdu_list_summary(newhdu))
                 newhdu.writeto(image, output_verify="silentfix", overwrite=True)
+                rawhdu.close()
+                hdu.close()
 
                 if os.path.isfile(rawtmp) and not p.options["args"].cleanup:
                     os.remove(rawtmp)
@@ -901,4 +1184,4 @@ class AstrometryPrimitive(BasePrimitive):
         if modified:
             p.sanitize_reference(reference)
 
-        return (tweakreg_success, shift_table)
+        return _tweakreg_cleanup_and_return((tweakreg_success, shift_table))

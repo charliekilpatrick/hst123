@@ -3,7 +3,27 @@ import pytest
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
 
+import os
+
 from hst123.primitives.astrometry import AstrometryPrimitive, parse_coord
+from hst123.primitives.astrometry.astrometry_primitive import (
+    _resolve_work_dir_chdir,
+)
+
+
+def test_resolve_work_dir_chdir_no_double_test_data(tmp_path, monkeypatch):
+    """After chdir(work_dir), shiftfile path must not be work_dir/shift under CWD."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    wd = root / "test_data"
+    wd.mkdir()
+    monkeypatch.chdir(root)
+    resolved = _resolve_work_dir_chdir("test_data")
+    assert resolved == str(wd.resolve())
+    assert os.getcwd() == str(wd.resolve())
+    shift = os.path.join(resolved, "drizzle_shifts.txt")
+    assert shift == str(wd / "drizzle_shifts.txt")
+    assert "test_data" + os.sep + "test_data" not in shift
 
 
 class TestParseCoord:

@@ -9,6 +9,7 @@ zero-point notes are in docs/ (changelog.md, zeropoints.md).
 import copy
 import filecmp
 import glob
+import logging as py_logging
 import os
 import random
 import shutil
@@ -21,7 +22,7 @@ import requests
 from astropy.io import fits
 from astropy.table import Table, Column, unique
 from astropy.time import Time
-from astropy.utils.data import clear_download_cache, download_file
+from astropy.utils.data import clear_download_cache
 import astropy.wcs as wcs
 from astroscrappy import detect_cosmics
 from stwcs import updatewcs
@@ -31,8 +32,49 @@ warnings.filterwarnings("ignore")
 
 from hst123 import __version__, settings
 from hst123.utils import options
-from hst123.utils.logging import get_logger, make_banner
-from hst123.utils.stdio import suppress_stdout
+from hst123.utils.logging import (
+    ASTRODRIZZLE_DETAIL_LOGGER,
+    PHOTEQ_DETAIL_LOGGER,
+    attach_work_dir_log_file,
+    ensure_cli_logging_configured,
+    format_hdu_list_summary,
+    get_logger,
+    ephemeral_pipeline_runfile,
+    ingest_text_file_to_logger,
+    log_calls,
+    log_pipeline_configuration,
+    make_banner,
+)
+from hst123.utils.stdio import suppress_stdout, suppress_stdout_fd
+from hst123.utils.wcs_utils import fix_sip_ctype_headers_fits
+from hst123.utils.paths import normalize_fits_path, normalize_work_and_raw_dirs
+from hst123.utils.astrodrizzle_paths import (
+    astrodrizzle_output_exists,
+    logical_driz_to_internal_astrodrizzle,
+    normalize_astrodrizzle_output_path,
+    recover_drizzlepac_linear_output,
+)
+from hst123.utils.astrodrizzle_helpers import (
+    build_astrodrizzle_keyword_args,
+    build_wfpc2_skymask_catalog,
+    combine_type_and_nhigh,
+    drizzle_product_catalog_header,
+    drizzle_sidecar_paths,
+    remove_internal_linear_drizzle_products,
+    rename_astrodrizzle_sidecars,
+    resolve_drizzle_clean_flag,
+    ensure_wcsname_tweak_on_image,
+    wcs_image_hdu_index,
+    write_drc_multis_extension_if_requested,
+)
+from hst123.utils.workdir_cleanup import (
+    cleanup_after_astrodrizzle,
+    remove_superseded_instrument_mask_reference_drizzle,
+)
+from hst123.utils.reference_download import (
+    fetch_calibration_reference,
+    ref_prefix_for_header,
+)
 from hst123.utils.visit import add_visit_info as add_visit_info_util
 from hst123.utils.wcs_utils import make_meta_wcs_header as make_meta_wcs_header_util
 from hst123.primitives import FitsHelper, PhotometryHelper
@@ -115,6 +157,9 @@ class hst123(object):
     self._astrom = AstrometryPrimitive(self)
     self._dolphot = DolphotPrimitive(self)
     self._scrape_dolphot = ScrapeDolphotPrimitive(self)
+    log.debug(
+        "Pipeline ready (FitsHelper, PhotometryHelper, astrometry, DOLPHOT, scrape)."
+    )
 
   def add_options(self, parser=None, usage=None):
     """
@@ -134,10 +179,11 @@ class hst123(object):
     """
     return options.add_options(parser=parser, usage=usage, version=__version__)
 
+  @log_calls
   def clear_downloads(self, options):
     if self.options['args'].no_clear_downloads:
-        return(None)
-    log.info('Trying to clear downloads')
+      return(None)
+    log.debug('clear_downloads: astropy cache')
     try:
         # utils.data.download_file can get buggy if the cache is
         # full.  Clear the cache even though we aren't using caching
@@ -145,7 +191,7 @@ class hst123(object):
         if 'HOME' in os.environ.keys():
             astropath = options['astropath']
             astropy_cache = os.environ['HOME'] + astropath
-            log.info('Clearing cache: %s', astropy_cache)
+            log.debug('clear_download_cache %s', astropy_cache)
             if os.path.exists(astropy_cache):
                 with suppress_stdout():
                     clear_download_cache()
@@ -172,26 +218,29 @@ class hst123(object):
                     os.remove(file)
         sys.exit(0)
 
+  @log_calls
   def try_to_get_image(self, image):
-
-    image = image.lower()
 
     if not self.coord:
         return(False)
 
-    # Need to guess image properties from input data and image name
-    data = {'productFilename': image, 'ra': self.coord.ra.degree}
+    dest = normalize_fits_path(image)
+    base = os.path.basename(image).lower()
+
+    # Need to guess image properties from input data and **basename** (path may
+    # include work_dir/test_data/... so startswith 'j' would fail on '.../j*.fits')
+    data = {'productFilename': os.path.basename(image), 'ra': self.coord.ra.degree}
 
     inst = ''
-    if image.startswith('i') and image.endswith('flc.fits'):
+    if base.startswith('i') and base.endswith('flc.fits'):
         inst = 'WFC3/UVIS'
-    elif image.startswith('i') and image.endswith('flt.fits'):
+    elif base.startswith('i') and base.endswith('flt.fits'):
         inst = 'WFC3/IR'
-    elif image.startswith('j') and image.endswith('flt.fits'):
+    elif base.startswith('j') and base.endswith('flt.fits'):
         inst = 'ACS/HRC'
-    elif image.startswith('j') and image.endswith('flc.fits'):
+    elif base.startswith('j') and base.endswith('flc.fits'):
         inst = 'ACS/WFC'
-    elif image.startswith('u'):
+    elif base.startswith('u'):
         inst = 'WFPC2'
     else:
         return(False)
@@ -201,9 +250,12 @@ class hst123(object):
     success, fullfile = self.check_archive(data)
 
     if success:
-        shutil.copyfile(fullfile, image)
-    else:
-        return(False)
+        parent = os.path.dirname(dest)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        shutil.copyfile(fullfile, dest)
+        return True
+    return False
 
 
   def input_list(self, img, show=True, save=False, file=None, image_number=[]):
@@ -224,6 +276,16 @@ class hst123(object):
         return(None)
     else:
         img = copy.copy(good)
+
+    # Absolute paths so astrometry (os.chdir work_dir) and drizzle still find files
+    img = [normalize_fits_path(p) for p in img]
+    for p in img:
+        if not os.path.isfile(p):
+            log.warning("Dropping missing or unreadable FITS from observation table: %s", p)
+    img = [p for p in img if os.path.isfile(p)]
+    if not img:
+        log.error("No input FITS paths exist on disk after resolve (missing files?).")
+        return None
 
     hdu = fits.open(img[0])
     h = hdu[0].header
@@ -259,28 +321,41 @@ class hst123(object):
         obstable, self.options["global_defaults"]["visit"], log=log
     )
 
-    # Show the obstable in a column formatted style
+    # One compact line (avoid N+1 INFO lines per input_list call)
     form = '{file: <36} {inst: <18} {filt: <10} '
     form += '{exp: <12} {date: <10} {time: <10}'
     if show:
-        header = form.format(file='FILE',inst='INSTRUMENT',filt='FILTER',
-                             exp='EXPTIME',date='DATE-OBS',time='TIME-OBS')
-        log.info('')
-        log.info(header)
+        bits = [
+            "%s|%s/%s"
+            % (
+                os.path.basename(row["image"]),
+                row["instrument"].upper(),
+                row["filter"].upper(),
+            )
+            for row in obstable
+        ]
+        log.info("inputs n=%d: %s", len(obstable), " ".join(bits))
+        log.debug(
+            "inputs table:\n%s",
+            "\n".join(
+                form.format(
+                    file=os.path.basename(row["image"]),
+                    inst=row["instrument"].upper(),
+                    filt=row["filter"].upper(),
+                    exp="%7.4f" % row["exptime"],
+                    date=Time(row["datetime"]).datetime.strftime("%Y-%m-%d"),
+                    time=Time(row["datetime"]).datetime.strftime("%H:%M:%S"),
+                )
+                for row in obstable
+            ),
+        )
 
-        for row in obstable:
-            line = form.format(file=os.path.basename(row['image']),
-                    inst=row['instrument'].upper(),
-                    filt=row['filter'].upper(),
-                    exp='%7.4f' % row['exptime'],
-                    date=Time(row['datetime']).datetime.strftime('%Y-%m-%d'),
-                    time=Time(row['datetime']).datetime.strftime('%H:%M:%S'))
-            log.info(line)
-
-        log.info('')
-
-    # Iterate over visit, instrument, filter to add group-specific info
-    obstable.add_column(Column([' '*99]*len(obstable), name='drizname'))
+    # Iterate over visit, instrument, filter to add group-specific info.
+    # Use object dtype so full paths are never truncated (fixed-width U99
+    # previously cut long work_dir + basename, breaking .drz.fits handling).
+    obstable.add_column(
+        Column(np.empty(len(obstable), dtype=object), name="drizname")
+    )
     for i,row in enumerate(obstable):
         visit = row['visit']
         n = str(visit).zfill(4)
@@ -300,11 +375,11 @@ class hst123(object):
         drizname = ''
         objname = self.options['args'].object
         if objname:
-            drizname = '{obj}.{inst}.{filt}.ut{date}_{n}.drz.fits'
+            drizname = '{obj}.{inst}.{filt}.ut{date}_{n}.drc.fits'
             drizname = drizname.format(inst=inst.split('_')[0],
                 filt=filt, n=n, date=date_str, obj=objname)
         else:
-            drizname = '{inst}.{filt}.ut{date}_{n}.drz.fits'
+            drizname = '{inst}.{filt}.ut{date}_{n}.drc.fits'
             drizname = drizname.format(inst=inst.split('_')[0],
                 filt=filt, n=n, date=date_str)
 
@@ -312,6 +387,13 @@ class hst123(object):
             drizname = os.path.join(self.options['args'].work_dir, drizname)
 
         obstable[i]['drizname'] = drizname
+
+    if len(obstable):
+        log.debug(
+            "drizname paths assigned (%d row(s)); example: %s",
+            len(obstable),
+            obstable[0]["drizname"],
+        )
 
     if file:
 
@@ -365,6 +447,7 @@ class hst123(object):
     return(obstable)
 
   # Copy raw data into raw data dir
+  @log_calls
   def copy_raw_data(self, rawdir, reverse=False, check_for_coord=False):
     # reverse=False will backup data in the working directory to rawdir
     if not reverse:
@@ -376,23 +459,56 @@ class hst123(object):
                 shutil.copyfile(f, rawdir+'/'+f)
     # reverse=True will copy files from the rawdir to the working dir
     else:
-        for file in glob.glob(rawdir+'/*.fits'):
+        dest_dir = "."
+        if (
+            getattr(self, "options", None)
+            and self.options.get("args") is not None
+            and self.options["args"].work_dir
+        ):
+            dest_dir = self.options["args"].work_dir
+        dest_abs = os.path.abspath(dest_dir)
+        os.makedirs(dest_abs, exist_ok=True)
+        raw_sub = os.path.join(dest_abs, "raw")
+        os.makedirs(raw_sub, exist_ok=True)
+        for file in glob.glob(os.path.join(rawdir, "*.fits")):
             # If check_for_coord, only copy files that have target coord
             if check_for_coord:
                 warning, check = self.needs_to_be_reduced(file, save_c1m=True)
                 if not check:
                     log.warning(warning)
                     continue
-            path, base = os.path.split(file)
-            # Should catch error where 'base' does not exist
-            if os.path.isfile(base) and filecmp.cmp(file, base):
-                message = '{file} == {base}'
-                log.info(message.format(file=file, base=base))
-                continue
-            else:
-                message = '{file} != {base}'
-                log.info(message.format(file=file, base=base))
-                shutil.copyfile(file, base)
+            base = os.path.basename(file)
+            real_tgt = os.path.join(raw_sub, base)
+            dest = os.path.join(dest_abs, base)
+            if not os.path.isfile(real_tgt):
+                log.info("%s -> %s (under raw/)", file, real_tgt)
+                shutil.copyfile(file, real_tgt)
+            elif not filecmp.cmp(file, real_tgt):
+                log.info("%s -> %s (refresh under raw/)", file, real_tgt)
+                shutil.copyfile(file, real_tgt)
+            if os.path.lexists(dest):
+                try:
+                    if os.path.islink(dest) or os.path.isfile(dest):
+                        if os.path.samefile(dest, real_tgt):
+                            log.info("%s == %s", real_tgt, dest)
+                            continue
+                except OSError:
+                    pass
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+            try:
+                rel = os.path.relpath(real_tgt, dest_abs)
+                os.symlink(rel, dest)
+                log.info("Symlink %s -> %s", dest, rel)
+            except OSError:
+                log.warning(
+                    "Could not symlink %s -> raw/%s; copying file to work dir",
+                    dest,
+                    base,
+                )
+                shutil.copyfile(real_tgt, dest)
 
   def _archive_path_for_product(self, product, archivedir):
     """Return full path (archivedir/inst/det/ra/name) for a product row."""
@@ -407,6 +523,7 @@ class hst123(object):
     return archivedir + '/' + filefmt.format(inst=inst, det=det, ra=ra, name=filename)
 
   # Use --archive dir to organize files and avoid duplicate copies.
+  @log_calls
   def check_archive(self, product, archivedir=None):
 
     if not archivedir:
@@ -441,6 +558,7 @@ class hst123(object):
         else:
             return(False, fullfile)
 
+  @log_calls
   def copy_raw_data_archive(self, product, archivedir=None, workdir=None,
     check_for_coord = False):
 
@@ -480,6 +598,7 @@ class hst123(object):
             shutil.copyfile(fullfile, fulloutfile)
             return(0)
 
+  @log_calls
   def sanitize_reference(self, reference):
 
     # If the reference image does not exist, print an error and return
@@ -498,10 +617,14 @@ class hst123(object):
     newhdu.append(hdu[0])
     newhdu[0].name='PRIMARY'
 
-    # Copy over if missing data
-    if newhdu[0].data is None:
-        if hdu[1].data is not None:
-            newhdu[0].data = hdu[1].data
+    # Copy over if missing data (only from a true SCI image HDU, never HDRTAB)
+    if newhdu[0].data is None and len(hdu) > 1:
+        ext1 = hdu[1]
+        ext1_name = str(ext1.name).strip().upper()
+        d1 = getattr(ext1, "data", None)
+        ndim = int(getattr(d1, "ndim", 0) or 0)
+        if ext1_name == "SCI" and ndim >= 2 and d1 is not None:
+            newhdu[0].data = ext1.data
 
     # COMMENT and HISTORY keys are annoying, so get rid of those
     if 'COMMENT' in newhdu[0].header.keys():
@@ -548,28 +671,81 @@ class hst123(object):
     # Write out to same file w/ overwrite
     newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
 
+  @log_calls
   def compress_reference(self, reference):
+    """
+    Collapse multi-extension drizzle products to a single PRIMARY for DOLPHOT.
+
+    AstroDrizzle often writes **PRIMARY (image) + HDRTAB**.  Older logic treated
+    any 2-HDU file as PRIMARY+SCI and replaced PRIMARY with extension 1, which
+    swaps the science image for a binary table and breaks ``calcsky`` (crash /
+    SIGTRAP).  We only promote **SCI** when the primary HDU has no image array.
+    """
     if not os.path.exists(reference):
-        error = 'ERROR: reference {ref} does not exist!'
+        error = "ERROR: reference {ref} does not exist!"
         log.error(error.format(ref=reference))
-        return(None)
+        return None
 
     hdu = fits.open(reference)
-    newhdu = fits.HDUList()
+    try:
+        prim = hdu[0]
+        naxis = int(prim.header.get("NAXIS", 0) or 0)
+        prim_has_image = naxis > 0 and prim.data is not None
 
-    hdr = hdu[0].header
-    newhdu.append(hdu[0])
-    newhdu[0].name='PRIMARY'
+        newhdu = fits.HDUList()
+        if len(hdu) == 1:
+            newhdu.append(copy.copy(prim))
+        elif len(hdu) == 2:
+            ext1 = hdu[1]
+            ext1_name = str(ext1.name).strip().upper()
+            if ext1_name == "SCI" and not prim_has_image:
+                sci = copy.copy(ext1)
+                sci.name = "PRIMARY"
+                for key in prim.header.keys():
+                    if key not in sci.header.keys():
+                        sci.header[key] = prim.header[key]
+                newhdu.append(sci)
+                log.debug(
+                    "compress_reference: promoted SCI to PRIMARY for %s",
+                    reference,
+                )
+            else:
+                newhdu.append(copy.copy(prim))
+                log.debug(
+                    "compress_reference: kept PRIMARY (%s + %s) for %s",
+                    prim.name,
+                    ext1.name,
+                    reference,
+                )
+        else:
+            # MEF drizzle (e.g. .drc: PRIMARY + SCI + WHT + CTX): promote SCI only.
+            ext1 = hdu[1] if len(hdu) > 1 else None
+            ext1_name = str(ext1.name).strip().upper() if ext1 is not None else ""
+            if ext1_name == "SCI" and not prim_has_image:
+                sci = copy.copy(ext1)
+                sci.name = "PRIMARY"
+                for key in prim.header.keys():
+                    if key not in sci.header.keys():
+                        sci.header[key] = prim.header[key]
+                newhdu.append(sci)
+                log.debug(
+                    "compress_reference: promoted SCI to PRIMARY (MEF, %d ext) for %s",
+                    len(hdu),
+                    reference,
+                )
+            else:
+                newhdu.append(copy.copy(prim))
+                if len(hdu) > 2:
+                    log.debug(
+                        "compress_reference: kept first HDU only (%d extensions) for %s",
+                        len(hdu),
+                        reference,
+                    )
 
-    if len(hdu)==1:
-        newhdu[0] = hdu[0]
-    elif len(hdu)==2:
-        newhdu[0] = hdu[1]
-        for key in hdu[0].header.keys():
-            if key not in newhdu[0].header.keys():
-                newhdu[0].header[key] = hdu[0].header[key]
-
-    newhdu.writeto(reference, output_verify='silentfix', overwrite=True)
+        newhdu[0].name = "PRIMARY"
+        newhdu.writeto(reference, output_verify="silentfix", overwrite=True)
+    finally:
+        hdu.close()
 
 
   def sanitize_wfpc2(self, image):
@@ -619,9 +795,12 @@ class hst123(object):
             warning = 'WARNING: could not find or download {img}'
             return(warning.format(img=image), False)
 
-        self.download_files(self.productlist,
-            archivedir=self.options['args'].archive, 
-            clobber=True)
+        self.download_files(
+            self.productlist,
+            archivedir=self.options["args"].archive,
+            clobber=True,
+            work_dir=self.options["args"].work_dir,
+        )
 
         for product in self.productlist[mask]:
             self.copy_raw_data_archive(product, 
@@ -782,6 +961,7 @@ class hst123(object):
     return(inside_im)
 
   # Pick deepest images in best reference filter (e.g. F606W/F814W); optional avoid WFPC2.
+  @log_calls
   def pick_deepest_images(self, images, reffilter=None, avoid_wfpc2=False,
     refinst=None):
     # Best possible filter for a dolphot reference image in the approximate
@@ -872,6 +1052,7 @@ class hst123(object):
 
     return(reference_images)
 
+  @log_calls
   def pick_reference(self, obstable):
     # If we haven't defined input images, catch error
 
@@ -893,47 +1074,64 @@ class hst123(object):
 
     # Generate photpipe-like output name for the drizzled image
     if self.options['args'].object:
-        drizname = '{obj}.{inst}.{filt}.ref_{num}.drz.fits'
+        drizname = '{obj}.{inst}.{filt}.ref_{num}.drc.fits'
         drizname = drizname.format(inst=best_inst, filt=best_filt,
             obj=self.options['args'].object, num=vnum)
     else:
-        drizname = '{inst}.{filt}.ref_{num}.drz.fits'
+        drizname = '{inst}.{filt}.ref_{num}.drc.fits'
         drizname = drizname.format(inst=best_inst, filt=best_filt, num=vnum)
+
+    wd = self.options["args"].work_dir
+    if wd:
+        drizname = os.path.join(wd, drizname)
 
     reference_images = sorted(reference_images)
 
-    if os.path.exists(drizname):
+    if os.path.isfile(drizname):
         hdu = fits.open(drizname)
+        try:
+            hdr = drizzle_product_catalog_header(hdu)
+            # Check for NINPUT and INPUT names
+            if "NINPUT" in hdr and "INPUT" in hdr:
+                ninput = len(reference_images)
+                str_input = ",".join([s.split(".")[0] for s in reference_images])
 
-        # Check for NINPUT and INPUT names
-        if 'NINPUT' in hdu[0].header.keys() and 'INPUT' in hdu[0].header.keys():
-            # Check that NINPUT and INPUT match what we expect
-            ninput = len(reference_images)
-            str_input = ','.join([s.split('.')[0] for s in reference_images])
+                if hdr["INPUT"].startswith(str_input) and hdr["NINPUT"] == ninput:
+                    warning = "WARNING: drizzled image {drz} exists.\n"
+                    warning += "Skipping astrodrizzle..."
+                    log.warning(warning.format(drz=drizname))
+                    return drizname
+        finally:
+            hdu.close()
 
-            if (hdu[0].header['INPUT'].startswith(str_input) and
-                hdu[0].header['NINPUT']==ninput):
-                warning='WARNING: drizzled image {drz} exists.\n'
-                warning+='Skipping astrodrizzle...'
-                log.warning(warning.format(drz=drizname))
-                return(drizname)
-
-    message = 'Reference image name will be: {reference}.\n'
-    message += 'Generating from input files: {img}\n\n'
-    log.info(message.format(reference=drizname, img=reference_images))
+    log.info(
+        "Reference drizzle: %s | inputs=%s",
+        drizname,
+        ",".join(os.path.basename(str(p)) for p in reference_images),
+    )
 
     if self.options['args'].drizzle_add:
         add_images = list(str(self.options['args'].drizzle_add).split(','))
         for image in add_images:
-            if os.path.exists(image) and image not in reference_images:
-                reference_images.append(image)
+            ip = normalize_fits_path(image)
+            if os.path.isfile(ip) and ip not in reference_images:
+                reference_images.append(ip)
 
-    if 'wfpc2' in best_inst and len(obstable)<3:
-        reference_images = glob.glob('u*c0m.fits')
+    if "wfpc2" in best_inst and len(obstable) < 3:
+        wd_glob = self.options["args"].work_dir or "."
+        reference_images = [
+            normalize_fits_path(p)
+            for p in glob.glob(os.path.join(wd_glob, "u*c0m.fits"))
+            if os.path.isfile(p)
+        ]
 
     obstable = self.input_list(reference_images, show=True, save=False)
     if not obstable or len(obstable)==0:
         return(None)
+
+    # Interstitial `{inst}.ref.drc.fits` when n<3 (instrument-mask pass); removed
+    # after the final filter-named reference drizzle succeeds.
+    instrument_mask_ref_path: str | None = None
 
     # If number of images is small, try to use imaging from the same instrument
     # and detector for masking
@@ -942,12 +1140,19 @@ class hst123(object):
         det = obstable['detector'][0]
         mask = (obstable['instrument']==inst) & (obstable['detector']==det)
 
-        outimage = '{inst}.ref.drz.fits'.format(inst=inst)
+        outimage = "{inst}.ref.drc.fits".format(inst=inst)
+        if self.options["args"].work_dir:
+            outimage = os.path.join(self.options["args"].work_dir, outimage)
 
-        if not opt.skip_tweakreg:
+        instrument_mask_ref_path = outimage
+
+        if not self.options['args'].skip_tweakreg:
             error, shift_table = self._astrom.run_tweakreg(obstable[mask], '')
-        self.run_astrodrizzle(obstable[mask], output_name=outimage,
-            clean=False, save_fullfile=True)
+        if not self.run_astrodrizzle(
+            obstable[mask], output_name=outimage, clean=False, save_fullfile=True
+        ):
+            log.error("Reference drizzle failed for %s", outimage)
+            return None
 
         # Add cosmic ray mask to static image mask
         if self.options['args'].add_crmask:
@@ -970,11 +1175,24 @@ class hst123(object):
                             maskhdu[3*i+1].data[crmask]=4096
                         maskhdu.writeto(file, overwrite=True)
 
-    if not opt.skip_tweakreg:
+    if not self.options['args'].skip_tweakreg:
         error, shift_table = self._astrom.run_tweakreg(obstable, '')
-    self.run_astrodrizzle(obstable, output_name=drizname, save_fullfile=True)
+    if not self.run_astrodrizzle(
+        obstable, output_name=drizname, save_fullfile=True
+    ):
+        log.error("Reference drizzle failed for %s", drizname)
+        return None
 
-    return(drizname)
+    if instrument_mask_ref_path:
+        remove_superseded_instrument_mask_reference_drizzle(
+            instrument_mask_ref_path,
+            log=log,
+            keep_artifacts=getattr(
+                self.options["args"], "keep_drizzle_artifacts", False
+            ),
+        )
+
+    return drizname
 
   def fix_idcscale(self, image):
 
@@ -1012,10 +1230,10 @@ class hst123(object):
   def fix_hdu_wcs_keys(self, image, change_keys, ref_url):
 
     hdu = fits.open(image, mode='update')
-    ref = ref_url.strip('.old')
-    outdir = self.options['args'].work_dir
-    if not outdir:
-        outdir = '.'
+    ref = ref_prefix_for_header(ref_url)
+    outdir = self.options['args'].work_dir or os.path.abspath(".")
+    cals_dir = os.path.join(outdir, "cals")
+    os.makedirs(cals_dir, exist_ok=True)
 
     for i,h in enumerate(hdu):
         for key in hdu[i].header.keys():
@@ -1032,33 +1250,35 @@ class hst123(object):
                 ref_file = val.split('$')[1]
             else:
                 ref_file = val
+            # Header may store paths like test_data/foo.fits; CRDS URLs need basename only
+            ref_file = os.path.basename(ref_file.strip())
 
-            fullfile = os.path.join(outdir, ref_file)
+            fullfile = os.path.join(cals_dir, ref_file)
             if not os.path.exists(fullfile):
-                log.info('Grabbing: %s', fullfile)
-                # Try using both old cdbs database and new crds link
-                urls = []
-                url = self.options['global_defaults']['crds']
-                urls.append(url+ref_file)
+                log.debug("ref fetch: %s", os.path.basename(fullfile))
+                ok, err = fetch_calibration_reference(
+                    self.options['global_defaults'],
+                    ref_url,
+                    ref_file,
+                    fullfile,
+                    log=log,
+                )
+                if not ok:
+                    log.warning(
+                        'Could not download reference %s (last error: %s)',
+                        ref_file,
+                        err or 'unknown',
+                    )
 
-                url = self.options['global_defaults']['cdbs']
-                urls.append(url+ref_url+'/'+ref_file)
-
-                for url in urls:
-                    message = f'Downloading file: {url}'
-                    log.info(message)
-                    try:
-                        dat = download_file(url, cache=False,
-                            show_progress=False, timeout=120)
-                        shutil.move(dat, fullfile)
-                        log.info('%s [SUCCESS]', message)
-                        break
-                    except Exception:
-                        log.warning('%s [FAILURE]', message)
-
-            message = f'Setting {image},{i} {key}={fullfile}'
-            log.info(message)
-            hdu[i].header[key] = fullfile
+            if os.path.exists(fullfile):
+                log.debug("Setting %s ext%d %s=%s", image, i, key, fullfile)
+                hdu[i].header[key] = fullfile
+            else:
+                log.error(
+                    'Missing reference file %s; not updating header key %s',
+                    fullfile,
+                    key,
+                )
 
         # WFPC2 does not have residual distortion corrections and astrodrizzle
         # choke if DGEOFILE is in header but not NPOLFILE.  So do a final check
@@ -1094,12 +1314,58 @@ class hst123(object):
 
     self.fix_hdu_wcs_keys(image, change_keys, ref_url)
 
+    _n_sip = fix_sip_ctype_headers_fits(image, logger=log)
+    if _n_sip:
+        log.debug("SIP/CTYPE aligned before updatewcs: %s (%d HDU(s))", image, _n_sip)
+
+    _quiet = (
+        "astropy",
+        "astropy.wcs",
+        "astropy.wcs.wcs",
+        "astropy.io",
+        "astropy.io.fits",
+        "stwcs",
+        "stwcs.wcsutil",
+        "stwcs.wcsutil.altwcs",
+        "stwcs.wcsutil.headerlet",
+    )
+    _prev_lv = {}
+    for _name in _quiet:
+        _lg = py_logging.getLogger(_name)
+        _prev_lv[_name] = _lg.level
+        _lg.setLevel(py_logging.ERROR)
+    _ap_log = None
+    _ap_level0 = None
     try:
-        updatewcs.updatewcs(image, use_db=use_db)
+        import astropy as _astropy_pkg
+
+        _ap_log = _astropy_pkg.log
+        _ap_level0 = _ap_log.level
+        _ap_log.setLevel(py_logging.ERROR)
+    except Exception:
+        _ap_log = None
+    try:
+        try:
+            try:
+                from astropy.wcs.wcs import FITSFixedWarning as _FFW
+            except ImportError:
+                _FFW = None
+            with warnings.catch_warnings():
+                if _FFW is not None:
+                    warnings.simplefilter("ignore", _FFW)
+                with suppress_stdout_fd():
+                    updatewcs.updatewcs(image, use_db=use_db)
+        finally:
+            for _name, _lv in _prev_lv.items():
+                py_logging.getLogger(_name).setLevel(_lv)
+            if _ap_log is not None and _ap_level0 is not None:
+                _ap_log.setLevel(_ap_level0)
         hdu = fits.open(image, mode='update')
-        message = '\n\nupdatewcs success.  File info:'
-        log.info(message)
-        hdu.info()
+        log.info(
+            "updatewcs ok %s | %s",
+            os.path.basename(image),
+            format_hdu_list_summary(hdu),
+        )
         hdu.close()
         self.fix_hdu_wcs_keys(image, change_keys, ref_url)
         self.fix_idcscale(image)
@@ -1109,35 +1375,30 @@ class hst123(object):
         log.error(error.format(file=image))
         return(None)
 
+  @log_calls
   def run_astrodrizzle(self, obstable, output_name=None, ra=None, dec=None,
     clean=None, save_fullfile=False):
 
-    log.info('Starting astrodrizzle')
-
     n = len(obstable)
 
-    if self.options['args'].work_dir:
-        outdir = self.options['args'].work_dir
-    else:
-        outdir = '.'
+    outdir = self.options['args'].work_dir or os.path.abspath(".")
+    os.makedirs(outdir, exist_ok=True)
 
     if output_name is None:
-        output_name = os.path.join(outdir, 'drizzled.fits')
+        output_name = os.path.join(outdir, "drizzled.drc.fits")
 
-    if n < 7:
-        combine_type = 'minmed'
-        combine_nhigh = 0
-    else:
-        combine_type = 'median'
-        combine_nhigh = np.max(int((n-4)/2), 0)
+    logical_output = normalize_astrodrizzle_output_path(output_name, log)
+    internal_output = normalize_astrodrizzle_output_path(
+        logical_driz_to_internal_astrodrizzle(os.fspath(logical_output)), log
+    )
 
-    if self.options['args'].combine_type:
-        combine_type = self.options['args'].combine_type
+    combine_type, combine_nhigh = combine_type_and_nhigh(
+        n, self.options["args"].combine_type or None
+    )
 
-    wcskey = 'TWEAK'
+    wcskey = "TWEAK"
 
-    inst = list(set(obstable['instrument']))
-    det = '_'.join(self._fits.get_instrument(obstable[0]['image']).split('_')[:2])
+    det = "_".join(self._fits.get_instrument(obstable[0]["image"]).split("_")[:2])
     options = self.options['detector_defaults'][det]
 
     # Make a copy of each input image so drizzlepac doesn't edit base headers
@@ -1178,17 +1439,17 @@ class hst123(object):
     else:
         pixscale = options['pixel_scale']
 
-    wht_type = self.options['args'].wht_type
+    wht_type = self.options["args"].wht_type
 
-    if clean is not None:
-        clean = self.options['args'].cleanup
+    drizzle_clean = resolve_drizzle_clean_flag(clean, self.options["args"].cleanup)
+    if save_fullfile:
+        drizzle_clean = False
 
-    if len(tmp_input)==1:
+    if len(tmp_input) == 1:
         shutil.copy(tmp_input[0], 'dummy.fits')
         tmp_input.append('dummy.fits')
 
-    log.info('Need to run astrodrizzle for images:')
-    self.input_list(obstable['image'], show=True, save=False)
+    self.input_list(obstable["image"], show=True, save=False)
 
     # If drizmask, then edit tmp_input masks for everything except for drizadd
     # files
@@ -1204,151 +1465,153 @@ class hst123(object):
         maskcoord = parse_coord(ramask, decmask)
 
         for image in tmp_input:
-            imhdu = fits.open(image)
-            added = any([base in image for base in add_im_base])
-
-            for i,h in enumerate(imhdu):
-                if not h.name=='DQ':
-                    continue
-
-                w = wcs.WCS(h.header)
-                y,x = wcs.utils.skycoord_to_pixel(maskcoord, w, origin=1)
-
-                size = self.options['global_defaults']['mask_region_size']
-                naxis1,naxis2 = h.data.shape
-
-                outside_im = False
-                if ((x+size < 0 or x-size > naxis1-1 or
-                    y+size < 0 or y-size > naxis2-1)):
-                    if not added:
+            added = any(base in image for base in add_im_base)
+            with fits.open(image, mode="update") as imhdu:
+                for i, h in enumerate(imhdu):
+                    if h.name != "DQ":
                         continue
-                    else:
+
+                    w = wcs.WCS(h.header)
+                    y, x = wcs.utils.skycoord_to_pixel(maskcoord, w, origin=1)
+
+                    size = self.options["global_defaults"]["mask_region_size"]
+                    naxis1, naxis2 = h.data.shape
+
+                    outside_im = False
+                    if (
+                        x + size < 0
+                        or x - size > naxis1 - 1
+                        or y + size < 0
+                        or y - size > naxis2 - 1
+                    ):
+                        if not added:
+                            continue
                         outside_im = True
 
-                xmin = int(np.max([x-size, 0]))
-                ymin = int(np.max([y-size, 0]))
-                xmax = int(np.min([x+size, naxis2-1]))
-                ymax = int(np.min([y+size, naxis1-1]))
+                    xmin = int(np.max([x - size, 0]))
+                    ymin = int(np.max([y - size, 0]))
+                    xmax = int(np.min([x + size, naxis2 - 1]))
+                    ymax = int(np.min([y + size, naxis1 - 1]))
 
-                imhdu[i].data[xmin:xmax, ymin:ymax]
+                    imhdu[i].data[xmin:xmax, ymin:ymax]
 
-                if any([base in image for base in add_im_base]):
-                    log.info('Making outside drizmask: %s', image)
-                    if outside_im: imhdu[i].data[:,:]=128
+                    if any(base in image for base in add_im_base):
+                        log.info("Making outside drizmask: %s", image)
+                        if outside_im:
+                            imhdu[i].data[:, :] = 128
+                        else:
+                            data = copy.copy(imhdu[i].data[xmin:xmax, ymin:ymax])
+                            imhdu[i].data[:, :] = 128
+                            imhdu[i].data[xmin:xmax, ymin:ymax] = data
                     else:
-                        data = copy.copy(imhdu[i].data[xmin:xmax,ymin:ymax])
-                        imhdu[i].data[:,:]=128
-                        imhdu[i].data[xmin:xmax,ymin:ymax]=data
-                else:
-                    log.info('Making inside drizmask: %s', image)
-                    imhdu[i].data[xmin:xmax,ymin:ymax]=128
+                        log.info("Making inside drizmask: %s", image)
+                        imhdu[i].data[xmin:xmax, ymin:ymax] = 128
 
-            imhdu.writeto(image, overwrite=True, output_verify='silentfix')
+                imhdu.flush()
 
-    # Check for TWEAK key in hdu.  If WCSNAME in header but not TWEAK
-    # then rename WCSNAME to TWEAK
     for image in tmp_input:
-        imhdu = fits.open(image)
-        for i,h in enumerate(imhdu):
-            head = h.header
-            tweak = False ; wcsname = False
-            log.info('Checking for tweak keys in header...')
-            for key in head.keys():
-                if 'WCSNAME' in key and head[key].strip()=='TWEAK': tweak = True
-
-            if not tweak:
-                # Rename 'WCSNAME' to 'TWEAK' in rawhdu
-                log.info('Changing WCSNAME to TWEAK for %s,%s', image, i)
-                imhdu[i].header['WCSNAME']='TWEAK'
-
-        imhdu.writeto(image, overwrite=True, output_verify='silentfix')
+        ensure_wcsname_tweak_on_image(image, log)
 
     start_drizzle = time.time()
 
-    # Make astrodrizzle use c1m masks when drizzling c0m files
-    skymask_cat = None
-    with open('skymask_cat','w') as f:
-        for file in tmp_input:
-            if 'c0m' in file:
-                maskfile = file.split('_')[0]+'_c1m.fits'
-                if os.path.exists(maskfile):
-                    hdu = fits.open(maskfile)
-                    for i,h in enumerate(hdu):
-                        if h.name=='SCI':
-                            # Reset DQ mask for bad columns
-                            hdu[i].data[np.where(hdu[i].data==258)]=256
-                    hdu.writeto(maskfile, overwrite=True)
+    skymask_cat = build_wfpc2_skymask_catalog(tmp_input, outdir, log)
 
-                    skymask_cat='skymask_cat'
-
-                    hdu = fits.open(file)
-                    exts = []
-                    for i,h in enumerate(hdu):
-                        if h.name=='SCI':
-                            exts.append(str(i))
-                    line = file+'{'+','.join(exts)+'},'
-                    line += ','.join([maskfile+'['+ext+']' for ext in exts])
-
-                    f.write(line+' \n')
-
-    # Equalize sensitivities for WFPC2 data
+    # Equalize sensitivities (non-WFPC2); WFPC2 skips photeq in original logic
+    photeq_log = ephemeral_pipeline_runfile(outdir, "photeq")
+    n_photeq = 0
     for image in tmp_input:
-        if 'wfpc2' not in self._fits.get_instrument(image).lower():
-            log.info('Equalizing photometric calibration in %s', image)
-            self.fix_phot_keys(image)
-
+        if "wfpc2" in self._fits.get_instrument(image).lower():
+            continue
+        n_photeq += 1
+        log.debug("photeq %s", os.path.basename(image))
+        self.fix_phot_keys(image)
+        with suppress_stdout_fd():
             with suppress_stdout():
-                photeq.photeq(files=image, readonly=False, ref_phot_ext=1,
-                    logfile=os.path.join(outdir, 'photeq.log'))
+                photeq.photeq(
+                    files=image,
+                    readonly=False,
+                    ref_phot_ext=1,
+                    logfile=photeq_log,
+                )
+    if n_photeq:
+        log.info(
+            "photeq: %d image(s); replaying runfile into session log (not kept in work dir)",
+            n_photeq,
+        )
+        ingest_text_file_to_logger(
+            photeq_log,
+            get_logger(PHOTEQ_DETAIL_LOGGER),
+            log_tag="photeq",
+            replay_full=True,
+            begin_end_markers=False,
+            compact_ws=True,
+            delete_after=True,
+        )
 
     rotation = 0.0
-    if self.options['args'].no_rotation:
+    if self.options["args"].no_rotation:
         rotation = None
 
-    logfile_name = os.path.join(outdir, 'astrodrizzle.log')
-
-    if save_fullfile:
-        clean=False
+    logfile_name = ephemeral_pipeline_runfile(outdir, "astrodrizzle")
+    dd = settings.drizzle_defaults
+    ad_kwargs = build_astrodrizzle_keyword_args(
+        output_name=internal_output,
+        logfile_name=logfile_name,
+        wcskey=wcskey,
+        options=options,
+        dd=dd,
+        ra=ra,
+        dec=dec,
+        rotation=rotation,
+        combine_type=combine_type,
+        combine_nhigh=combine_nhigh,
+        skysub=skysub,
+        skymask_cat=skymask_cat,
+        wht_type=wht_type,
+        pixscale=pixscale,
+        clean=drizzle_clean,
+    )
 
     tries = 0
-    while tries < 3:
-        try:
-            log.info('Running astrodrizzle on: %s', ','.join(tmp_input))
-            log.info('Output image: %s', output_name)
-            dd = settings.drizzle_defaults
-            astrodrizzle.AstroDrizzle(tmp_input, output=output_name,
-                runfile=logfile_name,
-                wcskey=wcskey, context=True, group='', build=False,
-                num_cores=dd['num_cores'], preserve=False, clean=clean, skysub=skysub,
-                skymethod='globalmin+match', skymask_cat=skymask_cat,
-                skystat='mode', skylower=0.0, skyupper=None, updatewcs=False,
-                driz_sep_fillval=None, driz_sep_bits=options['driz_bits'],
-                driz_sep_wcs=True, driz_sep_rot=rotation,
-                driz_sep_scale=options['driz_sep_scale'],
-                driz_sep_outnx=options['nx'], driz_sep_outny=options['ny'],
-                driz_sep_ra=ra, driz_sep_dec=dec, driz_sep_pixfrac=dd['driz_sep_pixfrac'],
-                combine_maskpt=dd['combine_maskpt'], combine_type=combine_type,
-                combine_nlow=0, combine_nhigh=combine_nhigh,
-                combine_lthresh=-10000, combine_hthresh=None,
-                combine_nsigma=dd['combine_nsigma'], driz_cr_corr=True,
-                driz_cr=True, driz_cr_snr=dd['driz_cr_snr'], driz_cr_grow=dd['driz_cr_grow'],
-                driz_cr_ctegrow=dd['driz_cr_ctegrow'], driz_cr_scale=dd['driz_cr_scale'],
-                final_pixfrac=dd['final_pixfrac'], final_fillval=None,
-                final_bits=options['driz_bits'], final_units='counts',
-                final_wcs=True, final_refimage=None, final_wht_type=wht_type,
-                final_rot=rotation, final_scale=pixscale,
-                final_outnx=options['nx'], final_outny=options['ny'],
-                final_ra=ra, final_dec=dec)
-            break
-        except FileNotFoundError:
-            # Usually happens because of a file missing in astropy cache.
-            # Try clearing the download cache and then re-try
-            self.clear_downloads(self.options['global_defaults'])
-            tries += 1
+    ad_detail_log = get_logger(ASTRODRIZZLE_DETAIL_LOGGER)
+    try:
+        while tries < 3:
+            try:
+                log.info(
+                    "AstroDrizzle: %d tmp input(s), combine=%s, output=%s (internal %s)",
+                    len(tmp_input),
+                    combine_type,
+                    os.path.basename(logical_output),
+                    os.path.basename(internal_output),
+                )
+                log.debug("AstroDrizzle inputs: %s", tmp_input)
+                # C extensions may printf to fd 1; ingest runfile in finally.
+                with suppress_stdout_fd():
+                    with suppress_stdout():
+                        astrodrizzle.AstroDrizzle(tmp_input, **ad_kwargs)
+                break
+            except FileNotFoundError:
+                # Usually happens because of a file missing in astropy cache.
+                # Try clearing the download cache and then re-try
+                self.clear_downloads(self.options['global_defaults'])
+                tries += 1
+    finally:
+        ingest_text_file_to_logger(
+            logfile_name,
+            ad_detail_log,
+            replay_full=True,
+            begin_end_markers=False,
+            compact_ws=True,
+            delete_after=True,
+        )
 
+    if tries >= 3:
+        log.error(
+            "AstroDrizzle failed after retries (often a missing CRDS/cache file). "
+            "See session log for AstroDrizzle replay."
+        )
 
-    message = 'Astrodrizzle took {time} seconds to execute.\n\n'
-    log.info(message.format(time = time.time()-start_drizzle))
+    log.info("Astrodrizzle finished in %.2fs", time.time() - start_drizzle)
 
     if self.options['args'].cleanup:
         for image in tmp_input:
@@ -1358,29 +1621,44 @@ class hst123(object):
     if os.path.exists('dummy.fits'):
         os.remove('dummy.fits')
 
-    # Rename science (sci), weight (wht), and mask (ctx) files
-    weight_file = output_name.replace('.fits', '_wht.fits')
-    mask_file = output_name.replace('.fits', '_ctx.fits')
-    science_file = output_name.replace('.fits', '_sci.fits')
+    internal_output = recover_drizzlepac_linear_output(internal_output, log)
 
-    if os.path.exists(weight_file):
-        os.rename(weight_file, output_name.replace('.fits', '.weight.fits'))
-        weight_file = output_name.replace('.fits', '.weight.fits')
-    if os.path.exists(mask_file):
-        os.rename(mask_file, output_name.replace('.fits', '.mask.fits'))
-        mask_file = output_name.replace('.fits', '.mask.fits')
-    if os.path.exists(science_file):
-        os.rename(science_file, output_name)
+    science_file, _, _ = drizzle_sidecar_paths(internal_output)
+    if not astrodrizzle_output_exists(internal_output):
+        log.error(
+            "AstroDrizzle did not produce expected drizzle product %r "
+            "(missing sidecar %r). Truncated drizname (no .drz.fits) was a "
+            "legacy table issue — see astrodrizzle_paths.normalize.",
+            internal_output,
+            science_file,
+        )
+        cleanup_after_astrodrizzle(
+            outdir,
+            log=log,
+            keep_artifacts=getattr(
+                self.options["args"], "keep_drizzle_artifacts", False
+            ),
+        )
+        return False
+
+    if not os.path.isfile(internal_output) and os.path.isfile(science_file):
+        log.info(
+            "AstroDrizzle sidecar %s -> canonical %s",
+            os.path.basename(science_file),
+            os.path.basename(internal_output),
+        )
+
+    weight_file, mask_file = rename_astrodrizzle_sidecars(internal_output, log)
 
     # Get comma-separated list of base input files
     ninput = len(tmp_input)
     tmp_input = sorted(tmp_input)
     str_input = ','.join([s.split('.')[0] for s in tmp_input])
 
-    origzpt = self._fits.get_zpt(output_name)
+    origzpt = self._fits.get_zpt(internal_output)
 
     # Add header keys on drizzled file
-    hdu = fits.open(output_name, mode='update')
+    hdu = fits.open(internal_output, mode='update')
     filt = obstable['filter'][0]
     hdu[0].header['FILTER'] = filt.upper()
     hdu[0].header['TELID'] = 'HST'
@@ -1411,9 +1689,9 @@ class hst123(object):
         fluxscale = self.options['global_defaults']['ab_flux_zero_mjy'] * 10**(-0.4 * fixzpt) # mJy/pix scale
 
         # Adjust header values for context
-        inst = self._fits.get_instrument(output_name).split('_')[0]
+        inst = self._fits.get_instrument(internal_output).split('_')[0]
         crpars = self.options['instrument_defaults'][inst]['crpars']
-        det = '_'.join(self._fits.get_instrument(output_name).split('_')[:2])
+        det = '_'.join(self._fits.get_instrument(internal_output).split('_')[:2])
         instopt = self.options['detector_defaults'][det]
 
         hdu[0].header['FIXZPT']   = fixzpt
@@ -1430,46 +1708,36 @@ class hst123(object):
 
     hdu.close()
 
-    log.info(
-        'save_fullfile=%s weight_file=%s (exists=%s) mask_file=%s (exists=%s)',
-        save_fullfile, weight_file, os.path.exists(weight_file),
-        mask_file, os.path.exists(mask_file),
+    logical_drc = (
+        os.fspath(logical_output)
+        if str(logical_output).lower().endswith(".drc.fits")
+        else None
     )
-    if (save_fullfile and os.path.exists(weight_file) and
-        os.path.exists(mask_file)):
+    drc_written = write_drc_multis_extension_if_requested(
+        internal_output,
+        weight_file,
+        mask_file,
+        save_fullfile,
+        log,
+        format_hdu_list_summary=format_hdu_list_summary,
+        logical_drc_path=logical_drc,
+    )
+    if drc_written:
+        remove_internal_linear_drizzle_products(internal_output, log)
+    elif logical_drc:
+        log.warning(
+            "Keeping internal drizzle product %s (could not build %s; missing weight/mask?)",
+            internal_output,
+            logical_drc,
+        )
 
-        hdu = fits.open(output_name)
-        hdu.info()
-
-        newhdu = fits.HDUList()
-
-        # Make PRIMARY HDU
-        newhdu.append(copy.copy(hdu[0]))
-        newhdu[0].data = None
-        newhdu[0].header['EXTNAME']='PRIMARY'
-
-        # Make SCI HDU
-        newhdu.append(copy.copy(hdu[0]))
-        newhdu[1].header['EXTNAME']='SCI'
-
-        # Make WHT HDU
-        weight_hdu = fits.open(weight_file)
-        newhdu.append(weight_hdu[0])
-        newhdu[2].header['EXTNAME']='WHT'
-        newhdu[2].header['BUNIT'] = 'UNITLESS'
-
-        # Make CTX HDU
-        mask_hdu = fits.open(mask_file)
-        newhdu.append(mask_hdu[0])
-        newhdu[3].header['EXTNAME']='CTX'
-        newhdu[3].header['BUNIT'] = 'UNITLESS'
-
-        # Make HDRTAB HDU
-        if 'HDRTAB' in [h.name for h in hdu]:
-            newhdu.append(copy.copy(hdu['HDRTAB']))
-
-        newhdu.writeto(output_name.replace('.drz.fits','.drc.fits'),
-            overwrite=True, output_verify='silentfix')
+    cleanup_after_astrodrizzle(
+        outdir,
+        log=log,
+        keep_artifacts=getattr(
+            self.options["args"], "keep_drizzle_artifacts", False
+        ),
+    )
 
     return(True)
 
@@ -1512,6 +1780,7 @@ class hst123(object):
 
 
   # MAST product list for input coordinate
+  @log_calls
   def get_productlist(self, coord, search_radius):
 
     self.clear_downloads(self.options['global_defaults'])
@@ -1523,10 +1792,17 @@ class hst123(object):
         error = 'ERROR: coordinate was not provided.'
         return(productlist)
 
+    make_banner("MAST catalog query")
+    log.info(
+        "query_region center=%s radius=%s",
+        coord.to_string("hmsdms"),
+        search_radius,
+    )
+
     # Define search params and grab all files from MAST
     try:
         if self.options['args'].token:
-            log.info('Logging in with token...')
+            log.info("MAST Observations.login(token=...)")
             Observations.login(token=self.options['args'].token)
     except Exception:
         warning = 'WARNING: could not log in with input username/password'
@@ -1544,6 +1820,10 @@ class hst123(object):
 
     # Get rid of all masked rows (they aren't HST data anyway)
     obsTable = obsTable.filled()
+    log.info(
+        "MAST query_region returned %i row(s) (before HST/image/detector filters).",
+        len(obsTable),
+    )
 
     # Construct masks for telescope, data type, detector, and data rights
     masks = []
@@ -1569,6 +1849,11 @@ class hst123(object):
     # Apply the masks to the observation table
     mask = [all(l) for l in list(map(list, zip(*masks)))]
     obsTable = obsTable[mask]
+    log.info(
+        "After HST / IMAGE / ACS·WFC·WFPC2 / non-calibration / exposure-time filters: "
+        "%i observation(s).",
+        len(obsTable),
+    )
 
     if self.options['args'].only_filter:
         get_filts = self.options['args'].only_filter.split(',')
@@ -1576,6 +1861,11 @@ class hst123(object):
         mask = np.array([any([f in row['filters'].lower() for f in get_filts])
             for row in obsTable])
         obsTable = obsTable[mask]
+        log.info(
+            "After --only-filter (%s): %i observation(s).",
+            self.options['args'].only_filter,
+            len(obsTable),
+        )
 
     # Get product lists in order of observation time
     obsTable.sort('t_min')
@@ -1622,6 +1912,9 @@ class hst123(object):
                     productlist.add_row(prod)
 
     if not productlist:
+        log.warning(
+            "MAST: no science products (FLT/FLC/C0M/C1M) matched filters for this field."
+        )
         return(None)
 
     downloadFilenames = []
@@ -1641,18 +1934,52 @@ class hst123(object):
     # Sort by obsID in case we need to reference
     productlist.sort('obsID')
 
+    log.info(
+        "MAST: final product list has %i unique file(s) (by downloadFilename, obsID-sorted).",
+        len(productlist),
+    )
+
     return(productlist)
 
-  def download_files(self, productlist, dest=None, archivedir=None,
-    clobber=False):
+  @log_calls
+  def download_files(
+      self,
+      productlist,
+      dest=None,
+      archivedir=None,
+      clobber=False,
+      work_dir=None,
+  ):
+    """
+    Download MAST products via astroquery.
 
+    Staging for ``Observations.download_products`` always uses a subdirectory of
+    *work_dir* (default: absolute current directory when ``--work-dir`` is unset)
+    so no ``mastDownload`` tree is created in the shell's cwd when that differs
+    from the pipeline work directory.
+    """
     if not productlist:
         error = 'ERROR: product list is empty.  Cannot download files.'
         log.error(error)
         return(False)
 
+    work_abs = os.path.abspath(os.path.expanduser(work_dir or os.getcwd()))
+    mast_staging_parent = os.path.join(work_abs, ".mast_download_staging")
+    os.makedirs(mast_staging_parent, exist_ok=True)
+    mast_download_tree = os.path.join(mast_staging_parent, "mastDownload")
+
     n = len(productlist)
-    log.info('We need to download %s files', n)
+    log.info("MAST download: %i file(s) in product list.", n)
+    log.info(
+        "MAST download staging (astroquery temp): %s",
+        mast_staging_parent,
+    )
+    if dest:
+        log.info("Download target directory (dest): %s", os.path.abspath(dest))
+    if archivedir:
+        log.info("Archive directory: %s", os.path.abspath(archivedir))
+    if not dest and not archivedir:
+        log.info("Download target: current directory (%s)", os.getcwd())
 
     for i,prod in enumerate(productlist):
         filename = prod['downloadFilename']
@@ -1678,24 +2005,33 @@ class hst123(object):
 
         obsid = prod['obsID']
 
-        message = f'Trying to download ({i+1}/{n}) {filename}'
-        log.info(message)
+        message = f"({i+1}/{n}) {filename}"
+        log.debug("MAST download try %s", message)
 
         try:
             with suppress_stdout():
-                cache = '.'
-                download = Observations.download_products(Table(prod),
-                    download_dir=cache, cache=False)
+                download = Observations.download_products(
+                    Table(prod),
+                    download_dir=mast_staging_parent,
+                    cache=False,
+                )
                 shutil.move(download['Local Path'][0], filename)
 
-            log.info('%s [SUCCESS]', message)
+            log.info("MAST ok %s", message)
 
         except Exception as e:
-            log.warning('%s [FAILURE]', message)
+            log.warning("MAST fail %s: %s", message, e)
+            log.debug("Download exception detail", exc_info=True)
 
-    # Clean up mastDownload directory
-    if os.path.exists('mastDownload'):
-        shutil.rmtree('mastDownload')
+    # Remove astroquery staging under work-dir (not the shell cwd when --work-dir is set)
+    if os.path.isdir(mast_download_tree):
+        log.info("Removing temporary MAST staging: %s", mast_download_tree)
+        shutil.rmtree(mast_download_tree)
+    try:
+        if os.path.isdir(mast_staging_parent) and not os.listdir(mast_staging_parent):
+            os.rmdir(mast_staging_parent)
+    except OSError:
+        pass
 
     return(True)
 
@@ -1718,6 +2054,7 @@ class hst123(object):
   def run_dolphot(self):
     self._dolphot.run_dolphot()
 
+  @log_calls
   def organize_reduction_tables(self, obstable, byvisit=False):
 
     tables = []
@@ -1730,14 +2067,23 @@ class hst123(object):
 
     return(tables)
 
+  @log_calls
   def handle_reference(self, obstable, refname):
     # If reference image was not provided then make one
     banner = 'Handling reference image: {0}'
-    if refname and os.path.exists(refname):
+    if refname:
+        refname = normalize_fits_path(refname)
+    if refname and os.path.isfile(refname):
         make_banner(banner.format(refname))
     else:
         make_banner(banner.format('generating from input files'))
         refname = self.pick_reference(obstable)
+
+    if not refname or not os.path.isfile(refname):
+        log.error(
+            "Could not build or find reference image (missing inputs or drizzle failure)."
+        )
+        return None
 
     # Sanitize extensions and header variables in reference
     banner = 'Sanitizing reference image: {ref}'
@@ -1750,6 +2096,7 @@ class hst123(object):
     return self._dolphot.prepare_dolphot(image)
 
   # Drizzle by instrument/filter/epoch (drizname); optional hierarchical alignment.
+  @log_calls
   def drizzle_all(self, obstable, hierarchical=False, clobber=False,
     do_tweakreg=True):
 
@@ -1769,8 +2116,11 @@ class hst123(object):
             if do_tweakreg:
                 error, shift_table = self._astrom.run_tweakreg(driztable, '')
             # Next run astrodrizzle to construct the drizzled frame
-            self.run_astrodrizzle(driztable, output_name=name,
-                save_fullfile=True)
+            if not self.run_astrodrizzle(
+                driztable, output_name=name, save_fullfile=True
+            ):
+                log.error("Drizzle failed for %s; skipping sanitize/sky for this product.", name)
+                continue
 
         self.sanitize_reference(name)
 
@@ -1797,19 +2147,21 @@ class hst123(object):
         # Overwrite WCSNAME 'TWEAK' if it exists
         for file in driztable['image']:
             hdu = fits.open(file, mode='update')
-            hdu[0].header['WCSNAME']='TWEAK-ORIG'
-            hdu[0].header['TWEAKSUC']=0
+            try:
+                wi = wcs_image_hdu_index(hdu)
+                hdu[wi].header["WCSNAME"] = "TWEAK-ORIG"
+                hdu[wi].header["TWEAKSUC"] = 0
 
-            x = hdu[0].header['NAXIS1']/2
-            y = hdu[0].header['NAXIS2']/2
-            w = wcs.WCS(hdu[0].header)
-            coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
+                x = hdu[wi].header["NAXIS1"] / 2
+                y = hdu[wi].header["NAXIS2"] / 2
+                w = wcs.WCS(hdu[wi].header)
+                coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
 
-            central[file]={}
-            central[file]['cra']=coord.ra.degree
-            central[file]['cdec']=coord.dec.degree
-
-            hdu.close()
+                central[file] = {}
+                central[file]["cra"] = coord.ra.degree
+                central[file]["cdec"] = coord.dec.degree
+            finally:
+                hdu.close()
 
         # Pick deepest drizzled image for reference and run tweakreg
         img = self.pick_deepest_images(driztable['image'])
@@ -1819,8 +2171,7 @@ class hst123(object):
             do_cosmic=False, skip_wcs=True, search_radius=5.0)
 
         # Convert xoffset and yoffset values to RAoffset and DECoffset
-        message = '\n\nApplying shifts to individual image frames'
-        log.info(message)
+        log.info("Applying hierarchical shifts to individual frames")
         for row in shift_table:
             hdu = fits.open(row['file'], mode='readonly')
 
@@ -1888,8 +2239,12 @@ class hst123(object):
   def get_dolphot_photometry(self, split_images, reference):
     self._dolphot.get_dolphot_photometry(split_images, reference)
 
+  @log_calls
   def handle_args(self, parser):
     opt = parser.parse_args()
+    opt.work_dir, opt.raw_dir = normalize_work_and_raw_dirs(
+        opt.work_dir, opt.raw_dir
+    )
     self.options['args'] = opt
 
     # If we're cleaning up a previous run, execute that here then exit
@@ -1962,6 +2317,7 @@ def main():
     on --help or invalid coord.
     """
     # Start timer, create hst123 class obj, parse args
+    ensure_cli_logging_configured()
     start = time.time()
     hst = hst123()
 
@@ -1995,14 +2351,21 @@ def main():
     opt = hst.handle_args(hst.add_options(usage=hst.usagestring))
     default = hst.options['global_defaults']
 
+    attach_work_dir_log_file(opt.work_dir, process_name="pipeline")
+
+    coord_str = hst.coord.to_string("hmsdms")
+    log_pipeline_configuration(
+        log,
+        opt,
+        version=__version__,
+        coord_hmsdms=coord_str,
+    )
+
     # Handle file downloads - first check what products are available
     hst.productlist = hst.get_productlist(hst.coord, default['radius'])
     if opt.download:
-        banner = f'Downloading HST data from MAST for: {ra} {dec}'
+        banner = f'Downloading HST data from MAST for: {ra} {dec} ({coord_str})'
         make_banner(banner)
-
-        if opt.raw_dir:
-            opt.raw_dir = os.path.join(opt.raw_dir, 'raw')
 
         if opt.archive:
             hst.dest=None
@@ -2012,20 +2375,24 @@ def main():
         if opt.raw_dir and not os.path.exists(opt.raw_dir):
             os.makedirs(opt.raw_dir)
 
-        hst.download_files(hst.productlist, archivedir=opt.archive,
-            dest=hst.dest, clobber=opt.clobber)
+        hst.download_files(
+            hst.productlist,
+            archivedir=opt.archive,
+            dest=hst.dest,
+            clobber=opt.clobber,
+            work_dir=opt.work_dir,
+        )
 
     if opt.archive and not opt.skip_copy:
-        make_banner('Copying raw data to working dir')
+        log.info("Ingest: archive → work_dir (%s)", opt.work_dir)
         if hst.productlist:
             for product in hst.productlist:
                 hst.copy_raw_data_archive(product, archivedir=opt.archive,
                     workdir=opt.work_dir, check_for_coord=True)
         else:
-            make_banner('WARNING: no products to download!')
+            log.warning("No MAST products to copy from archive.")
     else:
-        # Assume that all files are in the raw/ data directory
-        make_banner('Copying raw data to working dir')
+        log.info("Ingest: raw_dir (%s) → work_dir", opt.raw_dir)
         hst.copy_raw_data(opt.raw_dir, reverse=True, check_for_coord=True)
 
     # Get input images
@@ -2049,6 +2416,11 @@ def main():
         make_banner('Organizing input images by visit')
         # Going forward, we'll refer everything to obstable for imgs + metadata
         table = hst.input_list(hst.input_images, show=True)
+        if table is None or len(table) == 0:
+            log.error(
+                "No valid FITS inputs after filtering (missing files or bad headers). Exiting."
+            )
+            sys.exit(1)
         tables = hst.organize_reduction_tables(table, byvisit=opt.by_visit)
 
         for i,obstable in enumerate(tables):
@@ -2058,6 +2430,12 @@ def main():
                 hst.dolphot = hst._dolphot.make_dolphot_dict(opt.dolphot + vnum)
 
             hst.reference = hst.handle_reference(obstable, opt.reference)
+            if not hst.reference:
+                log.error(
+                    "Skipping visit %s: no valid reference image (check FITS on disk).",
+                    i,
+                )
+                continue
 
             # Run main alignment (tweakreg or jhat per --align-with)
             if not opt.skip_tweakreg:
