@@ -1,0 +1,17 @@
+/* hst123 documentation — tweaks on sphinx_rtd_theme (Swift_host_subtraction style) */
+
+.wy-table-responsive table td,
+.wy-table-responsive table th {
+    white-space: normal;
+}
+
+.wy-table-responsive {
+    margin-bottom: 24px;
+    max-width: 100%;
+    overflow: visible;
+}
+
+/* Slightly clearer admonitions in RTD */
+.rst-content .admonition {
+    border-radius: 4px;
+}

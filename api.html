@@ -1,0 +1,519 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API reference &mdash; hst123 1.0.1.dev113+gcc2203ca8</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" href="_static/hst123-docs.css" type="text/css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=ca323b03"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Zero points" href="zeropoints.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            hst123
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="zeropoints.html">Zero points</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#entry-point">Entry point</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123._pipeline.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#pipeline-class">Pipeline class</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123._pipeline.hst123"><code class="docutils literal notranslate"><span class="pre">hst123</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-hst123.utils.paths">Utilities</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.paths.normalize_fits_path"><code class="docutils literal notranslate"><span class="pre">normalize_fits_path()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.paths.normalize_work_and_raw_dirs"><code class="docutils literal notranslate"><span class="pre">normalize_work_and_raw_dirs()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.stdio.suppress_stdout"><code class="docutils literal notranslate"><span class="pre">suppress_stdout()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.stdio.suppress_stdout_fd"><code class="docutils literal notranslate"><span class="pre">suppress_stdout_fd()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><code class="docutils literal notranslate"><span class="pre">DolphotColumn</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.description"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.description</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_0based"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.index_0based</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_1based"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.index_1based</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.raw_line"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.raw_line</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.dolphot_columns_to_astropy_table"><code class="docutils literal notranslate"><span class="pre">dolphot_columns_to_astropy_table()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.find_column_index_0based"><code class="docutils literal notranslate"><span class="pre">find_column_index_0based()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.group_param_by_image"><code class="docutils literal notranslate"><span class="pre">group_param_by_image()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array"><code class="docutils literal notranslate"><span class="pre">load_dolphot_catalog_array()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.merge_image_metadata"><code class="docutils literal notranslate"><span class="pre">merge_image_metadata()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_column_index_and_description"><code class="docutils literal notranslate"><span class="pre">parse_column_index_and_description()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_columns_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_data_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_data_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_info_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_info_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_param_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_param_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_warnings_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_warnings_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.read_dolphot_catalog_hdf5"><code class="docutils literal notranslate"><span class="pre">read_dolphot_catalog_hdf5()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names"><code class="docutils literal notranslate"><span class="pre">unique_hdf5_column_names()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5"><code class="docutils literal notranslate"><span class="pre">write_dolphot_catalog_hdf5()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-hst123.primitives.base">Primitives base</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.primitives.base.BasePrimitive"><code class="docutils literal notranslate"><span class="pre">BasePrimitive</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.primitives.base.BasePrimitive.pipeline"><code class="docutils literal notranslate"><span class="pre">BasePrimitive.pipeline</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">hst123</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">API reference</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/api.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="api-reference">
+<span id="id1"></span><h1>API reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h1>
+<p>Selected public modules are documented below. The main orchestration class
+<code class="docutils literal notranslate"><span class="pre">hst123._pipeline.hst123</span></code> is large; only its summary is shown here—see the
+source or <a class="reference internal" href="user_guide.html"><span class="doc">User guide</span></a> for workflow details.</p>
+<section id="entry-point">
+<h2>Entry point<a class="headerlink" href="#entry-point" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123._pipeline.main">
+<span class="sig-prename descclassname"><span class="pre">hst123._pipeline.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#main"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.main" title="Link to this definition"></a></dt>
+<dd><p>Entry point: parse args, download/copy data, align, drizzle, run dolphot, scrape.</p>
+<p>Expects sys.argv[1] = RA, sys.argv[2] = Dec. Uses add_options for all other
+flags (–work-dir, –download, –run-dolphot, –scrape-dolphot, etc.). Exits
+on –help or invalid coord.</p>
+</dd></dl>
+
+</section>
+<section id="pipeline-class">
+<h2>Pipeline class<a class="headerlink" href="#pipeline-class" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">hst123._pipeline.</span></span><span class="sig-name descname"><span class="pre">hst123</span></span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123" title="Link to this definition"></a></dt>
+<dd><p>Orchestrates download, alignment, drizzle, DOLPHOT, and photometry scraping.</p>
+</dd></dl>
+
+</section>
+<section id="module-hst123.utils.paths">
+<span id="utilities"></span><h2>Utilities<a class="headerlink" href="#module-hst123.utils.paths" title="Link to this heading"></a></h2>
+<p>Path helpers for FITS files (stable across <a class="reference external" href="https://docs.python.org/3/library/os.html#os.chdir" title="(in Python v3.14)"><code class="xref py py-func docutils literal notranslate"><span class="pre">os.chdir()</span></code></a>).</p>
+<p>The pipeline changes the working directory to <code class="docutils literal notranslate"><span class="pre">--work-dir</span></code>; relative paths
+must be normalized to absolute before that.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.paths.normalize_fits_path">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.paths.</span></span><span class="sig-name descname"><span class="pre">normalize_fits_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/paths.html#normalize_fits_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.paths.normalize_fits_path" title="Link to this definition"></a></dt>
+<dd><p>Return an absolute, normalized <code class="docutils literal notranslate"><span class="pre">path</span></code> for FITS references.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>path</strong><span class="classifier">str</span></dt><dd><p>User-supplied path; empty string is returned unchanged.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>str</dt><dd><p><code class="docutils literal notranslate"><span class="pre">os.path.normpath</span></code> of the expanded absolute path.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>After alignment, the process cwd is <code class="docutils literal notranslate"><span class="pre">--work-dir</span></code>; unresolved relative
+paths would double-resolve (e.g. <code class="docutils literal notranslate"><span class="pre">test_data/foo.fits</span></code> under <code class="docutils literal notranslate"><span class="pre">work_dir</span></code>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.paths.normalize_work_and_raw_dirs">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.paths.</span></span><span class="sig-name descname"><span class="pre">normalize_work_and_raw_dirs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">work_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">raw_dir</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/paths.html#normalize_work_and_raw_dirs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.paths.normalize_work_and_raw_dirs" title="Link to this definition"></a></dt>
+<dd><p>Resolve CLI <code class="docutils literal notranslate"><span class="pre">--work-dir</span></code> and <code class="docutils literal notranslate"><span class="pre">--raw-dir</span></code> to absolute paths.</p>
+<p>Default raw directory is <code class="docutils literal notranslate"><span class="pre">&lt;work-dir&gt;/raw</span></code>. Call once after parsing
+arguments so paths remain valid after <code class="docutils literal notranslate"><span class="pre">os.chdir(work_dir)</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>work_dir</strong><span class="classifier">str or None</span></dt><dd><p><code class="docutils literal notranslate"><span class="pre">--work-dir</span></code> value, or None for current directory.</p>
+</dd>
+<dt><strong>raw_dir</strong><span class="classifier">str or None</span></dt><dd><p><code class="docutils literal notranslate"><span class="pre">--raw-dir</span></code>; if <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;.&quot;</span></code>, or <code class="docutils literal notranslate"><span class="pre">&quot;./&quot;</span></code>, use <code class="docutils literal notranslate"><span class="pre">&lt;work&gt;/raw</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>tuple of str</dt><dd><p><code class="docutils literal notranslate"><span class="pre">(work_abs,</span> <span class="pre">raw_abs)</span></code> absolute paths.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<p id="module-hst123.utils.stdio">Context managers to silence stdout/stderr during noisy imports or C I/O.</p>
+<p>Use <a class="reference internal" href="#hst123.utils.stdio.suppress_stdout" title="hst123.utils.stdio.suppress_stdout"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout()</span></code></a> for Python-level streams and
+<a class="reference internal" href="#hst123.utils.stdio.suppress_stdout_fd" title="hst123.utils.stdio.suppress_stdout_fd"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout_fd()</span></code></a> when C libraries write to file descriptor 1.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.stdio.suppress_stdout">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.stdio.</span></span><span class="sig-name descname"><span class="pre">suppress_stdout</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Iterator" title="(in Python v3.14)"><span class="pre">Iterator</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/stdio.html#suppress_stdout"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.stdio.suppress_stdout" title="Link to this definition"></a></dt>
+<dd><p>Redirect <code class="docutils literal notranslate"><span class="pre">sys.stdout</span></code> and <code class="docutils literal notranslate"><span class="pre">sys.stderr</span></code> to <code class="docutils literal notranslate"><span class="pre">os.devnull</span></code> until exit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Yields<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>None</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Does not affect the C runtime <code class="docutils literal notranslate"><span class="pre">stdout</span></code>; see <a class="reference internal" href="#hst123.utils.stdio.suppress_stdout_fd" title="hst123.utils.stdio.suppress_stdout_fd"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout_fd()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.stdio.suppress_stdout_fd">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.stdio.</span></span><span class="sig-name descname"><span class="pre">suppress_stdout_fd</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Iterator" title="(in Python v3.14)"><span class="pre">Iterator</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/stdio.html#suppress_stdout_fd"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.stdio.suppress_stdout_fd" title="Link to this definition"></a></dt>
+<dd><p>Redirect OS file descriptor 1 (stdout) to <code class="docutils literal notranslate"><span class="pre">os.devnull</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Yields<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>None</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>For C extensions (e.g. DrizzlePac <code class="docutils literal notranslate"><span class="pre">photeq</span></code>) that write to the C stdio
+<code class="docutils literal notranslate"><span class="pre">stdout</span></code>. Python <a class="reference internal" href="#hst123.utils.stdio.suppress_stdout" title="hst123.utils.stdio.suppress_stdout"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout()</span></code></a> does not catch those writes.
+Stderr (fd 2) is left unchanged so <a class="reference external" href="https://docs.python.org/3/library/logging.html#module-logging" title="(in Python v3.14)"><code class="xref py py-mod docutils literal notranslate"><span class="pre">logging</span></code></a> handlers on stderr still work.</p>
+</dd></dl>
+
+<p id="module-hst123.utils.dolphot_catalog_hdf5">Parse DOLPHOT multi-extension output (catalog, <code class="docutils literal notranslate"><span class="pre">.columns</span></code>, <code class="docutils literal notranslate"><span class="pre">.param</span></code>, <code class="docutils literal notranslate"><span class="pre">.data</span></code>,
+<code class="docutils literal notranslate"><span class="pre">.info</span></code>, <code class="docutils literal notranslate"><span class="pre">.warnings</span></code>) and export a single HDF5 file with a labeled catalog plus metadata.</p>
+<p>Designed against DOLPHOT 3.x text products: whitespace-separated numeric <code class="docutils literal notranslate"><span class="pre">dpXXXX</span></code> catalog,
+one descriptive line per column in <code class="docutils literal notranslate"><span class="pre">dpXXXX.columns</span></code>, and sidecar metadata files.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">DolphotColumn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index_1based</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_0based</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">description</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">raw_line</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#DolphotColumn"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="Link to this definition"></a></dt>
+<dd><p>One row from a DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> file.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.description">
+<span class="sig-name descname"><span class="pre">description</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.description" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_0based">
+<span class="sig-name descname"><span class="pre">index_0based</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_0based" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_1based">
+<span class="sig-name descname"><span class="pre">index_1based</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_1based" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.raw_line">
+<span class="sig-name descname"><span class="pre">raw_line</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.raw_line" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.dolphot_columns_to_astropy_table">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">dolphot_columns_to_astropy_table</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">catalog</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#dolphot_columns_to_astropy_table"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.dolphot_columns_to_astropy_table" title="Link to this definition"></a></dt>
+<dd><p>Build an <a class="reference external" href="https://docs.astropy.org/en/stable/api/astropy.table.Table.html#astropy.table.Table" title="(in Astropy v7.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">astropy.table.Table</span></code></a> with descriptive column names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>catalog</strong><span class="classifier">ndarray</span></dt><dd><p>Output of <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array" title="hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_dolphot_catalog_array()</span></code></a>.</p>
+</dd>
+<dt><strong>columns</strong><span class="classifier">list of DolphotColumn</span></dt><dd><p>From <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file" title="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file"><code class="xref py py-func docutils literal notranslate"><span class="pre">parse_dolphot_columns_file()</span></code></a>.</p>
+</dd>
+<dt><strong>names</strong><span class="classifier">list of str, optional</span></dt><dd><p>HDF5-safe names; defaults to <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names" title="hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names"><code class="xref py py-func docutils literal notranslate"><span class="pre">unique_hdf5_column_names()</span></code></a>.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.find_column_index_0based">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">find_column_index_0based</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">image</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#find_column_index_0based"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.find_column_index_0based" title="Link to this definition"></a></dt>
+<dd><p>Match DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> semantics used by
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.primitives.scrape_dolphot.ScrapeDolphotPrimitive.get_dolphot_column()</span></code>.</p>
+<p><em>key</em> must appear in the column description. If <em>image</em> is non-empty, it must
+appear in the description (after stripping a <code class="docutils literal notranslate"><span class="pre">.fits</span></code> suffix). If <em>image</em> is
+empty, any column whose description contains <em>key</em> may match—the first such
+column is returned (same as substring <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">in</span> <span class="pre">line</span></code> being true for every line).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.group_param_by_image">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">group_param_by_image</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">param</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#group_param_by_image"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.group_param_by_image" title="Link to this definition"></a></dt>
+<dd><p>Split flat <code class="docutils literal notranslate"><span class="pre">imgNNNN_*</span></code> keys into per-image dicts (<code class="docutils literal notranslate"><span class="pre">img0001</span></code>, …).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">load_dolphot_catalog_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#load_dolphot_catalog_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array" title="Link to this definition"></a></dt>
+<dd><p>Load the main DOLPHOT catalog (numeric rows, whitespace-separated).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>path</strong><span class="classifier">path-like</span></dt><dd><p>Path to <code class="docutils literal notranslate"><span class="pre">dpXXXX</span></code> (no extension), same as <code class="docutils literal notranslate"><span class="pre">dolphot['base']</span></code> in the pipeline.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>numpy.ndarray</dt><dd><p>2-D float array of shape (n_sources, n_columns).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.merge_image_metadata">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">merge_image_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">param</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">info</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">warnings</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#merge_image_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.merge_image_metadata" title="Link to this definition"></a></dt>
+<dd><p>Combine parsed sidecars into one JSON-serializable tree keyed by <code class="docutils literal notranslate"><span class="pre">img0000</span></code> .. <code class="docutils literal notranslate"><span class="pre">imgNNNN</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_column_index_and_description">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_column_index_and_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">line</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_column_index_and_description"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_column_index_and_description" title="Link to this definition"></a></dt>
+<dd><p>Parse a single <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> line of the form <code class="docutils literal notranslate"><span class="pre">N.</span> <span class="pre">description</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>(1-based index, description) or None if the line does not match.</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_columns_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_columns_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file" title="Link to this definition"></a></dt>
+<dd><p>Read a DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> file into structured column definitions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>path</strong><span class="classifier">path-like</span></dt><dd><p>Path to <code class="docutils literal notranslate"><span class="pre">dpXXXX.columns</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>list of DolphotColumn</dt><dd><p>One entry per line, in file order (column 1 .. N).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_data_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_data_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_data_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_data_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.data</span></code>: WCS, alignment iteration counts, PSF quality, aperture-correction stats.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_info_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_info_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_info_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_info_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.info</span></code>: MJD per input image, limits, filter/exptime lines, alignment, apcor.</p>
+<p>Structure varies slightly by instrument; unknown lines are kept in <code class="docutils literal notranslate"><span class="pre">extra_lines</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_param_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_param_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_param_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_param_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.param</span></code> (<code class="docutils literal notranslate"><span class="pre">key</span> <span class="pre">=</span> <span class="pre">value</span></code> lines, DOLPHOT style).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_warnings_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_warnings_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_warnings_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_warnings_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.warnings</span></code> into all lines and optional buckets by image path.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.read_dolphot_catalog_hdf5">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">read_dolphot_catalog_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">photometry_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'photometry'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#read_dolphot_catalog_hdf5"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.read_dolphot_catalog_hdf5" title="Link to this definition"></a></dt>
+<dd><p>Read back a table written by <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5" title="hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5"><code class="xref py py-func docutils literal notranslate"><span class="pre">write_dolphot_catalog_hdf5()</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>astropy.table.Table</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">unique_hdf5_column_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#unique_hdf5_column_names"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names" title="Link to this definition"></a></dt>
+<dd><p>Return safe column names, de-duplicated with numeric suffixes if needed.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">write_dolphot_catalog_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">out_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">base</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">photometry_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'photometry'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_raw_sidecars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compression</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#write_dolphot_catalog_hdf5"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5" title="Link to this definition"></a></dt>
+<dd><p>Write one HDF5 file with the full DOLPHOT catalog and metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>out_path</strong><span class="classifier">path-like</span></dt><dd><p>Output <code class="docutils literal notranslate"><span class="pre">.h5</span></code> file.</p>
+</dd>
+<dt><strong>base</strong><span class="classifier">path-like</span></dt><dd><p>DOLPHOT output base path <strong>without extension</strong> (same as pipeline <code class="docutils literal notranslate"><span class="pre">dolphot['base']</span></code>).</p>
+</dd>
+<dt><strong>photometry_path</strong><span class="classifier">str</span></dt><dd><p>HDF5 path for the <a class="reference external" href="https://docs.astropy.org/en/stable/api/astropy.table.Table.html#astropy.table.Table" title="(in Astropy v7.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Table</span></code></a> (Astropy default metadata).</p>
+</dd>
+<dt><strong>include_raw_sidecars</strong><span class="classifier">bool</span></dt><dd><p>If True, store UTF-8 text of <code class="docutils literal notranslate"><span class="pre">.param</span></code>, <code class="docutils literal notranslate"><span class="pre">.info</span></code>, <code class="docutils literal notranslate"><span class="pre">.data</span></code>, <code class="docutils literal notranslate"><span class="pre">.warnings</span></code>,
+and <code class="docutils literal notranslate"><span class="pre">.columns</span></code> as datasets under <code class="docutils literal notranslate"><span class="pre">metadata/raw/</span></code>.</p>
+</dd>
+<dt><strong>compression</strong><span class="classifier">bool</span></dt><dd><p>If True, use gzip compression on the table (requires Astropy + h5py).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>pathlib.Path</dt><dd><p>Path to the written file.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>ImportError</dt><dd><p>If <code class="docutils literal notranslate"><span class="pre">h5py</span></code> is not installed.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-hst123.primitives.base">
+<span id="primitives-base"></span><h2>Primitives base<a class="headerlink" href="#module-hst123.primitives.base" title="Link to this heading"></a></h2>
+<p>Base class for pipeline <em>primitives</em> (FITS, astrometry, DOLPHOT, etc.).</p>
+<p>Each primitive receives the live <a class="reference internal" href="#hst123._pipeline.hst123" title="hst123._pipeline.hst123"><code class="xref py py-class docutils literal notranslate"><span class="pre">hst123</span></code></a> instance as
+<code class="docutils literal notranslate"><span class="pre">self._p</span></code> and should use <code class="xref py py-meth docutils literal notranslate"><span class="pre">_primitive_cleanup()</span></code> after writing outputs.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hst123.primitives.base.BasePrimitive">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">hst123.primitives.base.</span></span><span class="sig-name descname"><span class="pre">BasePrimitive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pipeline</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/primitives/base.html#BasePrimitive"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.primitives.base.BasePrimitive" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Attach to the pipeline and share options/state via <code class="docutils literal notranslate"><span class="pre">self._p</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>pipeline</strong></dt><dd><p>The running <a class="reference internal" href="#hst123._pipeline.hst123" title="hst123._pipeline.hst123"><code class="xref py py-class docutils literal notranslate"><span class="pre">hst123</span></code></a> instance (required).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Attributes<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt><strong>_p</strong></dt><dd><p>Same object as <a class="reference internal" href="#hst123.primitives.base.BasePrimitive.pipeline" title="hst123.primitives.base.BasePrimitive.pipeline"><code class="xref py py-attr docutils literal notranslate"><span class="pre">pipeline</span></code></a>.</p>
+</dd>
+<dt><strong>_log</strong></dt><dd><p>Logger named after the primitive module (<code class="docutils literal notranslate"><span class="pre">hst123.primitives…</span></code>).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>TypeError</dt><dd><p>If <code class="docutils literal notranslate"><span class="pre">pipeline</span></code> is None.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<dl class="py property">
+<dt class="sig sig-object py" id="hst123.primitives.base.BasePrimitive.pipeline">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">pipeline</span></span><a class="headerlink" href="#hst123.primitives.base.BasePrimitive.pipeline" title="Link to this definition"></a></dt>
+<dd><p>Pipeline instance (alias of <code class="docutils literal notranslate"><span class="pre">self._p</span></code>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>object</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="zeropoints.html" class="btn btn-neutral float-left" title="Zero points" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, C. D. Kilpatrick.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
