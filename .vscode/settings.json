@@ -1,0 +1,8 @@
+{
+  "git.ignoreLimitWarning": true,
+  // On cloud-synced folders (e.g. Dropbox), parent-folder repo detection and
+  // constant auto-refresh can spawn many slow git processes and hit IDE timeouts.
+  "git.openRepositoryInParentFolders": "never",
+  "git.autorefresh": false,
+  "git.showProgress": true
+}

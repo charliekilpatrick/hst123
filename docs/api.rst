@@ -3,9 +3,9 @@
 API reference
 =============
 
-Selected public modules use **NumPy-style** docstrings. The main orchestration
-class ``hst123._pipeline.hst123`` is large; only its summary is shown here—see
-the source or :doc:`user_guide` for workflow details.
+Selected public modules are documented below. The main orchestration class
+``hst123._pipeline.hst123`` is large; only its summary is shown here—see the
+source or :doc:`user_guide` for workflow details.
 
 Entry point
 -----------

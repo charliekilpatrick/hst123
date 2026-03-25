@@ -18,18 +18,8 @@ The pipeline is driven by the ``hst123`` command-line interface. Typical stages:
 
 Configuration uses ``hst123.utils.options`` (argparse) and ``hst123.settings``.
 
-Documentation conventions
--------------------------
-
-Public APIs use **NumPy-style docstrings**:
-
-- One-line **summary** on the first line.
-- Optional **extended summary** paragraph(s).
-- Sections such as **Parameters**, **Returns**, **Raises**, **Notes**, **See
-  Also**, **Examples** where helpful.
-
-Sphinx builds API pages with ``numpydoc`` and cross-links via **intersphinx**
-to Python, NumPy, and Astropy.
+The :doc:`api` section lists selected modules; Sphinx uses **intersphinx** to
+link to Python, NumPy, and Astropy where configured.
 
 DOLPHOT catalog export
 ------------------------

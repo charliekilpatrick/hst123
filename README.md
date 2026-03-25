@@ -18,7 +18,7 @@ Pipeline for HST data: download from MAST, align (tweakreg/jhat), drizzle, run D
 - **Versioning:** From git tags (setuptools-scm); `hst123 --version`
 - **Layout:** Main pipeline in `hst123/_pipeline.py`; helpers in `hst123/primitives/` (FITS, photometry, astrometry, DOLPHOT, scrape) and `hst123/utils/` (options, logging, display, visit, WCS)
 - **Tests:** `pytest` in `tests/`; optional markers `network`, `dolphot` (see pyproject.toml)
-- **Docs:** Sphinx sources under `docs/` (MyST Markdown + reStructuredText, **numpydoc**, Read the Docs theme). Build: `pip install -e ".[docs]"` then `cd docs && make html`. **Hosted:** [GitHub Pages](https://charliekilpatrick.github.io/hst123/) (from the [Documentation workflow](https://github.com/charliekilpatrick/hst123/actions/workflows/documentation.yml)).
+- **Docs:** Sphinx sources under `docs/` (MyST Markdown + reStructuredText, Read the Docs theme). Build: `pip install -e ".[docs]"` then `cd docs && make html`. **Hosted:** [GitHub Pages](https://charliekilpatrick.github.io/hst123/) (from the [Documentation workflow](https://github.com/charliekilpatrick/hst123/actions/workflows/documentation.yml)).
 
 ---
 
@@ -64,6 +64,8 @@ Use **`--all-psfs`** for the full filter set; **`--no-make`** / **`--no-psfs`** 
 **macOS:** If `pip install drizzlepac` fails (e.g. HDF5), install with Homebrew: `brew install hdf5 c-blosc`, set `HDF5_DIR` and `BLOSC_DIR`, then retry.
 
 **Without Conda:** `python3 -m venv .venv && source .venv/bin/activate`, then run the same `pip` steps above.
+
+**`pip install` fails while building NumPy or Astropy** (Meson/ninja, C++ errors such as ``'type_traits' file not found``): this usually means **pip is compiling from source** because there is **no binary wheel** for your Python version. The repo pins **NumPy 1.x** and **Astropy 5.x** (see ``pyproject.toml``); on **Python 3.13+** those often lack wheels, so pip downloads tarballs and the build can fail. **Fix:** use the **conda** env from ``environment.yml`` (**Python 3.10**, with NumPy/Astropy from conda-forge), or use a **venv with Python 3.10–3.12**, or ``conda install 'numpy<2' 'astropy>=5.3,<6'`` (and matching SciPy) **before** ``pip install -e .`` so pip does not try to build the stack. Avoid installing this package into **base** with an unsupported Python unless you know wheels exist.
 
 ---
 
@@ -134,7 +136,7 @@ You can provide **`--reference`** or let hst123 build one from the data. Alignme
 
 - **Online:** [charliekilpatrick.github.io/hst123](https://charliekilpatrick.github.io/hst123/) (API reference, user guide, changelog, zero points).
 - **Local build:** `pip install -e ".[docs]"` then `cd docs && make html` → `docs/build/html/index.html`.
-- **Sources:** `docs/index.rst`, `docs/user_guide.rst`, `docs/api.rst`, plus `docs/changelog.md` and `docs/zeropoints.md` (MyST). Docstrings follow the **NumPy** convention (`numpydoc` / Sphinx).
+- **Sources:** `docs/index.rst`, `docs/user_guide.rst`, `docs/api.rst`, plus `docs/changelog.md` and `docs/zeropoints.md` (MyST).
 
 ---
 

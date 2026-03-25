@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# hst123 documentation configuration (Sphinx + Read the Docs theme + numpydoc).
+# hst123 documentation configuration (Sphinx + Read the Docs theme).
 #
 # This file is execfile()d with the current directory set to its containing dir.
 
@@ -38,7 +38,7 @@ extensions = [
 autosummary_generate = True
 autosummary_imported_members = False
 
-# numpydoc (NumPy docstring format)
+# numpydoc extension
 numpydoc_show_class_members = False
 numpydoc_use_blockquotes = True
 numpydoc_use_plots = False

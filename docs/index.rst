@@ -4,8 +4,7 @@ Welcome to hst123's documentation!
 
 **hst123** is a Python pipeline for Hubble Space Telescope data: download from
 MAST, align (TweakReg / JHAT), drizzle, run DOLPHOT, and scrape photometry from
-DOLPHOT catalogs. The code uses **NumPy-style docstrings** (see the
-:doc:`user_guide`).
+DOLPHOT catalogs. See the :doc:`user_guide` for an overview.
 
 Installing hst123
 =================
