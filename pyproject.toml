@@ -53,6 +53,8 @@ hdf5 = [
 docs = [
     "sphinx>=5.0",
     "sphinx-rtd-theme>=1.2",
+    "numpydoc>=1.5",
+    "myst-parser>=2.0",
 ]
 
 [project.scripts]

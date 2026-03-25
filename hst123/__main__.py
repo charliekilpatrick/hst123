@@ -1,4 +1,9 @@
-"""Allow running the package with python -m hst123."""
+"""
+CLI entry when running ``python -m hst123``.
+
+Configures logging before importing the pipeline so early messages use the same
+handlers as the rest of the run.
+"""
 from hst123.utils.logging import ensure_cli_logging_configured, get_logger
 
 # Configure logging before importing the heavy stack so early messages use the

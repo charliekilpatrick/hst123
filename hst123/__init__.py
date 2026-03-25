@@ -1,4 +1,14 @@
-"""hst123: download, register, drizzle, and run dolphot on HST images."""
+"""
+hst123: HST download, alignment, drizzle, and DOLPHOT photometry.
+
+This package provides the :class:`~hst123._pipeline.hst123` pipeline driver
+(lazy-imported via :func:`__getattr__` as ``hst123`` and ``main``) and supporting
+utilities under :mod:`hst123.utils` and :mod:`hst123.primitives`.
+
+Notes
+-----
+Version ``__version__`` is written by setuptools-scm at install time.
+"""
 
 try:
     from hst123._version import __version__

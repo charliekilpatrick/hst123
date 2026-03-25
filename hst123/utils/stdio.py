@@ -1,12 +1,28 @@
-"""Suppress stdout/stderr (e.g. during drizzlepac/astroquery import)."""
+"""
+Context managers to silence stdout/stderr during noisy imports or C I/O.
+
+Use :func:`suppress_stdout` for Python-level streams and
+:func:`suppress_stdout_fd` when C libraries write to file descriptor 1.
+"""
 import os
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 
 
 @contextmanager
-def suppress_stdout():
-    """Redirect stdout and stderr to devnull; restores them on exit."""
+def suppress_stdout() -> Iterator[None]:
+    """
+    Redirect ``sys.stdout`` and ``sys.stderr`` to ``os.devnull`` until exit.
+
+    Yields
+    ------
+    None
+
+    Notes
+    -----
+    Does not affect the C runtime ``stdout``; see :func:`suppress_stdout_fd`.
+    """
     with open(os.devnull, "w") as devnull:
         old_stdout = sys.stdout
         old_stderr = sys.stderr
@@ -20,13 +36,19 @@ def suppress_stdout():
 
 
 @contextmanager
-def suppress_stdout_fd():
+def suppress_stdout_fd() -> Iterator[None]:
     """
-    Redirect OS file descriptor 1 (stdout) to devnull.
+    Redirect OS file descriptor 1 (stdout) to ``os.devnull``.
 
-    Use for C extensions (e.g. drizzlepac ``photeq``) that printf to the C runtime
-    stdout; Python :func:`suppress_stdout` does not catch those. Leave fd 2
-    (stderr) alone so ``logging`` handlers attached to stderr still work.
+    Yields
+    ------
+    None
+
+    Notes
+    -----
+    For C extensions (e.g. DrizzlePac ``photeq``) that write to the C stdio
+    ``stdout``. Python :func:`suppress_stdout` does not catch those writes.
+    Stderr (fd 2) is left unchanged so :mod:`logging` handlers on stderr still work.
     """
     devnull = os.open(os.devnull, os.O_RDWR)
     saved = os.dup(1)

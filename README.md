@@ -1,5 +1,9 @@
 # hst123
 
+[![Build and Test](https://github.com/charliekilpatrick/hst123/actions/workflows/build-test.yml/badge.svg)](https://github.com/charliekilpatrick/hst123/actions/workflows/build-test.yml)
+[![Documentation](https://github.com/charliekilpatrick/hst123/actions/workflows/documentation.yml/badge.svg)](https://github.com/charliekilpatrick/hst123/actions/workflows/documentation.yml)
+[![Documentation site](https://img.shields.io/badge/documentation-GitHub%20Pages-4b32b3)](https://charliekilpatrick.github.io/hst123/)
+
 Pipeline for HST data: download from MAST, align (tweakreg/jhat), drizzle, run DOLPHOT, and scrape photometry. Optimized for point-source photometry across multiple visits and filters.
 
 **Alignment skip / provenance:** After a successful TweakReg or JHAT run, the primary header stores **`HIERARCH HST123 ALIGNOK`**, **`ALIGNMT`** (method), and **`ALIGNRF`** (normalized reference id). A later run **skips** re-aligning a file when those match the requested method and reference (**`--clobber`** forces re-alignment). Logs record alignment outcome, reference, and method.
@@ -14,7 +18,7 @@ Pipeline for HST data: download from MAST, align (tweakreg/jhat), drizzle, run D
 - **Versioning:** From git tags (setuptools-scm); `hst123 --version`
 - **Layout:** Main pipeline in `hst123/_pipeline.py`; helpers in `hst123/primitives/` (FITS, photometry, astrometry, DOLPHOT, scrape) and `hst123/utils/` (options, logging, display, visit, WCS)
 - **Tests:** `pytest` in `tests/`; optional markers `network`, `dolphot` (see pyproject.toml)
-- **Docs:** `docs/` (changelog, zeropoints, stwcs); Sphinx with `pip install -e ".[docs]"` then `cd docs && make html`
+- **Docs:** Sphinx sources under `docs/` (MyST Markdown + reStructuredText, **numpydoc**, Read the Docs theme). Build: `pip install -e ".[docs]"` then `cd docs && make html`. **Hosted:** [GitHub Pages](https://charliekilpatrick.github.io/hst123/) (from the [Documentation workflow](https://github.com/charliekilpatrick/hst123/actions/workflows/documentation.yml)).
 
 ---
 
@@ -128,10 +132,9 @@ You can provide **`--reference`** or let hst123 build one from the data. Alignme
 
 ## Documentation
 
-- **`docs/changelog.md`** — Version history
-- **`docs/zeropoints.md`** — AB vs Vega, zero-point formula
-- **`docs/stwcs_dependency_analysis.md`** — Why stwcs is required
-- **`docs/index.md`** — Doc index and Sphinx build
+- **Online:** [charliekilpatrick.github.io/hst123](https://charliekilpatrick.github.io/hst123/) (API reference, user guide, changelog, zero points).
+- **Local build:** `pip install -e ".[docs]"` then `cd docs && make html` → `docs/build/html/index.html`.
+- **Sources:** `docs/index.rst`, `docs/user_guide.rst`, `docs/api.rst`, plus `docs/changelog.md` and `docs/zeropoints.md` (MyST). Docstrings follow the **NumPy** convention (`numpydoc` / Sphinx).
 
 ---
 

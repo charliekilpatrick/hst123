@@ -1,5 +1,9 @@
-"""Base class for pipeline primitives; subclasses get the pipeline as self._p."""
+"""
+Base class for pipeline *primitives* (FITS, astrometry, DOLPHOT, etc.).
 
+Each primitive receives the live :class:`~hst123._pipeline.hst123` instance as
+``self._p`` and should use :meth:`_primitive_cleanup` after writing outputs.
+"""
 from __future__ import annotations
 
 from typing import Any, Callable, Sequence
@@ -8,19 +12,43 @@ from hst123.utils.logging import get_logger
 
 
 class BasePrimitive:
-    """Primitive helpers attach to the pipeline and use self._p for options/state."""
+    """
+    Attach to the pipeline and share options/state via ``self._p``.
+
+    Parameters
+    ----------
+    pipeline
+        The running :class:`~hst123._pipeline.hst123` instance (required).
+
+    Attributes
+    ----------
+    _p
+        Same object as :attr:`pipeline`.
+    _log
+        Logger named after the primitive module (``hst123.primitives…``).
+
+    Raises
+    ------
+    TypeError
+        If ``pipeline`` is None.
+    """
 
     def __init__(self, pipeline):
         if pipeline is None:
             raise TypeError("BasePrimitive requires a pipeline instance")
         self._p = pipeline
-        # Per-module logger (``hst123.primitives.…``); use for debug/detail.
         self._log = get_logger(self.__class__.__module__)
         self._log.debug("attached %s", self.__class__.__name__)
 
     @property
     def pipeline(self):
-        """Pipeline instance (same as self._p)."""
+        """
+        Pipeline instance (alias of ``self._p``).
+
+        Returns
+        -------
+        object
+        """
         return self._p
 
     def _primitive_cleanup(

@@ -1,4 +1,9 @@
-"""Path helpers for FITS files (stable across os.chdir)."""
+"""
+Path helpers for FITS files (stable across :func:`os.chdir`).
+
+The pipeline changes the working directory to ``--work-dir``; relative paths
+must be normalized to absolute before that.
+"""
 import os
 
 
@@ -6,9 +11,20 @@ def normalize_work_and_raw_dirs(work_dir, raw_dir):
     """
     Resolve CLI ``--work-dir`` and ``--raw-dir`` to absolute paths.
 
-    Default raw directory is ``<work-dir>/raw``. Must run once after parsing
-    args so paths stay valid after ``os.chdir(work_dir)`` (no ``test_data/``
-    doubling).
+    Default raw directory is ``<work-dir>/raw``. Call once after parsing
+    arguments so paths remain valid after ``os.chdir(work_dir)``.
+
+    Parameters
+    ----------
+    work_dir : str or None
+        ``--work-dir`` value, or None for current directory.
+    raw_dir : str or None
+        ``--raw-dir``; if ``None``, ``"."``, or ``"./"``, use ``<work>/raw``.
+
+    Returns
+    -------
+    tuple of str
+        ``(work_abs, raw_abs)`` absolute paths.
     """
     if work_dir:
         work_abs = os.path.abspath(os.path.expanduser(work_dir))
@@ -23,11 +39,22 @@ def normalize_work_and_raw_dirs(work_dir, raw_dir):
 
 def normalize_fits_path(path: str) -> str:
     """
-    Return absolute, normalized path so it stays valid after chdir(work_dir).
+    Return an absolute, normalized ``path`` for FITS references.
 
-    TweakReg and related code change the process cwd to ``--work-dir``; relative
-    paths like ``test_data/foo.fits`` would then incorrectly resolve under
-    ``work_dir/test_data/...``.
+    Parameters
+    ----------
+    path : str
+        User-supplied path; empty string is returned unchanged.
+
+    Returns
+    -------
+    str
+        ``os.path.normpath`` of the expanded absolute path.
+
+    Notes
+    -----
+    After alignment, the process cwd is ``--work-dir``; unresolved relative
+    paths would double-resolve (e.g. ``test_data/foo.fits`` under ``work_dir``).
     """
     if not path:
         return path
