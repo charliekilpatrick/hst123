@@ -13,9 +13,9 @@ class TestAddOptions:
 
     def test_optional_flags_exist(self):
         parser = options.add_options()
-        args = parser.parse_args(["0", "0", "--download", "--make-clean"])
+        args = parser.parse_args(["0", "0", "--download", "--cleanup"])
         assert args.download is True
-        assert args.make_clean is True
+        assert args.cleanup is True
 
     def test_work_dir_and_reference(self):
         parser = options.add_options()

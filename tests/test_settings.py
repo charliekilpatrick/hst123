@@ -119,3 +119,4 @@ class TestNamesAndLists:
     def test_pipeline_products_and_images(self):
         assert len(settings.pipeline_products) > 0
         assert len(settings.pipeline_images) > 0
+        assert "*drc.noise.fits" in settings.cleanup_extra_globs

@@ -1,4 +1,10 @@
-"""Pipeline settings: paths, DOLPHOT/tweakreg defaults, instruments, filters, catalog."""
+"""
+Default pipeline configuration: URLs, alignment radii, instruments, filters.
+
+``global_defaults`` is a flat dict consumed by :class:`~hst123._pipeline.hst123`
+and CLI parsing. Values include archive paths, CRDS/Mast endpoints, tweakreg
+search parameters, and photometry-related defaults.
+"""
 from astropy import units as u
 
 # Global defaults: archive, MAST/CRDS URLs, reference keys, visit, radius, dolphot params
@@ -273,6 +279,10 @@ pipeline_products = [
 ]
 
 pipeline_images = ["*flc.fits", "*flt.fits", "*c0m.fits", "*c1m.fits"]
+
+# Extra globs removed with CLI ``--cleanup`` (in addition to ``hst.input_images``).
+# DOLPHOT sky sidecars live next to ``*.drc.fits`` and are not input FITS names.
+cleanup_extra_globs = ("*drc.noise.fits",)
 
 names = [
     "image", "exptime", "datetime", "filter", "instrument",

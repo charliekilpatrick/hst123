@@ -14,6 +14,7 @@ from hst123.utils.logging import (
     ROOT_LOGGER,
     LogConfig,
     attach_work_dir_log_file,
+    compress_logger_name,
     ensure_cli_logging_configured,
     format_failure,
     format_hdu_list_summary,
@@ -27,6 +28,38 @@ from hst123.utils.logging import (
     red,
     end,
 )
+
+
+class TestCompressLoggerName:
+    def test_hst123_root(self):
+        assert compress_logger_name("hst123") == "hst123"
+
+    def test_dolphot_primitive_collapsed(self):
+        assert (
+            compress_logger_name("hst123.primitives.run_dolphot.run_dolphot_primitive")
+            == "run_dolphot"
+        )
+
+    def test_utils_shortened(self):
+        assert compress_logger_name("hst123.utils.logging") == "u.logging"
+
+    def test_primitives_prefix_dropped(self):
+        assert compress_logger_name("hst123.primitives.fits") == "fits"
+
+    def test_leading_underscore_stripped(self):
+        assert compress_logger_name("hst123._pipeline") == "pipeline"
+
+    def test_third_party_last_two_segments(self):
+        assert compress_logger_name("stwcs.wcsutil.altwcs") == "wcsutil.altwcs"
+
+    def test_short_name_unchanged(self):
+        assert compress_logger_name("astropy") == "astropy"
+        assert compress_logger_name("foo.bar") == "foo.bar"
+
+    def test_full_names_env(self, monkeypatch):
+        long_name = "hst123.primitives.run_dolphot.run_dolphot_primitive"
+        monkeypatch.setenv("HST123_LOG_FULL_NAMES", "1")
+        assert compress_logger_name(long_name) == long_name
 
 
 class TestFormatSuccess:

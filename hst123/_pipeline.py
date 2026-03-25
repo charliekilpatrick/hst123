@@ -46,7 +46,6 @@ from hst123.utils.logging import (
     make_banner,
 )
 from hst123.utils.stdio import suppress_stdout, suppress_stdout_fd
-from hst123.utils.wcs_utils import fix_sip_ctype_headers_fits
 from hst123.utils.paths import normalize_fits_path, normalize_work_and_raw_dirs
 from hst123.utils.astrodrizzle_paths import (
     astrodrizzle_output_exists,
@@ -69,6 +68,7 @@ from hst123.utils.astrodrizzle_helpers import (
 )
 from hst123.utils.workdir_cleanup import (
     cleanup_after_astrodrizzle,
+    remove_files_matching_globs,
     remove_superseded_instrument_mask_reference_drizzle,
 )
 from hst123.utils.reference_download import (
@@ -76,7 +76,12 @@ from hst123.utils.reference_download import (
     ref_prefix_for_header,
 )
 from hst123.utils.visit import add_visit_info as add_visit_info_util
-from hst123.utils.wcs_utils import make_meta_wcs_header as make_meta_wcs_header_util
+from hst123.utils.wcs_utils import (
+    fix_sip_ctype_headers_fits,
+    make_meta_wcs_header as make_meta_wcs_header_util,
+    remove_conflicting_alt_wcs_duplicate_names,
+    wcs_from_fits_hdu,
+)
 from hst123.primitives import FitsHelper, PhotometryHelper
 from hst123.primitives.astrometry import AstrometryPrimitive, parse_coord
 from hst123.primitives.run_dolphot import DolphotPrimitive
@@ -203,20 +208,6 @@ class hst123(object):
         warning = 'WARNING: Cannot run full clear_download_cache().\n'
         warning += 'Passing...'
         pass
-
-  def make_clean(self):
-    question = 'Are you sure you want to delete hst123 data? [y/n] '
-    var = input(question)
-    if var != 'y' and var != 'yes':
-        warning = 'WARNING: input={inp}. Exiting...'
-        log.warning(warning.format(inp=var))
-        sys.exit(1)
-    else:
-        for pattern in self.pipeline_products:
-            for file in glob.glob(pattern):
-                if os.path.isfile(file):
-                    os.remove(file)
-        sys.exit(0)
 
   @log_calls
   def try_to_get_image(self, image):
@@ -384,7 +375,13 @@ class hst123(object):
                 filt=filt, n=n, date=date_str)
 
         if self.options['args'].work_dir:
-            drizname = os.path.join(self.options['args'].work_dir, drizname)
+            # Keep drizzle-all products in a dedicated subdirectory.
+            if self.options["args"].drizzle_all:
+                drizzle_dir = os.path.join(self.options["args"].work_dir, "drizzle")
+                os.makedirs(drizzle_dir, exist_ok=True)
+                drizname = os.path.join(drizzle_dir, drizname)
+            else:
+                drizname = os.path.join(self.options['args'].work_dir, drizname)
 
         obstable[i]['drizname'] = drizname
 
@@ -943,22 +940,31 @@ class hst123(object):
   def split_image_contains(self, image, coord):
 
     log.info('Analyzing split image: %s', image)
-    hdu = fits.open(image)
-    try:
-        w = wcs.WCS(hdu[0].header)
-    except MemoryError:
-        w = wcs.WCS(make_meta_wcs_header_util(hdu[0].header))
+    with fits.open(image) as hdul:
+        prim = hdul[0]
+        if prim.data is None:
+            log.warning(
+                "split_image_contains: no data in primary HDU of %s", image
+            )
+            return False
+        # fobj=hdul: required when primary WCS references CPDIS / D2IM lookup
+        # tables (ACS/WFC FLC split chips); WCS(header) alone raises ValueError.
+        w = wcs_from_fits_hdu(hdul, 0)
 
-    y,x = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
+        y, x = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
 
-    naxis1,naxis2 = hdu[0].data.shape
+        naxis1, naxis2 = prim.data.shape
 
-    inside_im = False
-    if (x > 0 and x < naxis1-1 and
-        y > 0 and y < naxis2-1):
-        inside_im = True
+        inside_im = False
+        if (
+            x > 0
+            and x < naxis1 - 1
+            and y > 0
+            and y < naxis2 - 1
+        ):
+            inside_im = True
 
-    return(inside_im)
+        return inside_im
 
   # Pick deepest images in best reference filter (e.g. F606W/F814W); optional avoid WFPC2.
   @log_calls
@@ -1318,6 +1324,14 @@ class hst123(object):
     if _n_sip:
         log.debug("SIP/CTYPE aligned before updatewcs: %s (%d HDU(s))", image, _n_sip)
 
+    _n_stale_alt = remove_conflicting_alt_wcs_duplicate_names(image, logger=log)
+    if _n_stale_alt:
+        log.debug(
+            "Cleared %d stale alternate WCS key(s) (duplicate WCSNAME vs primary) before updatewcs: %s",
+            _n_stale_alt,
+            os.path.basename(image),
+        )
+
     _quiet = (
         "astropy",
         "astropy.wcs",
@@ -1471,7 +1485,7 @@ class hst123(object):
                     if h.name != "DQ":
                         continue
 
-                    w = wcs.WCS(h.header)
+                    w = wcs_from_fits_hdu(imhdu, i)
                     y, x = wcs.utils.skycoord_to_pixel(maskcoord, w, origin=1)
 
                     size = self.options["global_defaults"]["mask_region_size"]
@@ -2035,19 +2049,6 @@ class hst123(object):
 
     return(True)
 
-  def check_large_reduction(self):
-    n = len(self.input_images)
-    m = self.options['args'].large_num
-    if n > m:
-        error = 'ERROR: --no_large_reduction and input list size={n}>{m}'
-        log.error(error.format(n=n, m=m))
-
-        # Clean up any files in directory
-        for pattern in self.pipeline_products+self.pipeline_images:
-            for file in glob.glob(pattern):
-                if os.path.isfile(file):
-                    os.remove(file)
-
   def make_dolphot_file(self, images, reference):
     self._dolphot.make_dolphot_file(images, reference)
 
@@ -2124,8 +2125,11 @@ class hst123(object):
 
         self.sanitize_reference(name)
 
-        # Make a sky file for the drizzled image and rename 'noise'
-        if opt.run_dolphot:
+        # By default, only generate DOLPHOT sky for the main reference image.
+        # Set HST123_DOLPHOT_SKY_FOR_DRIZZLE_ALL=1 to restore older behavior.
+        if opt.run_dolphot and str(
+            os.environ.get("HST123_DOLPHOT_SKY_FOR_DRIZZLE_ALL", "")
+        ).strip().lower() in ("1", "true", "yes", "on"):
             if self._dolphot.needs_to_calc_sky(name):
                 self.compress_reference(name)
                 self._dolphot.calc_sky(name, self.options['detector_defaults'])
@@ -2154,7 +2158,7 @@ class hst123(object):
 
                 x = hdu[wi].header["NAXIS1"] / 2
                 y = hdu[wi].header["NAXIS2"] / 2
-                w = wcs.WCS(hdu[wi].header)
+                w = wcs_from_fits_hdu(hdu, wi)
                 coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
 
                 central[file] = {}
@@ -2173,13 +2177,12 @@ class hst123(object):
         # Convert xoffset and yoffset values to RAoffset and DECoffset
         log.info("Applying hierarchical shifts to individual frames")
         for row in shift_table:
-            hdu = fits.open(row['file'], mode='readonly')
-
-            # Repeat process from above to get central RA/Dec and get offset
-            x = hdu[0].header['NAXIS1']/2
-            y = hdu[0].header['NAXIS2']/2
-            w = wcs.WCS(hdu[0].header)
-            coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
+            # Read-only open + full HDUList for WCS (lookup-table distortion).
+            with fits.open(row["file"], mode="readonly") as hdu_ro:
+                x = hdu_ro[0].header["NAXIS1"] / 2
+                y = hdu_ro[0].header["NAXIS2"] / 2
+                w = wcs_from_fits_hdu(hdu_ro, 0)
+                coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
 
             nra = coord.ra.degree
             ndec = coord.dec.degree
@@ -2246,9 +2249,6 @@ class hst123(object):
         opt.work_dir, opt.raw_dir
     )
     self.options['args'] = opt
-
-    # If we're cleaning up a previous run, execute that here then exit
-    if self.options['args'].make_clean: self.make_clean()
 
     # Handle other options
     self.reference = self.options['args'].reference
@@ -2406,9 +2406,6 @@ def main():
             log.warning(warning)
             hst.input_images.remove(file)
 
-    # Quit if the number of input files exceeds large reduction limit
-    if opt.no_large_reduction: hst.check_large_reduction()
-
     # Check there are still images that need to be reduced
     if len(hst.input_images)>0:
 
@@ -2427,7 +2424,9 @@ def main():
 
             vnum = str(i).zfill(4)
             if opt.run_dolphot or opt.scrape_dolphot:
-                hst.dolphot = hst._dolphot.make_dolphot_dict(opt.dolphot + vnum)
+                hst.dolphot = hst._dolphot.make_dolphot_dict(
+                    opt.dolphot + vnum, work_dir=opt.work_dir
+                )
 
             hst.reference = hst.handle_reference(obstable, opt.reference)
             if not hst.reference:
@@ -2474,8 +2473,10 @@ def main():
                         message = 'Running calcsky for reference image: {ref}'
                         log.info(message.format(ref=hst.reference))
                         hst.compress_reference(hst.reference)
-                        hst.calc_sky(hst.reference,
-                            hst.options['detector_defaults'])
+                        hst._dolphot.calc_sky(
+                            hst.reference,
+                            hst.options["detector_defaults"],
+                        )
 
             # Construct dolphot param file from split images and reference
             if opt.run_dolphot:
@@ -2508,6 +2509,13 @@ def main():
             log.info(message.format(im=image))
             if os.path.isfile(image):
                 os.remove(image)
+        # DOLPHOT sky sidecars (*.drc.noise.fits) are not listed in input_images
+        n_extra = remove_files_matching_globs(opt.work_dir, settings.cleanup_extra_globs)
+        if n_extra:
+            log.info(
+                "Removed %d DOLPHOT noise sidecar(s) (*.drc.noise.fits) under work dir",
+                n_extra,
+            )
 
     message = 'Finished with: {cmd}\n'
     message += 'It took {time} seconds to complete this script.'

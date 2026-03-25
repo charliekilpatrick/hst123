@@ -39,12 +39,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Parallel JIT for Python calcsky fallback (large mosaics); `pip install .[perf]`
+perf = [
+    "numba>=0.57",
+]
 test = [
     "pytest>=7.0",
+    "h5py>=3.8",
+]
+hdf5 = [
+    "h5py>=3.8",
 ]
 docs = [
     "sphinx>=5.0",
     "sphinx-rtd-theme>=1.2",
+    "numpydoc>=1.5",
+    "myst-parser>=2.0",
 ]
 
 [project.scripts]

@@ -1,9 +1,11 @@
 """Tests for workdir_cleanup (intermediate drizzle/tweakreg file handling)."""
 import logging
+import os
 
 from hst123.utils.workdir_cleanup import (
     cleanup_after_astrodrizzle,
     cleanup_after_tweakreg,
+    remove_files_matching_globs,
     remove_superseded_instrument_mask_reference_drizzle,
 )
 
@@ -80,6 +82,27 @@ def test_cleanup_after_tweakreg_ingests_and_removes_shifts(tmp_path):
 
     assert not (wd / "drizzle_shifts.txt").exists()
     # Ingested into hst123.tweakreg log; no separate copies under logs/
+
+
+def test_remove_files_matching_globs_uses_work_dir_not_cwd(tmp_path):
+    """Products under ``work_dir`` are found even when CWD is elsewhere."""
+    work = tmp_path / "test_data"
+    work.mkdir()
+    noise = work / "acs.f814w.ref_0001.drc.noise.fits"
+    noise.write_bytes(b"0")
+    other = tmp_path / "noise_elsewhere.drc.noise.fits"
+    other.write_bytes(b"0")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    old = os.getcwd()
+    try:
+        os.chdir(cwd)
+        n = remove_files_matching_globs(str(work), ("*drc.noise.fits",))
+        assert n == 1
+        assert not noise.exists()
+        assert other.exists()
+    finally:
+        os.chdir(old)
 
 
 def test_cleanup_after_tweakreg_removes_numbered_shift_files(tmp_path):

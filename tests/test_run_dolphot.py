@@ -1,5 +1,7 @@
 """Unit tests for DolphotPrimitive (run_dolphot_primitive)."""
+import os
 import shutil
+import sys
 from io import StringIO
 from unittest.mock import patch, MagicMock
 
@@ -11,6 +13,7 @@ from hst123.primitives.run_dolphot import (
     DOLPHOT_REQUIRED_SCRIPTS,
     DolphotPrimitive,
 )
+from hst123.primitives.run_dolphot.run_dolphot_primitive import dolphot_subprocess_env
 
 
 class TestDolphotPrimitiveInstantiation:
@@ -23,6 +26,36 @@ class TestDolphotPrimitiveInstantiation:
         prim = DolphotPrimitive(mock_pipeline)
         assert prim._p is mock_pipeline
         assert prim.pipeline is mock_pipeline
+
+
+class TestDolphotSubprocessEnv:
+    """macOS OpenMP: avoid SIGTRAP by defaulting OMP_NUM_THREADS unless user set it."""
+
+    def test_respects_existing_omp_num_threads(self, monkeypatch):
+        monkeypatch.setenv("OMP_NUM_THREADS", "4")
+        monkeypatch.delenv("HST123_DOLPHOT_OMP_THREADS", raising=False)
+        e = dolphot_subprocess_env()
+        assert e["OMP_NUM_THREADS"] == "4"
+
+    def test_hst123_override_when_omp_unset(self, monkeypatch):
+        monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+        monkeypatch.setenv("HST123_DOLPHOT_OMP_THREADS", "2")
+        e = dolphot_subprocess_env()
+        assert e["OMP_NUM_THREADS"] == "2"
+
+    def test_darwin_defaults_omp_one(self, monkeypatch):
+        monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+        monkeypatch.delenv("HST123_DOLPHOT_OMP_THREADS", raising=False)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        e = dolphot_subprocess_env()
+        assert e.get("OMP_NUM_THREADS") == "1"
+
+    def test_non_darwin_does_not_set_omp_when_unset(self, monkeypatch):
+        monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+        monkeypatch.delenv("HST123_DOLPHOT_OMP_THREADS", raising=False)
+        monkeypatch.setattr(sys, "platform", "linux")
+        e = dolphot_subprocess_env()
+        assert "OMP_NUM_THREADS" not in e
 
 
 class TestDolphotRequiredScripts:
@@ -86,6 +119,16 @@ class TestMakeDolphotDict:
         assert out["final_phot"] == "mydolphot.phot"
         assert out["radius"] == 12
         assert out["limit_radius"] == 10.0
+
+    def test_outputs_go_under_workdir_dolphot(self, tmp_path):
+        prim = DolphotPrimitive(object())
+        out = prim.make_dolphot_dict("dp0000", work_dir=str(tmp_path))
+        expected_dir = tmp_path / "dolphot"
+        assert expected_dir.is_dir()
+        assert out["base"] == str(expected_dir / "dp0000")
+        assert out["param"] == str(expected_dir / "dp0000.param")
+        assert out["log"] == str(expected_dir / "dp0000.output")
+        assert out["final_phot"] == str(expected_dir / "dp0000.phot")
 
 
 class TestNeedsToCalcSky:
@@ -207,6 +250,41 @@ class TestGenerateBaseParamFile:
         assert "SigFinal = 3.0" in content
 
 
+class TestMakeDolphotFileNimg:
+    """Nimg counts only science images; img0000 reference is separate."""
+
+    def test_nimg_is_reference_plus_chip_count(self, tmp_path):
+        ref = tmp_path / "ref.drc.fits"
+        ref.write_bytes(b"SIMPLE")
+        chip1 = tmp_path / "a.chip1.fits"
+        chip2 = tmp_path / "a.chip2.fits"
+        chip1.write_bytes(b"SIMPLE")
+        chip2.write_bytes(b"SIMPLE")
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "ACS_WFC"
+        mock_pipeline.options = {
+            "args": MagicMock(work_dir=str(tmp_path)),
+            "detector_defaults": {
+                "acs_wfc": {"dolphot": {"RAper": 2, "RPSF": 10}},
+            },
+            "global_defaults": {"dolphot": {"SigFind": 2.5, "SigFinal": 3.0}},
+        }
+        mock_pipeline.dolphot = {
+            "param": "dp0000.param",
+            "base": "dp0000",
+            "log": "dp0000.output",
+            "original": "dp0000.orig",
+        }
+        prim = DolphotPrimitive(mock_pipeline)
+        prim.make_dolphot_file([str(chip1), str(chip2)], str(ref))
+        text = (tmp_path / "dp0000.param").read_text(encoding="utf-8")
+        assert "Nimg = 2" in text
+        assert "img0000_file = " in text
+        assert "img0001_file = " in text
+        assert "img0002_file = " in text
+
+
 class TestGetDolphotInstrumentParameters:
     def test_returns_detector_dolphot_options(self):
         mock_pipeline = MagicMock()
@@ -222,16 +300,19 @@ class TestGetDolphotInstrumentParameters:
 
 
 class TestAddImageToParamFile:
-    def test_writes_image_file_and_params(self):
+    def test_writes_image_file_and_params(self, tmp_path):
         mock_pipeline = MagicMock()
         mock_pipeline._fits = MagicMock()
         mock_pipeline._fits.get_instrument.return_value = "wfc3_uvis"
         options = {"wfc3_uvis": {"dolphot": {"RAper": 3}}}
         prim = DolphotPrimitive(mock_pipeline)
+        path = tmp_path / "j9abc01dq_flc.fits"
+        path.write_bytes(b"SIMPLE")
         buf = StringIO()
-        prim.add_image_to_param_file(buf, "j9abc01dq_flc.fits", 1, options)
+        prim.add_image_to_param_file(buf, str(path), 1, options)
         content = buf.getvalue()
-        assert "img0001_file = j9abc01dq_flc" in content
+        stem = os.path.splitext(os.path.abspath(str(path)))[0]
+        assert f"img0001_file = {stem}" in content
         assert "img0001_RAper = 3" in content
 
 

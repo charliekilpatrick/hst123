@@ -31,7 +31,8 @@ loggers ``hst123.astrodrizzle`` / ``hst123.photeq``, then removed. The pipeline 
 
 Environment variables: ``HST123_LOG_LEVEL`` (use ``DEBUG`` to show ``@log_calls``
 entry/exit lines), ``HST123_LOG_ENABLE_STDOUT``, ``HST123_LOG_ENABLE_FILE``,
-``HST123_LOG_DIR``, ``HST123_REPLAY_SUBLOGS``.
+``HST123_LOG_DIR``, ``HST123_REPLAY_SUBLOGS``, ``HST123_LOG_FULL_NAMES`` (set to
+``1`` to show full logger names in ``[…]`` instead of compressed tags).
 """
 from __future__ import annotations
 
@@ -79,18 +80,81 @@ def _get_level(level):
     return result if isinstance(result, int) else logging.INFO
 
 
+def compress_logger_name(name: str) -> str:
+    """
+    Shorten logger *name* for console and session logs.
+
+    - ``hst123`` package: drop the ``hst123.primitives.`` prefix, drop redundant
+      ``*_primitive`` leafs (e.g. ``run_dolphot.run_dolphot_primitive`` →
+      ``run_dolphot``), shorten ``utils.`` → ``u.``, strip a leading underscore
+      from the first segment (``_pipeline`` → ``pipeline``).
+    - Other packages: keep the last two dotted segments (e.g.
+      ``stwcs.wcsutil.altwcs`` → ``wcsutil.altwcs``).
+
+    Set ``HST123_LOG_FULL_NAMES=1`` to return *name* unchanged.
+    """
+    if not name:
+        return ""
+    if os.environ.get("HST123_LOG_FULL_NAMES", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return name
+    if name.startswith(ROOT_LOGGER):
+        rest = name[len(ROOT_LOGGER) :].lstrip(".")
+        if not rest:
+            return ROOT_LOGGER
+        if rest.startswith("primitives."):
+            rest = rest[len("primitives.") :]
+        parts = rest.split(".")
+        if (
+            len(parts) >= 2
+            and parts[-1].endswith("_primitive")
+            and parts[-1][: -len("_primitive")] == parts[-2]
+        ):
+            parts = parts[:-1]
+        # utils.foo -> u.foo
+        compact: list[str] = []
+        i = 0
+        while i < len(parts):
+            if parts[i] == "utils" and i + 1 < len(parts):
+                compact.append("u")
+                compact.append(parts[i + 1])
+                i += 2
+            else:
+                compact.append(parts[i])
+                i += 1
+        if compact and compact[0].startswith("_"):
+            compact[0] = compact[0].lstrip("_")
+        return ".".join(compact) if compact else ROOT_LOGGER
+    parts = name.split(".")
+    if len(parts) <= 2:
+        return name
+    return ".".join(parts[-2:])
+
+
+class Hst123CompactFormatter(logging.Formatter):
+    """Format records with a short ``compactname`` instead of full ``name``."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        record.compactname = compress_logger_name(record.name)
+        return super().format(record)
+
+
 def _make_formatter():
     """
-    Create the default log formatter ([timestamp][name][level]: message).
+    Create the default log formatter ([timestamp][compactname][level]: message).
 
     Returns
     -------
-    logging.Formatter
+    Hst123CompactFormatter
         Formatter with datefmt %Y-%m-%dT%H:%M:%S.
     """
-    return logging.Formatter(
+    return Hst123CompactFormatter(
         "[%(asctime)s]"
-        "[%(name)s]"
+        "[%(compactname)s]"
         "[%(levelname)s]: %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
     )

@@ -11,7 +11,63 @@ import glob
 import logging
 import os
 import shutil
+from collections.abc import Sequence
 from datetime import datetime
+
+
+def remove_files_matching_globs(
+    work_dir: str | os.PathLike[str],
+    patterns: Sequence[str],
+    *,
+    log: logging.Logger | None = None,
+    log_each_path: bool = False,
+) -> int:
+    """
+    Remove regular files under ``work_dir`` matching each glob in ``patterns``.
+
+    Patterns are joined with ``work_dir`` (not the process CWD), so cleanup
+    finds products under ``--work-dir`` (e.g. ``test_data/*.drc.noise.fits``)
+    regardless of where the CLI was launched.
+
+    The same path is only removed once even if multiple patterns match.
+
+    Parameters
+    ----------
+    work_dir
+        Working directory containing pipeline outputs.
+    patterns
+        Glob patterns relative to ``work_dir`` (e.g. ``*drc.noise.fits``).
+    log
+        If set and ``log_each_path`` is True, ``log.info`` each removed file.
+    log_each_path
+        Log every removal (default False for silent bulk deletes).
+
+    Returns
+    -------
+    int
+        Number of files removed.
+    """
+    wd = os.path.abspath(os.path.expanduser(os.fspath(work_dir)))
+    removed = 0
+    seen: set[str] = set()
+    for pattern in patterns:
+        for path in glob.glob(os.path.join(wd, pattern)):
+            ap = os.path.abspath(path)
+            if ap in seen:
+                continue
+            seen.add(ap)
+            if not os.path.isfile(ap):
+                continue
+            try:
+                os.remove(ap)
+                removed += 1
+                if log is not None and log_each_path:
+                    log.info("Removing file: %s", ap)
+            except OSError as exc:
+                if log is not None:
+                    log.warning("Could not remove %s: %s", ap, exc)
+    return removed
+
 
 # Exact basenames often left in the work directory (cwd during drizzle).
 _INTERSTITIAL_EXACT = frozenset(

@@ -24,6 +24,13 @@ from hst123.utils.stdio import suppress_stdout
 from hst123.utils.logging import format_hdu_list_summary, log_calls
 from hst123.utils.workdir_cleanup import cleanup_after_tweakreg
 from hst123.primitives.base import BasePrimitive
+from hst123.primitives.astrometry.alignment_meta import (
+    alignment_is_redundant,
+    alignment_method_token,
+    normalize_alignment_ref_id,
+    read_alignment_provenance,
+    write_alignment_provenance,
+)
 
 _STWCS_LOGGER_NAMES = (
     "stwcs",
@@ -209,19 +216,37 @@ class AstrometryPrimitive(BasePrimitive):
         newhdu.writeto(reference, output_verify="silentfix", overwrite=True)
         return True
 
-    def check_images_for_tweakreg(self, run_images):
+    def check_images_for_tweakreg(
+        self,
+        run_images,
+        *,
+        alignment_method: str | None = None,
+        alignment_ref_id: str | None = None,
+        force_realign: bool = False,
+    ):
         """
-        Return list of images that do not yet have TWEAKSUC=1 in header.
+        Return images that still need TweakReg-style alignment.
+
+        Skips files that are missing on disk. When *alignment_ref_id* is set and
+        *force_realign* is false, skips files whose primary header already records
+        a successful alignment with the same ``HIERARCH HST123 ALIGN*`` method and
+        reference (redundant re-run).
 
         Parameters
         ----------
         run_images : list of str
             Paths to FITS images.
+        alignment_method : str, optional
+            ``tweakreg`` or ``jhat`` (default: pipeline ``--align-with``).
+        alignment_ref_id : str, optional
+            Reference path, ``GAIA``, etc. If unset, redundancy is not evaluated.
+        force_realign : bool, optional
+            If True (e.g. ``--clobber``), never skip based on provenance.
 
         Returns
         -------
         list of str or None
-            Subset of run_images without TWEAKSUC=1; None if empty or run_images empty.
+            Subset needing alignment; None if nothing left to process.
         """
         if not run_images:
             return None
@@ -240,15 +265,47 @@ class AstrometryPrimitive(BasePrimitive):
             log.warning("No on-disk images left for tweakreg after filtering.")
             return None
 
+        if alignment_method is None:
+            alignment_method = getattr(
+                self._p.options["args"], "align_with", "tweakreg"
+            )
+
+        method_tok = alignment_method_token(alignment_method)
+        ref_for_compare = (
+            normalize_alignment_ref_id(alignment_ref_id)
+            if alignment_ref_id
+            else None
+        )
+
         for file in list(images):
-            log.debug("Checking %s for TWEAKSUC=1", file)
             with fits.open(file, mode="readonly") as hdu:
-                remove_image = (
-                    "TWEAKSUC" in hdu[0].header.keys()
-                    and hdu[0].header["TWEAKSUC"] == 1
+                hdr = hdu[0].header
+                prov = read_alignment_provenance(hdr)
+                if (
+                    not force_realign
+                    and ref_for_compare
+                    and alignment_is_redundant(
+                        hdr,
+                        method=method_tok,
+                        ref_id=alignment_ref_id,
+                        require_success=True,
+                    )
+                ):
+                    log.info(
+                        "Skipping alignment for %s: already aligned "
+                        "(success=True, method=%s, reference_id=%s)",
+                        os.path.basename(file),
+                        prov["method"] if prov else method_tok,
+                        prov["ref"] if prov else ref_for_compare,
+                    )
+                    images.remove(file)
+                    continue
+                log.debug(
+                    "Alignment needed for %s (provenance=%s, ref_id=%s)",
+                    file,
+                    prov,
+                    ref_for_compare,
                 )
-            if remove_image:
-                images.remove(file)
 
         if len(images) == 0:
             return None
@@ -554,14 +611,24 @@ class AstrometryPrimitive(BasePrimitive):
             exception,
         )
 
-    def apply_tweakreg_success(self, shifts):
+    def apply_tweakreg_success(
+        self,
+        shifts,
+        *,
+        ref_id: str,
+        method: str = "tweakreg",
+    ):
         """
-        Set TWEAKSUC=1 in header for files with valid shifts.
+        Set TWEAKSUC=1 and HST123 alignment provenance for files with valid shifts.
 
         Parameters
         ----------
         shifts : astropy.table.Table or iterable
             Rows with "file", "xoffset", "yoffset"; non-NaN offsets get TWEAKSUC=1.
+        ref_id : str
+            Reference image path or ``dummy.fits`` / batch reference (stored normalized).
+        method : str
+            Alignment engine label (default ``tweakreg``).
         """
         for row in shifts:
             xo, yo = row["xoffset"], row["yoffset"]
@@ -573,7 +640,19 @@ class AstrometryPrimitive(BasePrimitive):
                 continue
             with fits.open(file, mode="update") as hdu:
                 hdu[0].header["TWEAKSUC"] = 1
+                write_alignment_provenance(
+                    hdu[0].header,
+                    method=method,
+                    ref_id=ref_id,
+                    success=True,
+                )
                 hdu.flush()
+            log.debug(
+                "TweakReg alignment recorded for %s (success=True, method=%s, reference_id=%s)",
+                os.path.basename(file),
+                alignment_method_token(method),
+                normalize_alignment_ref_id(ref_id),
+            )
 
     def copy_wcs_keys(self, from_hdu, to_hdu):
         """
@@ -630,6 +709,11 @@ class AstrometryPrimitive(BasePrimitive):
         align_with = getattr(
             self._p.options["args"], "align_with", "tweakreg"
         ).lower()
+        log.info(
+            "Alignment requested: method=%s pipeline_reference_argument=%r",
+            align_with,
+            reference,
+        )
         if align_with == "jhat":
             result = self.run_jhat_align(obstable, reference)
         else:
@@ -641,11 +725,18 @@ class AstrometryPrimitive(BasePrimitive):
                 search_radius=search_radius,
                 update_hdr=update_hdr,
             )
+        msg = result[0] if result else None
+        log.info(
+            "Alignment step complete: outcome=%r method=%s pipeline_reference_argument=%r",
+            msg,
+            align_with,
+            reference,
+        )
         self._primitive_cleanup(
             "run_alignment",
             validation_notes={
                 "align_with": align_with,
-                "message": result[0] if result else None,
+                "message": msg,
             },
         )
         return result
@@ -671,11 +762,41 @@ class AstrometryPrimitive(BasePrimitive):
         p = self._p
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
         params = getattr(settings, "jhat_params", None) or {}
+        force_realign = getattr(p.options["args"], "clobber", False)
+        jhat_ref_id = "GAIA"
+
+        log.info(
+            "JHAT setup: method=jhat reference_catalog=%s (unused pipeline ref=%r)",
+            jhat_ref_id,
+            reference,
+        )
+
+        ran_any = False
         for image in obstable["image"]:
             if not os.path.exists(image):
                 log.warning("Skipping missing image for JHAT: %s", image)
                 continue
-            log.info("Running JHAT on %s (align to Gaia)", image)
+            if not force_realign:
+                with fits.open(image, mode="readonly") as hdu:
+                    if alignment_is_redundant(
+                        hdu[0].header,
+                        method="jhat",
+                        ref_id=jhat_ref_id,
+                        require_success=True,
+                    ):
+                        prov = read_alignment_provenance(hdu[0].header)
+                        log.info(
+                            "Skipping alignment for %s: already aligned "
+                            "(success=True, method=jhat, reference_id=%s)",
+                            os.path.basename(image),
+                            prov["ref"] if prov else jhat_ref_id,
+                        )
+                        continue
+            log.info(
+                "Running JHAT on %s (method=jhat, reference=%s)",
+                os.path.basename(image),
+                jhat_ref_id,
+            )
             try:
                 run_jhat(
                     image,
@@ -685,13 +806,38 @@ class AstrometryPrimitive(BasePrimitive):
                     verbose=False,
                 )
             except Exception as e:
-                log.error("JHAT failed for %s: %s", image, e)
+                log.error(
+                    "JHAT alignment failed for %s (method=jhat, reference=%s): %s",
+                    os.path.basename(image),
+                    jhat_ref_id,
+                    e,
+                )
                 self._primitive_cleanup(
                     "run_jhat_align",
                     work_dir=outdir,
                     validation_notes={"status": "failed", "image": str(image)},
                 )
                 return ("jhat failure", None)
+            ran_any = True
+            with fits.open(image, mode="update") as hdu:
+                hdu[0].header["TWEAKSUC"] = 1
+                write_alignment_provenance(
+                    hdu[0].header,
+                    method="jhat",
+                    ref_id=jhat_ref_id,
+                    success=True,
+                )
+                hdu.flush()
+            log.info(
+                "JHAT alignment succeeded for %s (method=jhat, reference=%s)",
+                os.path.basename(image),
+                jhat_ref_id,
+            )
+        if not ran_any:
+            log.info(
+                "JHAT: no images required alignment (missing files or already aligned to %s).",
+                jhat_ref_id,
+            )
         vpaths = [
             normalize_fits_path(str(im))
             for im in obstable["image"]
@@ -742,6 +888,7 @@ class AstrometryPrimitive(BasePrimitive):
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
         outshifts = os.path.join(outdir, "drizzle_shifts.txt")
         options = p.options["global_defaults"]
+        force_realign = getattr(p.options["args"], "clobber", False)
 
         def _tweakreg_cleanup_and_return(result):
             vpaths = [
@@ -757,8 +904,20 @@ class AstrometryPrimitive(BasePrimitive):
             )
             return result
 
-        run_images = self.check_images_for_tweakreg(list(obstable["image"]))
+        initial_ref = None
+        if reference and str(reference).strip():
+            initial_ref = str(reference).strip()
+        run_images = self.check_images_for_tweakreg(
+            list(obstable["image"]),
+            alignment_method="tweakreg",
+            alignment_ref_id=initial_ref,
+            force_realign=force_realign,
+        )
         if not run_images:
+            log.info(
+                "TweakReg skipped: no images require alignment "
+                "(missing, or already aligned for current method/reference when known)."
+            )
             return _tweakreg_cleanup_and_return(("tweakreg success", None))
         if reference in run_images:
             run_images.remove(reference)
@@ -780,7 +939,10 @@ class AstrometryPrimitive(BasePrimitive):
             if p.updatewcs and not skip_wcs:
                 det = "_".join(p._fits.get_instrument(image).split("_")[:2])
                 wcsoptions = p.options["detector_defaults"][det]
-                p.update_image_wcs(image, wcsoptions)
+                # Match run_astrodrizzle: skip MAST AstrometryDB here. DB updates call
+                # stwcs.archive_wcs(..., QUIET_ABORT) and emit duplicate-WCSNAME warnings
+                # on FLCs that already carry IDC/TWEAK alternates; makecorr still runs.
+                p.update_image_wcs(image, wcsoptions, use_db=False)
 
             if not do_cosmic:
                 tmp_images.append(image)
@@ -855,7 +1017,12 @@ class AstrometryPrimitive(BasePrimitive):
             tries = 0
 
             while not batch_ok and tries < max_tries:
-                tweak_img = self.check_images_for_tweakreg(tweak_img)
+                tweak_img = self.check_images_for_tweakreg(
+                    tweak_img,
+                    alignment_method="tweakreg",
+                    alignment_ref_id=ref_use,
+                    force_realign=force_realign,
+                )
                 if not tweak_img:
                     batch_ok = True
                     break
@@ -868,7 +1035,12 @@ class AstrometryPrimitive(BasePrimitive):
                 if len(tweak_img) == 0:
                     log.error("removed all images as shallow in batch %d", bi)
                     tweak_img = copy.copy(batch_imgs)
-                    tweak_img = self.check_images_for_tweakreg(tweak_img)
+                    tweak_img = self.check_images_for_tweakreg(
+                        tweak_img,
+                        alignment_method="tweakreg",
+                        alignment_ref_id=ref_use,
+                        force_realign=force_realign,
+                    )
 
                 success = list(set(batch_imgs) ^ set(tweak_img))
                 if tries > 1 and ref_use == "dummy.fits" and len(success) > 0:
@@ -876,9 +1048,10 @@ class AstrometryPrimitive(BasePrimitive):
                     shutil.copyfile(success[random.randint(0, n)], "dummy.fits")
 
                 log.info(
-                    "TweakReg batch %d: ref=%s  n=%d  %s",
+                    "TweakReg batch %d: ref=%s (reference_id=%s) method=tweakreg n=%d  %s",
                     bi,
                     os.path.basename(ref_use),
+                    normalize_alignment_ref_id(ref_use),
                     len(tweak_img),
                     ", ".join(os.path.basename(x) for x in tweak_img[:6])
                     + (" …" if len(tweak_img) > 6 else ""),
@@ -1050,7 +1223,9 @@ class AstrometryPrimitive(BasePrimitive):
                     ),
                 )
 
-                self.apply_tweakreg_success(shifts)
+                self.apply_tweakreg_success(
+                    shifts, ref_id=ref_use, method="tweakreg"
+                )
 
                 for row in shifts:
                     filename = os.path.basename(row["file"])
@@ -1066,16 +1241,31 @@ class AstrometryPrimitive(BasePrimitive):
                         shift_table[idx[0]]["xoffset"] = row["xoffset"]
                         shift_table[idx[0]]["yoffset"] = row["yoffset"]
 
-                if not self.check_images_for_tweakreg(batch_imgs):
+                if not self.check_images_for_tweakreg(
+                    batch_imgs,
+                    alignment_method="tweakreg",
+                    alignment_ref_id=ref_use,
+                    force_realign=force_realign,
+                ):
                     batch_ok = True
 
                 tries += 1
 
             if not batch_ok:
-                log.warning("TweakReg batch %d did not converge after %d tries", bi, max_tries)
+                log.warning(
+                    "TweakReg batch %d did not converge after %d tries (method=tweakreg, ref=%s)",
+                    bi,
+                    max_tries,
+                    os.path.basename(ref_use),
+                )
                 tweakreg_success = False
 
         log.info("Tweakreg finished in %.2fs", time.time() - start_tweak)
+        log.info(
+            "TweakReg alignment summary: success=%s batches=%d method=tweakreg",
+            tweakreg_success,
+            len(batches),
+        )
         log.debug("Shift table: %s", shift_table)
         try:
             parts = []

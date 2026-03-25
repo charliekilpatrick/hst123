@@ -1,4 +1,10 @@
-"""Utilities: logging, options, display, visit, WCS, stdio, progress_log."""
+"""
+Shared utilities for logging, CLI options, photometry display, visits, and WCS.
+
+Submodules (:mod:`hst123.utils.logging`, :mod:`hst123.utils.options`, etc.) hold
+the bulk of the implementation; this package re-exports common helpers for
+``from hst123.utils import …``.
+"""
 from hst123.utils.logging import (
     LogConfig,
     attach_work_dir_log_file,
