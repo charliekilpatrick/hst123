@@ -1,0 +1,11 @@
+stwcs 1.7.7 (Space Telescope Science Institute)
+================================================
+Vendored from the PyPI wheel ``stwcs-1.7.7-py3-none-any.whl``.
+Upstream: https://github.com/spacetelescope/stwcs
+License: BSD-3-Clause (see upstream repository).
+
+The ``tests/`` and ``gui/`` subtrees are omitted. hst123 loads this code only via
+``hst123.utils.stsci_wcs`` (``importlib.import_module("hst123.utils.stwcs…")``);
+the PyPI ``stwcs`` package is not a direct dependency of hst123.
+
+The package lives under ``hst123.utils.stwcs`` (not PyPI ``stwcs``).
