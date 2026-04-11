@@ -23,6 +23,7 @@ from hst123.utils.paths import normalize_fits_path
 from hst123.utils.stdio import suppress_stdout
 from hst123.utils.logging import format_hdu_list_summary, log_calls
 from hst123.utils.workdir_cleanup import cleanup_after_tweakreg
+from hst123.utils.alignment_validation import log_tweakreg_shift_metrics
 from hst123.primitives.base import BasePrimitive
 from hst123.primitives.astrometry.alignment_meta import (
     alignment_is_redundant,
@@ -1227,6 +1228,17 @@ class AstrometryPrimitive(BasePrimitive):
                     ),
                 )
 
+                _ref_metrics = ref_use if os.path.isfile(ref_use) else deepest
+                if not os.path.isfile(_ref_metrics):
+                    _ref_metrics = deepest
+                log_tweakreg_shift_metrics(
+                    shifts,
+                    ref_path=os.path.abspath(_ref_metrics),
+                    log=log,
+                    tolerance_arcsec=tol,
+                    batch_index=bi if len(batches) > 1 else None,
+                )
+
                 self.apply_tweakreg_success(
                     shifts, ref_id=ref_use, method="tweakreg"
                 )
@@ -1265,6 +1277,26 @@ class AstrometryPrimitive(BasePrimitive):
                 tweakreg_success = False
 
         log.info("Tweakreg finished in %.2fs", time.time() - start_tweak)
+        try:
+            _agg = Table(
+                [shift_table["xoffset"], shift_table["yoffset"]],
+                names=("xoffset", "yoffset"),
+            )
+            _agg_ref = (
+                os.path.abspath(reference)
+                if reference and os.path.isfile(reference)
+                else os.path.abspath(deepest)
+            )
+            log_tweakreg_shift_metrics(
+                _agg,
+                ref_path=_agg_ref,
+                log=log,
+                tolerance_arcsec=settings.tweakreg_defaults["tolerance"],
+                summary_prefix="TweakReg aggregate",
+            )
+        except Exception as exc:
+            log.debug("TweakReg aggregate shift validation: %s", exc)
+
         log.info(
             "TweakReg alignment summary: success=%s batches=%d method=tweakreg",
             tweakreg_success,

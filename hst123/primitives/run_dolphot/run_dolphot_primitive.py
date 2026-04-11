@@ -301,6 +301,22 @@ class DolphotPrimitive(BasePrimitive):
                     "If the install lives on cloud storage, ensure files are fully local "
                     "(not zero-byte placeholders)."
                 )
+        if inst_l == "wfc3":
+            from hst123.dolphot_install import verify_wfc3_mask_support_files
+
+            ok, msgs = verify_wfc3_mask_support_files()
+            if not ok:
+                raise RuntimeError(
+                    "DOLPHOT WFC3 wfc3mask needs distortion map FITS (UVIS1wfc3_map.fits, "
+                    "UVIS2wfc3_map.fits, ir_wfc3_map.fits) under .../dolphot3.1/wfc3/data/. "
+                    "Problems: "
+                    + "; ".join(msgs)
+                    + ". Fix: ensure dolphot3.1.WFC3.tar.gz is extracted into the DOLPHOT "
+                    "tree — run hst123-install-dolphot (HST modules include WFC3), or "
+                    "manually unpack the WFC3 module tarball next to your Makefile root. "
+                    "If the tree is on cloud storage, ensure maps are fully synced "
+                    "(not zero-byte placeholders)."
+                )
         maskimage = p._fits.get_dq_image(image)
         use_ext = os.environ.get("HST123_DOLPHOT_MASK_EXTERNAL", "").strip().lower() in (
             "1",
@@ -400,8 +416,12 @@ class DolphotPrimitive(BasePrimitive):
                 log.info("Wrote sky map (Python, large-image path): %s", final_sky)
                 return
 
+            # Short temp path: upstream calcsky.c uses char str[81] with
+            # sprintf("%s.sky.fits", argv[1]); a long work_dir overflows → SIGTRAP
+            # (__chk_fail_overflow) on macOS. System temp + prefix "cs" stays safe
+            # even before hst123's calcsky.c source patch (see dolphot_install).
             fd, tmp_img = tempfile.mkstemp(
-                suffix=".fits", prefix=".hst123_calcsky_", dir=work_dir
+                suffix=".fits", prefix="cs", dir=tempfile.gettempdir()
             )
             os.close(fd)
             tmp_root = tmp_img[:-5] if tmp_img.lower().endswith(".fits") else tmp_img
@@ -485,6 +505,14 @@ class DolphotPrimitive(BasePrimitive):
                     sig,
                     sig_name,
                 )
+                if sig == 5 and tmp_root and len(tmp_root) > 72:
+                    log.warning(
+                        "calcsky: SIGTRAP with long base path (%d chars) often means an "
+                        "**unpatched** calcsky.c stack buffer (81 B) overflow, not OpenMP — "
+                        "re-run hst123-install-dolphot (applies calcsky.c patch) or rely "
+                        "on this Python sky map.",
+                        len(tmp_root),
+                    )
             elif cp is not None:
                 log.warning(
                     "calcsky: exit %s; Python sky fallback",

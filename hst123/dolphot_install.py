@@ -106,6 +106,13 @@ def default_dolphot_install_dir() -> Path:
 
 # ACS/WFC PAM FITS shipped in ACS_WFC_PAM.tar.gz; ``acsmask`` reads these from the DOLPHOT tree.
 ACS_WFC_PAM_FILENAMES = ("wfc1_pam.fits", "wfc2_pam.fits")
+# Distortion / pixel-area maps required by wfc3mask (Python and C); shipped with
+# ``dolphot3.1.WFC3.tar.gz`` under ``wfc3/data/``.
+WFC3_MASK_MAP_FILENAMES = (
+    "UVIS1wfc3_map.fits",
+    "UVIS2wfc3_map.fits",
+    "ir_wfc3_map.fits",
+)
 _MIN_PAM_FILE_BYTES = 512
 _MIN_PSF_FILE_BYTES = 512
 
@@ -136,6 +143,82 @@ def dolphot_acs_data_dir(source_dir: Path | str | None = None) -> Path | None:
         if cand.is_dir():
             return cand
     return None
+
+
+def dolphot_wfc3_data_dir(source_dir: Path | str | None = None) -> Path | None:
+    """
+    Return ``.../wfc3/data`` under a DOLPHOT source tree if present.
+
+    Tries DOLPHOT 3.x ``make_root/wfc3/data`` and legacy ``dolphot2.0/wfc3/data``.
+    """
+    root = default_dolphot_install_dir() if source_dir is None else Path(source_dir)
+    root = root.resolve()
+    make_root = dolphot_make_root(root)
+    for rel in (Path("wfc3") / "data", Path("dolphot2.0") / "wfc3" / "data"):
+        d = make_root / rel
+        if d.is_dir():
+            return d
+    return None
+
+
+def resolve_dolphot_wfc3_data_dir() -> Path | None:
+    """First ``wfc3/data`` directory found under plausible DOLPHOT install roots."""
+    for r in _candidate_dolphot_source_roots():
+        d = dolphot_wfc3_data_dir(r)
+        if d is not None:
+            return d
+    return None
+
+
+def _wfc3_mask_maps_ok_in_data_dir(data_dir: Path) -> bool:
+    """True if UVIS/IR ``*wfc3_map.fits`` exist under *data_dir* with non-trivial size."""
+    data_dir = Path(data_dir).resolve()
+    if not data_dir.is_dir():
+        return False
+    for name in WFC3_MASK_MAP_FILENAMES:
+        p = data_dir / name
+        try:
+            if not p.is_file() or p.stat().st_size < _MIN_PAM_FILE_BYTES:
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def verify_wfc3_mask_support_files() -> tuple[bool, list[str]]:
+    """
+    Return (ok, problem_messages) for WFC3 ``wfc3mask`` distortion maps.
+
+    Python :func:`~hst123.utils.dolphot_mask.apply_wfc3mask` and the C ``wfc3mask``
+    binary both read ``UVIS1wfc3_map.fits``, ``UVIS2wfc3_map.fits``, and
+    ``ir_wfc3_map.fits`` from ``.../wfc3/data`` (from ``dolphot3.1.WFC3.tar.gz``).
+    """
+    d = resolve_dolphot_wfc3_data_dir()
+    msgs: list[str] = []
+    if d is None:
+        return False, [
+            "DOLPHOT wfc3/data not found (searched CONDA_PREFIX/opt/hst123-dolphot and "
+            "default install roots)."
+        ]
+    if not _wfc3_mask_maps_ok_in_data_dir(d):
+        for name in WFC3_MASK_MAP_FILENAMES:
+            p = d / name
+            if not p.is_file():
+                msgs.append(f"missing {p}")
+                continue
+            try:
+                sz = p.stat().st_size
+            except OSError as exc:
+                msgs.append(f"cannot stat {p}: {exc}")
+                continue
+            if sz < _MIN_PAM_FILE_BYTES:
+                msgs.append(
+                    f"{p} is too small ({sz} B); likely corrupt or cloud placeholder — "
+                    "re-extract dolphot3.1.WFC3.tar.gz"
+                )
+        if not msgs:
+            msgs.append(f"WFC3 mask maps invalid under {d}")
+    return (len(msgs) == 0, msgs)
 
 
 def relocate_acs_wfc_pam_into_canonical_layout(make_root: Path) -> bool:
@@ -677,6 +760,76 @@ def apply_dolphot_source_patches(make_root: Path) -> bool:
     log.info("Applied hst123 patch: %s main() stack buffer 82 -> 4096 bytes", path.name)
     _progress(
         "  Source patch: dolphot.c — enlarged main() path buffer (long absolute paths)."
+    )
+    return True
+
+
+def apply_calcsky_source_patches(make_root: Path) -> bool:
+    """
+    Enlarge ``calcsky.c`` ``main`` stack buffer used for ``sprintf`` path assembly.
+
+    Upstream ``calcsky.c`` declares ``char str[81];`` and does::
+
+        sprintf(str, "%s.fits", argv[1]);
+        sprintf(str, "%s.sky.fits", argv[1]);
+
+    So the input basename ``argv[1]`` must stay short (roughly **≤71** characters
+    for the second call). Long work directories (Dropbox, conda envs) overflow
+    the buffer; on macOS hardened libc this aborts with **SIGTRAP**
+    (``__chk_fail_overflow``), often mistaken for an OpenMP issue.
+
+    This patch enlarges the buffer to **4096** bytes (same strategy as
+    :func:`apply_dolphot_source_patches`) and is **idempotent**.
+
+    Parameters
+    ----------
+    make_root : pathlib.Path
+        Directory containing ``Makefile`` and ``calcsky.c``.
+
+    Returns
+    -------
+    bool
+        True if ``calcsky.c`` was modified, False if already patched or pattern
+        not found.
+    """
+    make_root = Path(make_root).resolve()
+    path = make_root / "calcsky.c"
+    if not path.is_file():
+        log.debug("apply_calcsky_source_patches: no %s", path)
+        return False
+    text = path.read_text(encoding="utf-8", errors="replace")
+    marker = "hst123_calcsky_main_str_buf"
+    if marker in text:
+        log.debug("apply_calcsky_source_patches: already applied (%s)", path)
+        return False
+    pattern = re.compile(
+        r"(int main\(int argc,char\*\*argv\) \{\s*)char str\[81\];",
+        re.MULTILINE,
+    )
+    repl = (
+        r"\1/* "
+        + marker
+        + ": avoid sprintf stack overflow on long absolute paths (macOS). */\n"
+        r"   char str[4096];"
+    )
+    new_text, n_sub = pattern.subn(repl, text, count=1)
+    if n_sub == 0:
+        if marker in text or (
+            path.name == "calcsky.c" and "char str[4096]" in text
+        ):
+            log.debug(
+                "apply_calcsky_source_patches: calcsky.c already has enlarged buffer"
+            )
+            return False
+        log.warning(
+            "Could not apply hst123 calcsky.c buffer patch (expected "
+            "`char str[81];` after main). Long paths may crash calcsky with SIGTRAP."
+        )
+        return False
+    path.write_text(new_text, encoding="utf-8")
+    log.info("Applied hst123 patch: %s main() stack buffer 81 -> 4096 bytes", path.name)
+    _progress(
+        "  Source patch: calcsky.c — enlarged main() path buffer (long absolute paths)."
     )
     return True
 
@@ -1387,7 +1540,13 @@ def install_psfs(
     _progress("PSF / PAM step finished.")
 
 
-def run_make(make_root: Path, jobs: int | None = None) -> None:
+def run_make(
+    make_root: Path,
+    jobs: int | None = None,
+    targets: list[str] | None = None,
+    *,
+    always_make: bool = False,
+) -> None:
     """
     Run ``make`` in the DOLPHOT tree root (directory containing ``Makefile``).
 
@@ -1397,6 +1556,12 @@ def run_make(make_root: Path, jobs: int | None = None) -> None:
         Same as ``dolphot_make_root(install_dir)`` after extracting base + modules.
     jobs : int, optional
         If set, ``make -j <jobs>`` is used.
+    targets : list of str, optional
+        If set, only these Makefile targets are built (e.g. ``["bin/calcsky"]``).
+        If ``None``, runs a full ``make`` (default ``all``).
+    always_make : bool, optional
+        If True, pass ``make -B`` (unconditionally remake), used for calcsky-only
+        rebuilds so the binary is re-linked even when timestamps look current.
     """
     make_root = Path(make_root).resolve()
     makefile = make_root / "Makefile"
@@ -1405,8 +1570,12 @@ def run_make(make_root: Path, jobs: int | None = None) -> None:
             f"No Makefile in {make_root}; extract DOLPHOT sources first."
         )
     cmd = ["make"]
+    if always_make:
+        cmd.append("-B")
     if jobs is not None and jobs > 0:
         cmd.extend(["-j", str(jobs)])
+    if targets:
+        cmd.extend(targets)
     _progress("")
     _progress("— Build (make) —")
     _progress(f"  Directory: {make_root}")
@@ -1417,11 +1586,62 @@ def run_make(make_root: Path, jobs: int | None = None) -> None:
     _progress("  make completed successfully.")
 
 
+def _calcsky_make_target(make_root: Path) -> str:
+    """
+    Return the Makefile target name for ``calcsky`` (``bin/calcsky`` vs ``calcsky``).
+
+    DOLPHOT 3.x typically defines ``bin/calcsky``; older layouts may use ``calcsky``.
+    """
+    mf = Path(make_root).resolve() / "Makefile"
+    if not mf.is_file():
+        return "bin/calcsky"
+    text = mf.read_text(encoding="utf-8", errors="replace")
+    for pat in (r"^\s*(bin/calcsky)\s*:", r"^\s*(calcsky)\s*:"):
+        m = re.search(pat, text, re.MULTILINE)
+        if m:
+            return m.group(1)
+    return "bin/calcsky"
+
+
+def rebuild_calcsky_in_tree(
+    make_root: Path,
+    jobs: int | None = None,
+    *,
+    apply_patch: bool = True,
+) -> None:
+    """
+    Apply the hst123 ``calcsky.c`` buffer patch and rebuild only ``calcsky``.
+
+    Does not run a full ``make``; use after a normal install when you need an
+    updated ``calcsky`` binary (e.g. long-path ``sprintf`` fix). CLI:
+    ``hst123-install-dolphot --calcsky-only``.
+    """
+    make_root = Path(make_root).resolve()
+    if apply_patch:
+        apply_calcsky_source_patches(make_root)
+    tgt = _calcsky_make_target(make_root)
+    try:
+        run_make(
+            make_root, jobs=jobs, targets=[tgt], always_make=True
+        )
+    except subprocess.CalledProcessError:
+        if tgt == "bin/calcsky":
+            log.warning(
+                "make target bin/calcsky failed; retrying with target calcsky"
+            )
+            run_make(
+                make_root, jobs=jobs, targets=["calcsky"], always_make=True
+            )
+        else:
+            raise
+
+
 def link_executables_to_conda_bin(
     source_dir: Path,
     conda_prefix: Path | None = None,
     *,
     force: bool = False,
+    only: tuple[str, ...] | None = None,
 ) -> list[str]:
     """
     Symlink (or copy) DOLPHOT executables from ``source_dir`` into
@@ -1436,6 +1656,8 @@ def link_executables_to_conda_bin(
         Conda environment root; default ``CONDA_PREFIX``.
     force : bool
         Replace existing files/symlinks in ``bin``.
+    only : tuple of str, optional
+        If set, link only these executable names (e.g. ``("calcsky",)``).
 
     Returns
     -------
@@ -1458,7 +1680,8 @@ def link_executables_to_conda_bin(
     from_dir = sample.parent if sample is not None else source_dir
     _progress(f"  From: {from_dir}")
     _progress(f"  To:   {bin_dir}")
-    for name in DOLPHOT_EXECUTABLES:
+    names: tuple[str, ...] = only if only is not None else DOLPHOT_EXECUTABLES
+    for name in names:
         src = _resolve_dolphot_executable(source_dir, name)
         if src is None:
             log.warning(
@@ -1516,6 +1739,16 @@ def main():
         action="store_true",
         help="Only download PSF files; do not download base or module sources. "
         "--dolphot-dir must point to an existing DOLPHOT source directory (with Makefile).",
+    )
+    parser.add_argument(
+        "--calcsky-only",
+        action="store_true",
+        help=(
+            "Only apply the hst123 calcsky.c buffer patch and rebuild the calcsky "
+            "binary (no source downloads, no PSF steps). Requires an existing DOLPHOT "
+            "tree at --dolphot-dir (default: $CONDA_PREFIX/opt/hst123-dolphot). "
+            "Use --force-bin to replace calcsky in conda bin."
+        ),
     )
     parser.add_argument(
         "--instruments",
@@ -1628,7 +1861,7 @@ def main():
         action="store_true",
         help=(
             "Do not patch upstream DOLPHOT sources before build. Default: apply "
-            "a small fix to dolphot.c (main() path buffer) so long absolute output "
+            "fixes to dolphot.c and calcsky.c (main() path buffers) so long absolute "
             "paths do not crash with SIGTRAP on macOS."
         ),
     )
@@ -1649,6 +1882,83 @@ def main():
     )
 
     dest = (args.dolphot_dir if args.dolphot_dir is not None else default_dir).resolve()
+
+    if args.calcsky_only and args.psf_only:
+        parser.error("--calcsky-only cannot be used with --psf-only")
+
+    if args.calcsky_only:
+        if not dest.is_dir():
+            parser.error(
+                f"--calcsky-only requires an existing DOLPHOT directory: {dest}"
+            )
+        make_root = dolphot_make_root(dest)
+        if not (make_root / "Makefile").is_file():
+            parser.error(
+                f"No Makefile under {make_root}; run a full hst123-install-dolphot first."
+            )
+        # Ensure visible output even if the hst123 logger has no stderr handler yet.
+        print(
+            "hst123-install-dolphot: calcsky-only (patch + make bin/calcsky) …",
+            file=sys.stderr,
+            flush=True,
+        )
+        _progress("")
+        _progress("— calcsky-only (patch + partial make) —")
+        _progress(f"  Makefile root: {make_root}")
+        try:
+            if args.run_make:
+                rebuild_calcsky_in_tree(
+                    make_root,
+                    jobs=args.jobs,
+                    apply_patch=not args.no_source_patches,
+                )
+            elif not args.no_source_patches:
+                apply_calcsky_source_patches(make_root)
+        except subprocess.CalledProcessError as e:
+            log.error("make failed with exit code %s", e.returncode)
+            _progress(f"make failed with exit code {e.returncode}.")
+            sys.exit(e.returncode)
+        except FileNotFoundError as e:
+            log.error("%s", e)
+            _progress(str(e))
+            sys.exit(1)
+        if args.link_conda_bin:
+            linked = link_executables_to_conda_bin(
+                make_root, force=args.force_bin, only=("calcsky",)
+            )
+            if linked:
+                log.info(
+                    "Linked DOLPHOT executables into conda bin: %s",
+                    ", ".join(linked),
+                )
+            elif get_conda_prefix() is None:
+                path_dir = dolphot_path_for_shell(make_root)
+                log.info(
+                    "To use calcsky, add to PATH: export PATH=%s:$PATH",
+                    path_dir,
+                )
+                _progress("")
+                _progress("Add DOLPHOT bin to PATH:")
+                _progress(f"  export PATH={path_dir}:$PATH")
+        else:
+            path_dir = dolphot_path_for_shell(make_root)
+            log.info(
+                "calcsky built under %s (not linked to conda bin)",
+                path_dir,
+            )
+            _progress("")
+            _progress("Add DOLPHOT to PATH (or use --link-conda-bin):")
+            _progress(f"  export PATH={path_dir}:$PATH")
+        _progress("")
+        _progress("Done (--calcsky-only).")
+        log.info("DOLPHOT root: %s", make_root)
+        print(
+            f"hst123-install-dolphot: calcsky-only finished (DOLPHOT root {make_root}).",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+
     _progress("hst123-install-dolphot")
     _progress(f"  Install root: {dest}")
     if conda:
@@ -1673,7 +1983,7 @@ def main():
         + (" | force-download: yes" if args.force_download else "")
         + (" | HST modules only" if args.hst_modules_only else "")
         + (" | no threaded build (default)" if args.no_threaded else " | threaded OpenMP build")
-        + (" | no source patches" if args.no_source_patches else " | source patches (dolphot.c buffer)")
+        + (" | no source patches" if args.no_source_patches else " | source patches (dolphot.c + calcsky.c buffers)")
     )
 
     if args.psf_only:
@@ -1709,6 +2019,7 @@ def main():
     if not args.no_source_patches:
         try:
             apply_dolphot_source_patches(make_root)
+            apply_calcsky_source_patches(make_root)
         except OSError as exc:
             log.warning("Could not apply DOLPHOT source patches: %s", exc)
             _progress(f"  Warning: source patch failed ({exc})")
