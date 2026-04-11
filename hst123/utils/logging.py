@@ -1068,9 +1068,12 @@ def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
         raw_abs,
         sys.executable,
     )
+    ad_cores = getattr(opt, "drizzle_num_cores", None)
+    if ad_cores is None:
+        ad_cores = 1
     logger.info(
         "MAST dl=%s clob=%s arch=%s [%s] | align=%s skip_tr=%s hier=%s | "
-        "drizzle=%s redriz=%s dim=%s by_vis=%s | dp run=%s scrape=%s %s lim=%s "
+        "drizzle=%s redriz=%s dim=%s by_vis=%s ad_cores=%s | dp run=%s scrape=%s %s lim=%s "
         "clean=%s fake=%s | keep_driz_art=%s keep_obj=%s",
         opt.download,
         opt.clobber,
@@ -1083,6 +1086,7 @@ def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
         opt.redrizzle,
         opt.drizzle_dim,
         opt.by_visit,
+        ad_cores,
         opt.run_dolphot,
         opt.scrape_dolphot,
         opt.dolphot,

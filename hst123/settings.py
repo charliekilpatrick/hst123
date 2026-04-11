@@ -5,7 +5,25 @@ Default pipeline configuration: URLs, alignment radii, instruments, filters.
 and CLI parsing. Values include archive paths, CRDS/Mast endpoints, tweakreg
 search parameters, and photometry-related defaults.
 """
+import os
+
 from astropy import units as u
+
+
+def default_astrodrizzle_cores(*, cap: int = 8) -> int:
+    """
+    Default DrizzlePac ``num_cores`` when ``--max-cores`` is omitted.
+
+    Uses :func:`os.cpu_count` capped at *cap* so large shared machines do not
+    default to dozens of workers. Single-core fallback when CPU count is unknown.
+    """
+    try:
+        n = os.cpu_count()
+    except NotImplementedError:
+        n = None
+    if not n or n < 1:
+        return 1
+    return max(1, min(int(cap), int(n)))
 
 # Global defaults: archive, MAST/CRDS URLs, reference keys, visit, radius, dolphot params
 
@@ -44,7 +62,6 @@ global_defaults = {
     "minobj": 10,
     # Pipeline instance defaults
     "rawdir": "raw",
-    "summary": "exposure_summary.out",
     "magsystem": "abmag",
     "default_threshold": 10.0,
     "snr_limit": 3.0,
@@ -101,7 +118,8 @@ global_defaults = {
 # AstroDrizzle
 
 drizzle_defaults = {
-    "num_cores": 8,
+    # Match CLI default when ``--max-cores`` omitted (see ``default_astrodrizzle_cores``).
+    "num_cores": default_astrodrizzle_cores(),
     "driz_sep_pixfrac": 0.8,
     "final_pixfrac": 0.8,
     "combine_maskpt": 0.2,

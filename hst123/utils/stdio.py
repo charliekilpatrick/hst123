@@ -3,6 +3,9 @@ Context managers to silence stdout/stderr during noisy imports or C I/O.
 
 Use :func:`suppress_stdout` for Python-level streams and
 :func:`suppress_stdout_fd` when C libraries write to file descriptor 1.
+
+:func:`limit_blas_threads_when_parallel` avoids BLAS/OpenMP oversubscription when
+DrizzlePac uses multiple workers (``num_cores`` > 1).
 """
 import os
 import sys
@@ -59,3 +62,38 @@ def suppress_stdout_fd() -> Iterator[None]:
         os.dup2(saved, 1)
         os.close(saved)
         os.close(devnull)
+
+
+_BLAS_THREAD_KEYS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+
+
+@contextmanager
+def limit_blas_threads_when_parallel(num_cores: int) -> Iterator[None]:
+    """
+    When *num_cores* > 1, set common thread env vars to ``1`` for the duration.
+
+    Multi-worker DrizzlePac plus multi-threaded NumPy/BLAS often oversubscribes
+    CPUs; capping worker-local BLAS threads usually improves wall time without
+    changing outputs.
+    """
+    if num_cores <= 1:
+        yield
+        return
+    saved: dict[str, str | None] = {k: os.environ.get(k) for k in _BLAS_THREAD_KEYS}
+    try:
+        for k in _BLAS_THREAD_KEYS:
+            os.environ[k] = "1"
+        yield
+    finally:
+        for k in _BLAS_THREAD_KEYS:
+            v = saved[k]
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v

@@ -38,6 +38,13 @@ class TestAddOptions:
         assert args.drizzle_dim == 4000
         assert args.wht_type == "IVM"
 
+    def test_max_cores_optional(self):
+        parser = options.add_options()
+        args = parser.parse_args(["0", "0"])
+        assert args.max_cores is None
+        args = parser.parse_args(["0", "0", "--max-cores", "8"])
+        assert args.max_cores == 8
+
     def test_uses_provided_parser(self):
         import argparse
         p = argparse.ArgumentParser()

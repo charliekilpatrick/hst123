@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-# Defer import so collection succeeds even if stwcs/drizzlepac not installed
+# Defer import so collection succeeds even if drizzlepac not installed
 try:
     import hst123 as hst123_module
 except Exception as e:
@@ -33,6 +33,10 @@ class TestHst123Init:
         assert "instrument_defaults" in hst.options
         assert "acceptable_filters" in hst.options
         assert "catalog" in hst.options
+        assert "drizzle_defaults" in hst.options
+        from hst123 import settings as _settings
+
+        assert hst.options["drizzle_defaults"]["num_cores"] == _settings.default_astrodrizzle_cores()
         assert hst.options["args"] is None
         assert hst.names is not None
         assert hst.pipeline_products is not None

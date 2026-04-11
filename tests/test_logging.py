@@ -172,6 +172,7 @@ def test_log_pipeline_configuration_logs_version_and_flags(tmp_path, caplog, mon
         cleanup=False,
         keep_drizzle_artifacts=False,
         keep_objfile=False,
+        drizzle_num_cores=4,
     )
     caplog.set_level(logging.INFO)
     log = get_logger("hst123")
@@ -187,6 +188,7 @@ def test_log_pipeline_configuration_logs_version_and_flags(tmp_path, caplog, mon
     assert "dl=True" in text
     assert "dp run=True" in text
     assert "after=2020-01-01" in text
+    assert "ad_cores=4" in text
 
 
 def test_run_external_command_echo(caplog, tmp_path):

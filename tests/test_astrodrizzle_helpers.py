@@ -11,9 +11,22 @@ from hst123.utils.astrodrizzle_helpers import (
     drizzle_sidecar_paths,
     resolve_drizzle_clean_flag,
     rename_astrodrizzle_sidecars,
+    wfpc2_astrodrizzle_scratch_paths,
     wcs_image_hdu_index,
     write_drc_multis_extension_if_requested,
 )
+
+
+def test_wfpc2_astrodrizzle_scratch_paths_pairs_c1m(tmp_path):
+    d = tmp_path / "data"
+    d.mkdir()
+    c0 = d / "u2460107t_c0m.fits"
+    c1 = d / "u2460107t_c1m.fits"
+    c0.write_text("x")
+    c1.write_text("y")
+    t0, t1 = wfpc2_astrodrizzle_scratch_paths(str(c0), 12345)
+    assert t0.endswith("u2460107t_hst123drz12345_c0m.fits")
+    assert t1 is not None and t1.endswith("u2460107t_hst123drz12345_c1m.fits")
 
 
 def test_combine_type_and_nhigh_small_stack():

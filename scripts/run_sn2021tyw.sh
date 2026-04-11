@@ -3,7 +3,7 @@
 #
 # Prerequisites (from repo root):
 #   pip install -e .
-#   # plus drizzlepac/stwcs; DOLPHOT binaries on PATH for --run-dolphot
+#   # plus drizzlepac; DOLPHOT binaries on PATH for --run-dolphot
 #
 # Requires: network to MAST for --download and get_productlist.
 set -euo pipefail

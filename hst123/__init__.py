@@ -1,9 +1,17 @@
 """
 hst123: HST download, alignment, drizzle, and DOLPHOT photometry.
 
-This package provides the :class:`~hst123._pipeline.hst123` pipeline driver
-(lazy-imported via :func:`__getattr__` as ``hst123`` and ``main``) and supporting
-utilities under :mod:`hst123.utils` and :mod:`hst123.primitives`.
+Public API
+----------
+``__version__``
+    Package version (from setuptools-scm at install time).
+``hst123``
+    Pipeline class :class:`hst123._pipeline.hst123` (lazy-loaded).
+``main``
+    CLI entry :func:`hst123._pipeline.main` (lazy-loaded).
+
+Heavy optional dependencies (e.g. DrizzlePac) are imported only when the
+pipeline class or ``main`` is first accessed.
 
 Notes
 -----
@@ -20,22 +28,22 @@ __all__ = ["__version__", "hst123", "main"]
 
 def __getattr__(name):
     """
-    Lazy-load pipeline class and main so heavy deps (stwcs, drizzlepac) are not required at import.
+    Lazy-load the pipeline class and CLI entry so imports stay lightweight.
 
     Parameters
     ----------
     name : str
-        Attribute name; only "hst123" and "main" are supported.
+        Must be ``"hst123"`` or ``"main"``.
 
     Returns
     -------
-    type or function
-        The hst123 pipeline class or the main entry-point function.
+    object
+        The pipeline class or the ``main`` function.
 
     Raises
     ------
     AttributeError
-        If name is not "hst123" or "main".
+        If name is not ``"hst123"`` or ``"main"``.
     """
     if name == "hst123":
         from hst123._pipeline import hst123

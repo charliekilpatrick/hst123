@@ -32,21 +32,22 @@ from hst123.primitives.astrometry.alignment_meta import (
     write_alignment_provenance,
 )
 
-_STWCS_LOGGER_NAMES = (
+# Logger names emitted by STScI ``stwcs`` (PyPI) when TweakReg/headerlet runs.
+_STSCI_WCS_LOGGERS = (
     "stwcs",
     "stwcs.wcsutil",
     "stwcs.wcsutil.headerlet",
 )
 
 
-def _quiet_stwcs_for_headerlet(fn):
-    """Raise stwcs/headerlet loggers to WARNING for the duration of *fn* (less noise)."""
+def _quiet_headerlet_loggers(fn):
+    """Raise headerlet-related loggers to WARNING for the duration of *fn* (less noise)."""
 
     @functools.wraps(fn)
     def wrapped(*args, **kwargs):
-        prev = {n: logging.getLogger(n).level for n in _STWCS_LOGGER_NAMES}
+        prev = {n: logging.getLogger(n).level for n in _STSCI_WCS_LOGGERS}
         try:
-            for n in _STWCS_LOGGER_NAMES:
+            for n in _STSCI_WCS_LOGGERS:
                 logging.getLogger(n).setLevel(logging.WARNING)
             return fn(*args, **kwargs)
         finally:
@@ -126,11 +127,14 @@ def parse_coord(ra, dec):
 
 try:
     from drizzlepac import tweakreg, catalogs
-    import stwcs
+
+    from hst123.utils.stsci_wcs import hstwcs_class
+
+    HSTWCS = hstwcs_class()
 except ImportError:
     tweakreg = None
     catalogs = None
-    stwcs = None
+    HSTWCS = None  # type: ignore[misc,assignment]
 
 
 class AstrometryPrimitive(BasePrimitive):
@@ -327,8 +331,8 @@ class AstrometryPrimitive(BasePrimitive):
         int
             Total number of sources from catalog.
         """
-        if catalogs is None or stwcs is None:
-            log.warning("drizzlepac/stwcs unavailable; cannot count sources")
+        if catalogs is None or HSTWCS is None:
+            log.warning("drizzlepac or stsci_wcs (bundled STScI WCS) unavailable; cannot count sources")
             return 0
         nsources = 0
         log.debug(
@@ -340,7 +344,7 @@ class AstrometryPrimitive(BasePrimitive):
             for i, h in enumerate(imghdu):
                 if h.name == "SCI" or (len(imghdu) == 1 and h.name == "PRIMARY"):
                     filename = "{:s}[{:d}]".format(image, i)
-                    wcs = stwcs.wcsutil.HSTWCS(filename)
+                    wcs = HSTWCS(filename)
                     catalog_mode = "automatic"
                     catalog = catalogs.generateCatalog(
                         wcs,
@@ -851,7 +855,7 @@ class AstrometryPrimitive(BasePrimitive):
         return ("jhat success", None)
 
     @log_calls
-    @_quiet_stwcs_for_headerlet
+    @_quiet_headerlet_loggers
     def run_tweakreg(
         self,
         obstable,
@@ -940,7 +944,7 @@ class AstrometryPrimitive(BasePrimitive):
                 det = "_".join(p._fits.get_instrument(image).split("_")[:2])
                 wcsoptions = p.options["detector_defaults"][det]
                 # Match run_astrodrizzle: skip MAST AstrometryDB here. DB updates call
-                # stwcs.archive_wcs(..., QUIET_ABORT) and emit duplicate-WCSNAME warnings
+                # archive_wcs(..., QUIET_ABORT) and emit duplicate-WCSNAME warnings
                 # on FLCs that already carry IDC/TWEAK alternates; makecorr still runs.
                 p.update_image_wcs(image, wcsoptions, use_db=False)
 

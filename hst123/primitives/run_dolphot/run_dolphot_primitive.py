@@ -52,6 +52,10 @@ def dolphot_subprocess_env() -> dict[str, str]:
     For a permanent multi-threaded run after fixing **Homebrew** ``libomp`` and
     rebuilding DOLPHOT (see README), export ``OMP_NUM_THREADS`` or
     ``HST123_DOLPHOT_OMP_THREADS`` before running the pipeline.
+
+    Note: ``calcsky`` uses :func:`calcsky_subprocess_env` instead, because an inherited
+    shell ``OMP_NUM_THREADS`` (e.g. from conda) commonly breaks **calcsky** on macOS
+    even when ``dolphot`` would be fine.
     """
     env = os.environ.copy()
     if "OMP_NUM_THREADS" in os.environ:
@@ -61,6 +65,30 @@ def dolphot_subprocess_env() -> dict[str, str]:
         env["OMP_NUM_THREADS"] = str(explicit).strip()
         return env
     if sys.platform == "darwin":
+        env["OMP_NUM_THREADS"] = "1"
+    return env
+
+
+def calcsky_subprocess_env() -> dict[str, str]:
+    """
+    Environment for the ``calcsky`` binary only.
+
+    On **macOS**, ``calcsky`` frequently aborts with **SIGTRAP** if ``OMP_NUM_THREADS>1``
+    and OpenMP libraries are mismatched. Unlike :func:`dolphot_subprocess_env`, this
+    **does not** inherit a global ``OMP_NUM_THREADS`` from the parent process: conda
+    and other stacks often set it to the CPU count, which triggers the crash. We
+    default to a single thread on Darwin.
+
+    Override with ``HST123_CALCSKY_OMP_THREADS`` (e.g. ``4``) after verifying
+    ``calcsky`` is linked against the correct Homebrew ``libomp``.
+    """
+    env = os.environ.copy()
+    if sys.platform != "darwin":
+        return dolphot_subprocess_env()
+    explicit = os.environ.get("HST123_CALCSKY_OMP_THREADS")
+    if explicit is not None and str(explicit).strip() != "":
+        env["OMP_NUM_THREADS"] = str(explicit).strip()
+    else:
         env["OMP_NUM_THREADS"] = "1"
     return env
 
@@ -408,7 +436,7 @@ class DolphotPrimitive(BasePrimitive):
                             calc_argv,
                             log=log,
                             check=False,
-                            env=dolphot_subprocess_env(),
+                            env=calcsky_subprocess_env(),
                         )
                     except OSError as exc:
                         log.warning(

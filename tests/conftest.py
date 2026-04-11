@@ -65,7 +65,7 @@ def hst123_instance():
     try:
         import hst123 as _hst
     except Exception as e:
-        pytest.skip(f"hst123 not importable (need drizzlepac/stwcs): {e}")
+        pytest.skip(f"hst123 not importable (need drizzlepac, stsci.tools, etc.): {e}")
     import argparse
     from hst123.utils import options
 

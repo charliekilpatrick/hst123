@@ -141,6 +141,14 @@ def add_options(parser=None, usage=None, version=None):
         'the original position angle.')
     parser.add_argument('--no-mask', default=False, action='store_true',
         help='Do not add extra masking based on other input files.')
+    parser.add_argument(
+        '--max-cores',
+        default=None,
+        type=int,
+        metavar='N',
+        help='AstroDrizzle (DrizzlePac) worker count (num_cores). Default: min(8, CPU '
+        'count) when omitted. Use 1 to force single-worker behavior.',
+    )
 
     # dolphot options
     parser.add_argument('--run-dolphot', default=False, action='store_true',
