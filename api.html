@@ -1,0 +1,1521 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API reference &mdash; hst123 1.0.1.dev127+g5eee3491a</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" href="_static/hst123-docs.css" type="text/css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=66f05667"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Zero points" href="zeropoints.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            hst123
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="zeropoints.html">Zero points</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#entry-point">Entry point</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123._pipeline.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#pipeline-class">Pipeline class</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123._pipeline.hst123"><code class="docutils literal notranslate"><span class="pre">hst123</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.add_options"><code class="docutils literal notranslate"><span class="pre">hst123.add_options()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.check_archive"><code class="docutils literal notranslate"><span class="pre">hst123.check_archive()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.clear_downloads"><code class="docutils literal notranslate"><span class="pre">hst123.clear_downloads()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.compress_reference"><code class="docutils literal notranslate"><span class="pre">hst123.compress_reference()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.copy_raw_data"><code class="docutils literal notranslate"><span class="pre">hst123.copy_raw_data()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.copy_raw_data_archive"><code class="docutils literal notranslate"><span class="pre">hst123.copy_raw_data_archive()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.download_files"><code class="docutils literal notranslate"><span class="pre">hst123.download_files()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.drizzle_all"><code class="docutils literal notranslate"><span class="pre">hst123.drizzle_all()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.expand_obstable_for_split_images"><code class="docutils literal notranslate"><span class="pre">hst123.expand_obstable_for_split_images()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.fix_hdu_wcs_keys"><code class="docutils literal notranslate"><span class="pre">hst123.fix_hdu_wcs_keys()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.fix_idcscale"><code class="docutils literal notranslate"><span class="pre">hst123.fix_idcscale()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.fix_phot_keys"><code class="docutils literal notranslate"><span class="pre">hst123.fix_phot_keys()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.get_dolphot_photometry"><code class="docutils literal notranslate"><span class="pre">hst123.get_dolphot_photometry()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.get_productlist"><code class="docutils literal notranslate"><span class="pre">hst123.get_productlist()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.handle_args"><code class="docutils literal notranslate"><span class="pre">hst123.handle_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.handle_reference"><code class="docutils literal notranslate"><span class="pre">hst123.handle_reference()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.input_list"><code class="docutils literal notranslate"><span class="pre">hst123.input_list()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.make_dolphot_file"><code class="docutils literal notranslate"><span class="pre">hst123.make_dolphot_file()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.needs_to_be_reduced"><code class="docutils literal notranslate"><span class="pre">hst123.needs_to_be_reduced()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.organize_reduction_tables"><code class="docutils literal notranslate"><span class="pre">hst123.organize_reduction_tables()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.pick_deepest_images"><code class="docutils literal notranslate"><span class="pre">hst123.pick_deepest_images()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.pick_reference"><code class="docutils literal notranslate"><span class="pre">hst123.pick_reference()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.prepare_dolphot"><code class="docutils literal notranslate"><span class="pre">hst123.prepare_dolphot()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.refresh_obstable_zeropoints_from_fits"><code class="docutils literal notranslate"><span class="pre">hst123.refresh_obstable_zeropoints_from_fits()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.run_astrodrizzle"><code class="docutils literal notranslate"><span class="pre">hst123.run_astrodrizzle()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.run_cosmic"><code class="docutils literal notranslate"><span class="pre">hst123.run_cosmic()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.run_dolphot"><code class="docutils literal notranslate"><span class="pre">hst123.run_dolphot()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.sanitize_reference"><code class="docutils literal notranslate"><span class="pre">hst123.sanitize_reference()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.sanitize_wfpc2"><code class="docutils literal notranslate"><span class="pre">hst123.sanitize_wfpc2()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.split_image_contains"><code class="docutils literal notranslate"><span class="pre">hst123.split_image_contains()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.try_to_get_image"><code class="docutils literal notranslate"><span class="pre">hst123.try_to_get_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123._pipeline.hst123.update_image_wcs"><code class="docutils literal notranslate"><span class="pre">hst123.update_image_wcs()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-hst123.utils.options">CLI options and redo helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.options.add_options"><code class="docutils literal notranslate"><span class="pre">add_options()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.options.want_redo_astrodrizzle"><code class="docutils literal notranslate"><span class="pre">want_redo_astrodrizzle()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.options.want_redo_astrometry"><code class="docutils literal notranslate"><span class="pre">want_redo_astrometry()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-hst123.utils.paths">Path helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.paths.normalize_fits_path"><code class="docutils literal notranslate"><span class="pre">normalize_fits_path()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.paths.normalize_work_and_raw_dirs"><code class="docutils literal notranslate"><span class="pre">normalize_work_and_raw_dirs()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.paths.pipeline_chip_output_dir"><code class="docutils literal notranslate"><span class="pre">pipeline_chip_output_dir()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.paths.pipeline_workspace_dir"><code class="docutils literal notranslate"><span class="pre">pipeline_workspace_dir()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-hst123.utils.stdio">Parallel BLAS / OpenMP guard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.stdio.limit_blas_threads_when_parallel"><code class="docutils literal notranslate"><span class="pre">limit_blas_threads_when_parallel()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.stdio.suppress_stdout"><code class="docutils literal notranslate"><span class="pre">suppress_stdout()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.stdio.suppress_stdout_fd"><code class="docutils literal notranslate"><span class="pre">suppress_stdout_fd()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#work-directory-cleanup">Work directory cleanup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.workdir_cleanup.cleanup_after_astrodrizzle"><code class="docutils literal notranslate"><span class="pre">cleanup_after_astrodrizzle()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.workdir_cleanup.cleanup_after_tweakreg"><code class="docutils literal notranslate"><span class="pre">cleanup_after_tweakreg()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.workdir_cleanup.remove_files_matching_globs"><code class="docutils literal notranslate"><span class="pre">remove_files_matching_globs()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.workdir_cleanup.remove_superseded_instrument_mask_reference_drizzle"><code class="docutils literal notranslate"><span class="pre">remove_superseded_instrument_mask_reference_drizzle()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-hst123.utils.dolphot_catalog_hdf5">DOLPHOT catalog → HDF5</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><code class="docutils literal notranslate"><span class="pre">DolphotColumn</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.description"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.description</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_0based"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.index_0based</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_1based"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.index_1based</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.raw_line"><code class="docutils literal notranslate"><span class="pre">DolphotColumn.raw_line</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.dolphot_columns_to_astropy_table"><code class="docutils literal notranslate"><span class="pre">dolphot_columns_to_astropy_table()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.find_column_index_0based"><code class="docutils literal notranslate"><span class="pre">find_column_index_0based()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.group_param_by_image"><code class="docutils literal notranslate"><span class="pre">group_param_by_image()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array"><code class="docutils literal notranslate"><span class="pre">load_dolphot_catalog_array()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.merge_image_metadata"><code class="docutils literal notranslate"><span class="pre">merge_image_metadata()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_column_index_and_description"><code class="docutils literal notranslate"><span class="pre">parse_column_index_and_description()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_columns_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_data_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_data_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_info_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_info_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_param_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_param_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_warnings_file"><code class="docutils literal notranslate"><span class="pre">parse_dolphot_warnings_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.read_dolphot_catalog_hdf5"><code class="docutils literal notranslate"><span class="pre">read_dolphot_catalog_hdf5()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names"><code class="docutils literal notranslate"><span class="pre">unique_hdf5_column_names()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5"><code class="docutils literal notranslate"><span class="pre">write_dolphot_catalog_hdf5()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-hst123.datamodels.hst_model">Data model</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.datamodels.hst_model.HSTModel"><code class="docutils literal notranslate"><span class="pre">HSTModel</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.datamodels.hst_model.HSTModel.basename"><code class="docutils literal notranslate"><span class="pre">HSTModel.basename</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.datamodels.hst_model.HSTModel.dirname"><code class="docutils literal notranslate"><span class="pre">HSTModel.dirname</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.datamodels.hst_model.HSTModel.init_meta"><code class="docutils literal notranslate"><span class="pre">HSTModel.init_meta()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.datamodels.hst_model.HSTModel.on_init"><code class="docutils literal notranslate"><span class="pre">HSTModel.on_init()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#primitives-base-class">Primitives base class</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hst123.primitives.base.BasePrimitive"><code class="docutils literal notranslate"><span class="pre">BasePrimitive</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#hst123.primitives.base.BasePrimitive.pipeline"><code class="docutils literal notranslate"><span class="pre">BasePrimitive.pipeline</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">hst123</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">API reference</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/api.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="api-reference">
+<span id="id1"></span><h1>API reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h1>
+<p>This section documents the public Python API: the CLI entry point, the main
+<a class="reference internal" href="#hst123._pipeline.hst123" title="hst123._pipeline.hst123"><code class="xref py py-class docutils literal notranslate"><span class="pre">hst123</span></code></a> orchestration class, CLI registration in
+<a class="reference internal" href="#module-hst123.utils.options" title="hst123.utils.options"><code class="xref py py-mod docutils literal notranslate"><span class="pre">hst123.utils.options</span></code></a>, path helpers, optional HDF5 export for DOLPHOT
+tables, and shared primitive utilities.</p>
+<section id="entry-point">
+<h2>Entry point<a class="headerlink" href="#entry-point" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123._pipeline.main">
+<span class="sig-prename descclassname"><span class="pre">hst123._pipeline.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#main"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.main" title="Link to this definition"></a></dt>
+<dd><p>Command-line entry point for the full HST123 pipeline.</p>
+<p>Reads <code class="docutils literal notranslate"><span class="pre">sys.argv[1:3]</span></code> as right ascension and declination, then applies all
+flags from <a class="reference internal" href="#hst123._pipeline.hst123.add_options" title="hst123._pipeline.hst123.add_options"><code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.add_options()</span></code></a>. Orchestrates MAST download or raw ingest,
+builds the observation table, alignment, optional drizzle-all, DOLPHOT, and
+catalog scraping according to the selected options.</p>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">hst123.hst123</span></code></dt><dd><p>Programmatic use of the same pipeline steps.</p>
+</dd>
+</dl>
+</div>
+<p class="rubric">Notes</p>
+<p>Calling <code class="docutils literal notranslate"><span class="pre">--help</span></code> prints usage and exits. The function may call <code class="docutils literal notranslate"><span class="pre">sys.exit</span></code>
+on fatal configuration errors or after <code class="docutils literal notranslate"><span class="pre">--hierarch-test</span></code>.</p>
+</dd></dl>
+
+</section>
+<section id="pipeline-class">
+<h2>Pipeline class<a class="headerlink" href="#pipeline-class" title="Link to this heading"></a></h2>
+<p>The class <a class="reference internal" href="#hst123._pipeline.hst123" title="hst123._pipeline.hst123"><code class="xref py py-class docutils literal notranslate"><span class="pre">hst123</span></code></a> holds pipeline state (options,
+coordinates, input lists, reference path) and delegates to <strong>primitives</strong>
+(<code class="docutils literal notranslate"><span class="pre">_fits</span></code>, <code class="docutils literal notranslate"><span class="pre">_phot</span></code>, <code class="docutils literal notranslate"><span class="pre">_astrom</span></code>, <code class="docutils literal notranslate"><span class="pre">_dolphot</span></code>, <code class="docutils literal notranslate"><span class="pre">_scrape_dolphot</span></code>) for
+instrument-specific work.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">hst123._pipeline.</span></span><span class="sig-name descname"><span class="pre">hst123</span></span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123" title="Link to this definition"></a></dt>
+<dd><p>End-to-end HST reduction and photometry pipeline.</p>
+<p>Construct once, then call <a class="reference internal" href="#hst123._pipeline.hst123.handle_args" title="hst123._pipeline.hst123.handle_args"><code class="xref py py-meth docutils literal notranslate"><span class="pre">handle_args()</span></code></a> (or set <code class="docutils literal notranslate"><span class="pre">self.options['args']</span></code>
+programmatically) before invoking download, alignment, drizzle, or DOLPHOT steps.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Attributes<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>input_images</strong><span class="classifier">list of str</span></dt><dd><p>Paths to science FITS after ingest.</p>
+</dd>
+<dt><strong>obstable</strong><span class="classifier">astropy.table.Table or None</span></dt><dd><p>Per-exposure metadata table from <a class="reference internal" href="#hst123._pipeline.hst123.input_list" title="hst123._pipeline.hst123.input_list"><code class="xref py py-meth docutils literal notranslate"><span class="pre">input_list()</span></code></a>.</p>
+</dd>
+<dt><strong>reference</strong><span class="classifier">str</span></dt><dd><p>Path to the drizzled reference image when set.</p>
+</dd>
+<dt><strong>options</strong><span class="classifier">dict</span></dt><dd><p><code class="docutils literal notranslate"><span class="pre">global_defaults</span></code>, <code class="docutils literal notranslate"><span class="pre">detector_defaults</span></code>, <code class="docutils literal notranslate"><span class="pre">instrument_defaults</span></code>,
+<code class="docutils literal notranslate"><span class="pre">acceptable_filters</span></code>, <code class="docutils literal notranslate"><span class="pre">drizzle_defaults</span></code>, and <code class="docutils literal notranslate"><span class="pre">args</span></code> (CLI namespace).</p>
+</dd>
+<dt><strong>coord</strong><span class="classifier">astropy.coordinates.SkyCoord or None</span></dt><dd><p>Target position from the command line.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">hst123.main</span></code></dt><dd><p>CLI entry point.</p>
+</dd>
+</dl>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.add_options">
+<span class="sig-name descname"><span class="pre">add_options</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parser</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">usage</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.add_options"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.add_options" title="Link to this definition"></a></dt>
+<dd><p>Add hst123 command-line arguments to an argparse parser.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>parser</strong><span class="classifier">argparse.ArgumentParser, optional</span></dt><dd><p>Parser to add arguments to; if None, a new parser is created.</p>
+</dd>
+<dt><strong>usage</strong><span class="classifier">str, optional</span></dt><dd><p>Usage string when parser is None.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>argparse.ArgumentParser</dt><dd><p>Parser with all hst123 options registered.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.check_archive">
+<span class="sig-name descname"><span class="pre">check_archive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">product</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">archivedir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.check_archive"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.check_archive" title="Link to this definition"></a></dt>
+<dd><p>Ensure the archive tree exists and report whether the product file is present.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>product</strong><span class="classifier">dict-like</span></dt><dd><p>Row with <code class="docutils literal notranslate"><span class="pre">productFilename</span></code>, <code class="docutils literal notranslate"><span class="pre">instrument_name</span></code>, <code class="docutils literal notranslate"><span class="pre">ra</span></code>, etc.</p>
+</dd>
+<dt><strong>archivedir</strong><span class="classifier">str, optional</span></dt><dd><p>Root archive directory; defaults to <code class="docutils literal notranslate"><span class="pre">args.archive</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>tuple (bool, str)</dt><dd><p><code class="docutils literal notranslate"><span class="pre">(file_exists,</span> <span class="pre">full_path)</span></code> where <em>full_path</em> is the target archive path.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.clear_downloads">
+<span class="sig-name descname"><span class="pre">clear_downloads</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">options</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.clear_downloads"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.clear_downloads" title="Link to this definition"></a></dt>
+<dd><p>Clear Astropy’s download cache to avoid failures when the cache is full.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>options</strong><span class="classifier">dict</span></dt><dd><p>Must include <code class="docutils literal notranslate"><span class="pre">astropath</span></code> (suffix under <code class="docutils literal notranslate"><span class="pre">$HOME</span></code> for the cache location).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>No-op when <code class="docutils literal notranslate"><span class="pre">--no-clear-downloads</span></code> is set.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.compress_reference">
+<span class="sig-name descname"><span class="pre">compress_reference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">reference</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.compress_reference"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.compress_reference" title="Link to this definition"></a></dt>
+<dd><p>Collapse multi-extension drizzle products to a single PRIMARY for DOLPHOT.</p>
+<p>AstroDrizzle often writes <strong>PRIMARY (image) + HDRTAB</strong>. Older logic treated
+any 2-HDU file as PRIMARY+SCI and replaced PRIMARY with extension 1, which
+swaps the science image for a binary table and breaks <code class="docutils literal notranslate"><span class="pre">calcsky</span></code> (crash /
+SIGTRAP). Only <strong>SCI</strong> is promoted when the primary HDU has no image array.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>reference</strong><span class="classifier">str</span></dt><dd><p>Path to the drizzled FITS file (updated in place).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>None</dt><dd><p>Returns None if <em>reference</em> does not exist.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.copy_raw_data">
+<span class="sig-name descname"><span class="pre">copy_raw_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rawdir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reverse</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">check_for_coord</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.copy_raw_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.copy_raw_data" title="Link to this definition"></a></dt>
+<dd><p>Sync FITS between a raw directory and the working directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>rawdir</strong><span class="classifier">str</span></dt><dd><p>Directory containing <code class="docutils literal notranslate"><span class="pre">*.fits</span></code> (used as the source when <em>reverse</em> is True).</p>
+</dd>
+<dt><strong>reverse</strong><span class="classifier">bool, optional</span></dt><dd><p>If False, copy pipeline <code class="docutils literal notranslate"><span class="pre">input_images</span></code> into <em>rawdir</em>. If True, copy from
+<em>rawdir</em> into <code class="docutils literal notranslate"><span class="pre">work_dir</span></code>, keeping a copy under <code class="docutils literal notranslate"><span class="pre">work_dir/raw/</span></code> and a
+symlink (or copy) at the work-dir top level.</p>
+</dd>
+<dt><strong>check_for_coord</strong><span class="classifier">bool, optional</span></dt><dd><p>If True with <em>reverse</em>, only copy exposures that pass <a class="reference internal" href="#hst123._pipeline.hst123.needs_to_be_reduced" title="hst123._pipeline.hst123.needs_to_be_reduced"><code class="xref py py-meth docutils literal notranslate"><span class="pre">needs_to_be_reduced()</span></code></a>.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Used after downloads or when ingesting an existing raw cache.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.copy_raw_data_archive">
+<span class="sig-name descname"><span class="pre">copy_raw_data_archive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">product</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">archivedir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">workdir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">check_for_coord</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.copy_raw_data_archive"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.copy_raw_data_archive" title="Link to this definition"></a></dt>
+<dd><p>Copy one MAST product from the archive into the working directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>product</strong><span class="classifier">dict-like</span></dt><dd><p>Row from <a class="reference internal" href="#hst123._pipeline.hst123.get_productlist" title="hst123._pipeline.hst123.get_productlist"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_productlist()</span></code></a> (used with <code class="xref py py-meth docutils literal notranslate"><span class="pre">_archive_path_for_product()</span></code>).</p>
+</dd>
+<dt><strong>archivedir, workdir</strong><span class="classifier">str, optional</span></dt><dd><p>Archive root and destination directory (defaults from <code class="docutils literal notranslate"><span class="pre">args</span></code>).</p>
+</dd>
+<dt><strong>check_for_coord</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, skip copying when <a class="reference internal" href="#hst123._pipeline.hst123.needs_to_be_reduced" title="hst123._pipeline.hst123.needs_to_be_reduced"><code class="xref py py-meth docutils literal notranslate"><span class="pre">needs_to_be_reduced()</span></code></a> rejects the file.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>int or None</dt><dd><p><code class="docutils literal notranslate"><span class="pre">0</span></code> on success or skip-when-identical; None if missing or filtered out.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.download_files">
+<span class="sig-name descname"><span class="pre">download_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">productlist</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dest</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">archivedir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clobber</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">work_dir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.download_files"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.download_files" title="Link to this definition"></a></dt>
+<dd><p>Download MAST products via <code class="docutils literal notranslate"><span class="pre">astroquery.mast.Observations.download_products</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>productlist</strong><span class="classifier">table-like</span></dt><dd><p>Rows from <a class="reference internal" href="#hst123._pipeline.hst123.get_productlist" title="hst123._pipeline.hst123.get_productlist"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_productlist()</span></code></a> (must include <code class="docutils literal notranslate"><span class="pre">downloadFilename</span></code>, <code class="docutils literal notranslate"><span class="pre">obsID</span></code>).</p>
+</dd>
+<dt><strong>dest</strong><span class="classifier">str, optional</span></dt><dd><p>Directory for downloaded FITS when not using an archive layout.</p>
+</dd>
+<dt><strong>archivedir</strong><span class="classifier">str, optional</span></dt><dd><p>When set, <code class="docutils literal notranslate"><span class="pre">check_archive</span></code> places files under <code class="docutils literal notranslate"><span class="pre">{inst}/{det}/{ra}/...</span></code>.</p>
+</dd>
+<dt><strong>clobber</strong><span class="classifier">bool, optional</span></dt><dd><p>If False, skip when the destination file already exists.</p>
+</dd>
+<dt><strong>work_dir</strong><span class="classifier">str, optional</span></dt><dd><p>Parent for <code class="docutils literal notranslate"><span class="pre">.mast_download_staging</span></code> (isolates astroquery temp from CWD).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>bool</dt><dd><p>True when the download loop completes (individual files may warn on failure).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Staging always lives under <em>work_dir</em> so <code class="docutils literal notranslate"><span class="pre">mastDownload</span></code> is not created in an
+unrelated shell current directory.</p>
+<p>Downloads run <strong>sequentially</strong>. <code class="docutils literal notranslate"><span class="pre">Observations.download_products</span></code> (astroquery)
+is not thread-safe; parallel calls caused intermittent <code class="docutils literal notranslate"><span class="pre">I/O</span> <span class="pre">operation</span> <span class="pre">on</span> <span class="pre">closed</span>
+<span class="pre">file</span></code> errors and staging-directory races (<code class="docutils literal notranslate"><span class="pre">[Errno</span> <span class="pre">17]</span> <span class="pre">File</span> <span class="pre">exists</span></code>).
+<code class="docutils literal notranslate"><span class="pre">--max-cores</span></code> still applies to drizzle/DOLPHOT parallelism elsewhere.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.drizzle_all">
+<span class="sig-name descname"><span class="pre">drizzle_all</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obstable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hierarchical</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clobber</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">do_tweakreg</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.drizzle_all"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.drizzle_all" title="Link to this definition"></a></dt>
+<dd><p>Drizzle each unique <code class="docutils literal notranslate"><span class="pre">drizname</span></code> group (visit/filter/epoch) from <em>obstable</em>.</p>
+<dl class="field-list">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl>
+<dt><strong>obstable</strong><span class="classifier"><cite>astropy.table.Table</cite></span></dt><dd><p>Must include <code class="docutils literal notranslate"><span class="pre">drizname</span></code> and <code class="docutils literal notranslate"><span class="pre">image</span></code> columns (from <a class="reference internal" href="#hst123._pipeline.hst123.input_list" title="hst123._pipeline.hst123.input_list"><code class="xref py py-meth docutils literal notranslate"><span class="pre">input_list()</span></code></a>).</p>
+</dd>
+<dt><strong>hierarchical</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, after per-epoch drizzles, run a second TweakReg pass and apply
+shifts tied to the deepest stacked image.</p>
+</dd>
+<dt><strong>clobber</strong><span class="classifier">bool, optional</span></dt><dd><p>If False, skip drizzle when the output file already exists. Set True when
+using <code class="docutils literal notranslate"><span class="pre">--redo-astrodrizzle</span></code>, <code class="docutils literal notranslate"><span class="pre">--redo</span></code>, or <code class="docutils literal notranslate"><span class="pre">--clobber</span></code> (see
+<a class="reference internal" href="#hst123.utils.options.want_redo_astrodrizzle" title="hst123.utils.options.want_redo_astrodrizzle"><code class="xref py py-func docutils literal notranslate"><span class="pre">want_redo_astrodrizzle()</span></code></a>).</p>
+</dd>
+<dt><strong>do_tweakreg</strong><span class="classifier">bool, optional</span></dt><dd><p>Run TweakReg on each group before AstroDrizzle when alignment is enabled.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Optional per-drizzle <code class="docutils literal notranslate"><span class="pre">calcsky</span></code> for non-reference products is controlled by
+<code class="docutils literal notranslate"><span class="pre">HST123_DOLPHOT_SKY_FOR_DRIZZLE_ALL</span></code>.</p>
+<p>Groups are processed <strong>sequentially</strong>: each step calls <code class="xref py py-meth docutils literal notranslate"><span class="pre">run_tweakreg()</span></code>, which
+sets the process working directory to <code class="docutils literal notranslate"><span class="pre">workspace/</span></code>; parallelizing groups in
+threads would race on <code class="docutils literal notranslate"><span class="pre">chdir</span></code>. DOLPHOT prep thread count is set by
+<code class="docutils literal notranslate"><span class="pre">--max-cores</span></code> (same as AstroDrizzle workers).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.expand_obstable_for_split_images">
+<span class="sig-name descname"><span class="pre">expand_obstable_for_split_images</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">visit_obstable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">split_images</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.expand_obstable_for_split_images"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.expand_obstable_for_split_images" title="Link to this definition"></a></dt>
+<dd><p>Build one obstable row per DOLPHOT split/chip path from the visit table.</p>
+<p>Avoids <a class="reference internal" href="#hst123._pipeline.hst123.input_list" title="hst123._pipeline.hst123.input_list"><code class="xref py py-meth docutils literal notranslate"><span class="pre">input_list()</span></code></a> over <code class="docutils literal notranslate"><span class="pre">split_images</span></code>, which re-opens every chip
+FITS many times per file (very slow on network-backed storage).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>visit_obstable</strong><span class="classifier">astropy.table.Table</span></dt><dd><p>Per-visit observation table (same exposures as the parents of <em>split_images</em>).</p>
+</dd>
+<dt><strong>split_images</strong><span class="classifier">list of str</span></dt><dd><p>Chip-level FITS paths (e.g. <code class="docutils literal notranslate"><span class="pre">*.chipN.fits</span></code>) or undivided exposures.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>astropy.table.Table or None</dt><dd><p>Table aligned to <em>split_images</em>, or None if a parent exposure cannot be matched.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.fix_hdu_wcs_keys">
+<span class="sig-name descname"><span class="pre">fix_hdu_wcs_keys</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">change_keys</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ref_url</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.fix_hdu_wcs_keys"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.fix_hdu_wcs_keys" title="Link to this definition"></a></dt>
+<dd><p>Rewrite <code class="docutils literal notranslate"><span class="pre">WCSNAME</span></code>-like keys and expand CRDS reference paths for alignment.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>FITS path opened in update mode.</p>
+</dd>
+<dt><strong>change_keys</strong><span class="classifier">iterable of str</span></dt><dd><p>Header keys to normalize (strip <code class="docutils literal notranslate"><span class="pre">WCSNAME</span></code> values, resolve <code class="docutils literal notranslate"><span class="pre">ref$</span></code> paths).</p>
+</dd>
+<dt><strong>ref_url</strong><span class="classifier">str</span></dt><dd><p>CRDS / reference root URL prefix (see <code class="docutils literal notranslate"><span class="pre">ref_prefix_for_header</span></code> in
+<code class="docutils literal notranslate"><span class="pre">hst123.utils.reference_download</span></code>).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.fix_idcscale">
+<span class="sig-name descname"><span class="pre">fix_idcscale</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.fix_idcscale"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.fix_idcscale" title="Link to this definition"></a></dt>
+<dd><p>Ensure WFC3 IDC headers carry <code class="docutils literal notranslate"><span class="pre">IDCSCALE</span></code> from detector defaults.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Path to a FITS file updated in place.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.fix_phot_keys">
+<span class="sig-name descname"><span class="pre">fix_phot_keys</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.fix_phot_keys"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.fix_phot_keys" title="Link to this definition"></a></dt>
+<dd><p>Propagate the first <code class="docutils literal notranslate"><span class="pre">PHOTPLAM</span></code> / <code class="docutils literal notranslate"><span class="pre">PHOTFLAM</span></code> pair to every HDU.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Path to a FITS file updated in place.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.get_dolphot_photometry">
+<span class="sig-name descname"><span class="pre">get_dolphot_photometry</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">split_images</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">visit_obstable</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.get_dolphot_photometry"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.get_dolphot_photometry" title="Link to this definition"></a></dt>
+<dd><p>Parse DOLPHOT output for the pipeline coordinate and print summary photometry.</p>
+<p>Delegates to <code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.primitives.run_dolphot.DolphotPrimitive.get_dolphot_photometry()</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>visit_obstable</strong><span class="classifier">astropy.table.Table, optional</span></dt><dd><p>Per-visit observation table. When provided, scraping reuses it for chip-level
+paths instead of rebuilding metadata via <a class="reference internal" href="#hst123._pipeline.hst123.input_list" title="hst123._pipeline.hst123.input_list"><code class="xref py py-meth docutils literal notranslate"><span class="pre">input_list()</span></code></a> on every split FITS.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.get_productlist">
+<span class="sig-name descname"><span class="pre">get_productlist</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coord</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">search_radius</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.get_productlist"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.get_productlist" title="Link to this definition"></a></dt>
+<dd><p>Query MAST for HST science products near a sky position.</p>
+<dl class="field-list">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl>
+<dt><strong>coord</strong><span class="classifier"><cite>astropy.coordinates.SkyCoord</cite></span></dt><dd><p>Field center.</p>
+</dd>
+<dt><strong>search_radius</strong><span class="classifier">float or str</span></dt><dd><p>Search radius passed to <code class="docutils literal notranslate"><span class="pre">astroquery.mast.Observations.query_region</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>astropy.table.Table or None</dt><dd><p>Table with <code class="docutils literal notranslate"><span class="pre">productFilename</span></code>, <code class="docutils literal notranslate"><span class="pre">downloadFilename</span></code>, <code class="docutils literal notranslate"><span class="pre">obsID</span></code>, etc., or
+None if no rows match the configured filters.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.handle_args">
+<span class="sig-name descname"><span class="pre">handle_args</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parser</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.handle_args"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.handle_args" title="Link to this definition"></a></dt>
+<dd><p>Parse CLI arguments, normalize work/raw dirs, and apply overrides to <code class="docutils literal notranslate"><span class="pre">self.options</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>parser</strong><span class="classifier">argparse.ArgumentParser</span></dt><dd><p>Parser from <a class="reference internal" href="#hst123._pipeline.hst123.add_options" title="hst123._pipeline.hst123.add_options"><code class="xref py py-meth docutils literal notranslate"><span class="pre">add_options()</span></code></a>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>argparse.Namespace</dt><dd><p>Parsed options (also stored as <code class="docutils literal notranslate"><span class="pre">self.options['args']</span></code>).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.handle_reference">
+<span class="sig-name descname"><span class="pre">handle_reference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obstable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">refname</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.handle_reference"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.handle_reference" title="Link to this definition"></a></dt>
+<dd><p>Resolve the drizzled reference image path, building it via <a class="reference internal" href="#hst123._pipeline.hst123.pick_reference" title="hst123._pipeline.hst123.pick_reference"><code class="xref py py-meth docutils literal notranslate"><span class="pre">pick_reference()</span></code></a> if needed.</p>
+<dl class="field-list">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl>
+<dt><strong>obstable</strong><span class="classifier"><cite>astropy.table.Table</cite></span></dt><dd><p>Current visit table.</p>
+</dd>
+<dt><strong>refname</strong><span class="classifier">str or None</span></dt><dd><p>User-supplied reference path, or None to generate.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>str or None</dt><dd><p>Path to the reference FITS, or None if missing or drizzle failed.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.input_list">
+<span class="sig-name descname"><span class="pre">input_list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">img</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">show</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_number</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[]</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.input_list"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.input_list" title="Link to this definition"></a></dt>
+<dd><p>Build the observation metadata table for a list of FITS paths.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>img</strong><span class="classifier">list of str</span></dt><dd><p>Input image paths; missing files may be filled via <a class="reference internal" href="#hst123._pipeline.hst123.try_to_get_image" title="hst123._pipeline.hst123.try_to_get_image"><code class="xref py py-meth docutils literal notranslate"><span class="pre">try_to_get_image()</span></code></a>.</p>
+</dd>
+<dt><strong>show</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, log a one-line summary of inputs (and a debug table).</p>
+</dd>
+<dt><strong>save</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, store the table on <code class="docutils literal notranslate"><span class="pre">self.obstable</span></code>.</p>
+</dd>
+<dt><strong>file</strong><span class="classifier">str, optional</span></dt><dd><p>If set, write a formatted text summary under <code class="docutils literal notranslate"><span class="pre">work_dir</span></code>.</p>
+</dd>
+<dt><strong>image_number</strong><span class="classifier">list, optional</span></dt><dd><p>Optional per-row image indices; default is zeros.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>astropy.table.Table or None</dt><dd><p>Columns match <code class="xref py py-mod docutils literal notranslate"><span class="pre">hst123.settings</span></code> <code class="docutils literal notranslate"><span class="pre">names</span></code> (image, exptime, datetime,
+filter, instrument, detector, zeropoint, chip, …). Returns None if no
+valid inputs remain.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.make_dolphot_file">
+<span class="sig-name descname"><span class="pre">make_dolphot_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">images</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.make_dolphot_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.make_dolphot_file" title="Link to this definition"></a></dt>
+<dd><p>Write the DOLPHOT parameter file listing chip images and reference.</p>
+<p>Delegates to <code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.primitives.run_dolphot.DolphotPrimitive.make_dolphot_file()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.needs_to_be_reduced">
+<span class="sig-name descname"><span class="pre">needs_to_be_reduced</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_c1m</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.needs_to_be_reduced"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.needs_to_be_reduced" title="Link to this definition"></a></dt>
+<dd><p>Decide whether an exposure should enter the reduction pipeline.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Path to the FITS file.</p>
+</dd>
+<dt><strong>save_c1m</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, allow WFPC2 <code class="docutils literal notranslate"><span class="pre">*_c1m.fits</span></code> through the instrument-shape checks.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt><strong>warning</strong><span class="classifier">str</span></dt><dd><p>Human-readable reason when the file is rejected (may be empty when accepted).</p>
+</dd>
+<dt><strong>accept</strong><span class="classifier">bool</span></dt><dd><p>True if the file passes quality, filter, date, and coordinate checks.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Applies <code class="docutils literal notranslate"><span class="pre">--before</span></code> / <code class="docutils literal notranslate"><span class="pre">--after</span></code>, <code class="docutils literal notranslate"><span class="pre">EXPFLAG</span></code>, exposure time, filter allow-list,
+and optional on-sky containment tests for <code class="docutils literal notranslate"><span class="pre">self.coord</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.organize_reduction_tables">
+<span class="sig-name descname"><span class="pre">organize_reduction_tables</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obstable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">byvisit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.organize_reduction_tables"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.organize_reduction_tables" title="Link to this definition"></a></dt>
+<dd><p>Split a full observation table into per-visit sub-tables when requested.</p>
+<dl class="field-list">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl>
+<dt><strong>obstable</strong><span class="classifier"><cite>astropy.table.Table</cite></span></dt><dd><p>Table including a <code class="docutils literal notranslate"><span class="pre">visit</span></code> column.</p>
+</dd>
+<dt><strong>byvisit</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, return one table per visit; if False, return a single-element list.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>list of <cite>astropy.table.Table</cite></dt><dd><p>Tables in processing order.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.pick_deepest_images">
+<span class="sig-name descname"><span class="pre">pick_deepest_images</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">images</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reffilter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">avoid_wfpc2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">refinst</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.pick_deepest_images"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.pick_deepest_images" title="Link to this definition"></a></dt>
+<dd><p>Select the longest-exposure images in preferred filters for a reference stack.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>images</strong><span class="classifier">list of str</span></dt><dd><p>Paths to calibrated FITS files.</p>
+</dd>
+<dt><strong>reffilter</strong><span class="classifier">str, optional</span></dt><dd><p>If set, restrict to this filter (must be in <code class="docutils literal notranslate"><span class="pre">acceptable_filters</span></code>).</p>
+</dd>
+<dt><strong>avoid_wfpc2</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, skip WFPC2 exposures.</p>
+</dd>
+<dt><strong>refinst</strong><span class="classifier">str, optional</span></dt><dd><p>If set, restrict to this instrument name.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>list of str</dt><dd><p>Deepest exposures matching the constraints.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.pick_reference">
+<span class="sig-name descname"><span class="pre">pick_reference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obstable</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.pick_reference"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.pick_reference" title="Link to this definition"></a></dt>
+<dd><p>Build or reuse the astrometric reference drizzle for alignment and DOLPHOT.</p>
+<p>Chooses the deepest exposures in the preferred filter, optionally runs an
+instrument-mask drizzle when <code class="docutils literal notranslate"><span class="pre">n&lt;3</span></code>, then drizzles to the visit reference
+filename (<code class="docutils literal notranslate"><span class="pre">{inst}.{filt}.ref_{visit}.drc.fits</span></code>) under <code class="docutils literal notranslate"><span class="pre">work_dir</span></code>.</p>
+<dl class="field-list">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl>
+<dt><strong>obstable</strong><span class="classifier"><cite>astropy.table.Table</cite></span></dt><dd><p>Observation table with at least an <code class="docutils literal notranslate"><span class="pre">image</span></code> column.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>str or None</dt><dd><p>Path to the drizzled reference <code class="docutils literal notranslate"><span class="pre">.drc.fits</span></code>, or None on failure.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.prepare_dolphot">
+<span class="sig-name descname"><span class="pre">prepare_dolphot</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.prepare_dolphot"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.prepare_dolphot" title="Link to this definition"></a></dt>
+<dd><p>Mask, split, and sky-subtract one exposure for DOLPHOT.</p>
+<p>Delegates to <code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.primitives.run_dolphot.DolphotPrimitive.prepare_dolphot()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.refresh_obstable_zeropoints_from_fits">
+<span class="sig-name descname"><span class="pre">refresh_obstable_zeropoints_from_fits</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obstable</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.refresh_obstable_zeropoints_from_fits"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.refresh_obstable_zeropoints_from_fits" title="Link to this definition"></a></dt>
+<dd><p>Recompute <code class="docutils literal notranslate"><span class="pre">zeropoint</span></code> for each row with one <code class="xref py py-meth docutils literal notranslate"><span class="pre">FitsPrimitive.get_zpt()</span></code>
+call per image (single FITS open each), preserving chip-specific calibration.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.run_astrodrizzle">
+<span class="sig-name descname"><span class="pre">run_astrodrizzle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obstable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ra</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dec</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clean</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_fullfile</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.run_astrodrizzle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.run_astrodrizzle" title="Link to this definition"></a></dt>
+<dd><p>Drizzle a stack of exposures with DrizzlePac (sky match, CR rejection, combine).</p>
+<p>Copies inputs to scratch paths (WFPC2 <code class="docutils literal notranslate"><span class="pre">*_c0m</span></code> / <code class="docutils literal notranslate"><span class="pre">*_c1m</span></code>), runs <code class="docutils literal notranslate"><span class="pre">photeq</span></code>
+when applicable, invokes <code class="xref py py-func docutils literal notranslate"><span class="pre">drizzlepac.astrodrizzle.AstroDrizzle()</span></code>, then
+renames sidecars and optionally writes a multi-extension <code class="docutils literal notranslate"><span class="pre">.drc.fits</span></code>.</p>
+<dl class="field-list">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl>
+<dt><strong>obstable</strong><span class="classifier"><cite>astropy.table.Table</cite></span></dt><dd><p>Must include an <code class="docutils literal notranslate"><span class="pre">image</span></code> column listing calibrated FITS paths.</p>
+</dd>
+<dt><strong>output_name</strong><span class="classifier">str, optional</span></dt><dd><p>Desired output path (<code class="docutils literal notranslate"><span class="pre">*.drc.fits</span></code> logical name); default <code class="docutils literal notranslate"><span class="pre">drizzled.drc.fits</span></code>.</p>
+</dd>
+<dt><strong>ra, dec</strong><span class="classifier">float, optional</span></dt><dd><p>Field center for output WCS (degrees); default from <code class="docutils literal notranslate"><span class="pre">self.coord</span></code>.</p>
+</dd>
+<dt><strong>clean</strong><span class="classifier">bool or None</span></dt><dd><p>DrizzlePac <code class="docutils literal notranslate"><span class="pre">clean</span></code> flag; resolved via <code class="xref py py-func docutils literal notranslate"><span class="pre">resolve_drizzle_clean_flag()</span></code>.</p>
+</dd>
+<dt><strong>save_fullfile</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, build a multi-extension DRC product when supported.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>bool</dt><dd><p>True if the drizzle product exists on disk; False otherwise.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.run_cosmic">
+<span class="sig-name descname"><span class="pre">run_cosmic</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.run_cosmic"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.run_cosmic" title="Link to this definition"></a></dt>
+<dd><p>Run LAcosmic-style cosmic-ray detection (astroscrappy) on SCI extensions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Input FITS path.</p>
+</dd>
+<dt><strong>options</strong><span class="classifier">dict</span></dt><dd><p>Detector block with <code class="docutils literal notranslate"><span class="pre">rdnoise</span></code>, <code class="docutils literal notranslate"><span class="pre">gain</span></code>, <code class="docutils literal notranslate"><span class="pre">saturate</span></code>, <code class="docutils literal notranslate"><span class="pre">sig_clip</span></code>,
+<code class="docutils literal notranslate"><span class="pre">sig_frac</span></code>, and <code class="docutils literal notranslate"><span class="pre">obj_lim</span></code> (see <code class="docutils literal notranslate"><span class="pre">settings.detector_defaults</span></code>).</p>
+</dd>
+<dt><strong>output</strong><span class="classifier">str, optional</span></dt><dd><p>Output path; defaults to overwriting <em>image</em>.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>When <code class="docutils literal notranslate"><span class="pre">--add-crmask</span></code> is set, updates matching DQ extensions or WFPC2 <code class="docutils literal notranslate"><span class="pre">*_c1m</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.run_dolphot">
+<span class="sig-name descname"><span class="pre">run_dolphot</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.run_dolphot"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.run_dolphot" title="Link to this definition"></a></dt>
+<dd><p>Execute DOLPHOT using the prepared parameter and image list.</p>
+<p>Delegates to <code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.primitives.run_dolphot.DolphotPrimitive.run_dolphot()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.sanitize_reference">
+<span class="sig-name descname"><span class="pre">sanitize_reference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">reference</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.sanitize_reference"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.sanitize_reference" title="Link to this definition"></a></dt>
+<dd><p>Normalize a drizzled reference FITS for DOLPHOT (single science HDU, headers).</p>
+<p>Promotes SCI data to PRIMARY when needed, strips COMMENT/HISTORY, applies
+mask-based NaN/median masking, and fills detector calibration keywords.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>reference</strong><span class="classifier">str</span></dt><dd><p>Path to the reference image (updated in place).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>None</dt><dd><p>Returns None if the file is missing.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.sanitize_wfpc2">
+<span class="sig-name descname"><span class="pre">sanitize_wfpc2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.sanitize_wfpc2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.sanitize_wfpc2" title="Link to this definition"></a></dt>
+<dd><p>Rewrite a WFPC2 MEF so PRIMARY and SCI extensions match DOLPHOT expectations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Path to a WFPC2 <code class="docutils literal notranslate"><span class="pre">*_c0m.fits</span></code> file (modified in place).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.split_image_contains">
+<span class="sig-name descname"><span class="pre">split_image_contains</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">coord</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.split_image_contains"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.split_image_contains" title="Link to this definition"></a></dt>
+<dd><p>Return whether a DOLPHOT chip image’s WCS encloses the target sky position.</p>
+<p>Uses linear WCS only (<code class="docutils literal notranslate"><span class="pre">mode='wcs'</span></code>) for robustness near chip edges.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Path to a single-HDU chip file (e.g. <code class="docutils literal notranslate"><span class="pre">*_c0m.chip1.fits</span></code>).</p>
+</dd>
+<dt><strong>coord</strong><span class="classifier">astropy.coordinates.SkyCoord</span></dt><dd><p>Target position.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>bool</dt><dd><p>True if the projected pixel coordinates lie inside the image bounds.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.try_to_get_image">
+<span class="sig-name descname"><span class="pre">try_to_get_image</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.try_to_get_image"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.try_to_get_image" title="Link to this definition"></a></dt>
+<dd><p>Recover a missing exposure from the local archive layout (<code class="docutils literal notranslate"><span class="pre">--archive</span></code>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Destination path for the FITS file.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>bool</dt><dd><p>True if a file was copied from the archive, False otherwise.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123._pipeline.hst123.update_image_wcs">
+<span class="sig-name descname"><span class="pre">update_image_wcs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_db</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/_pipeline.html#hst123.update_image_wcs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123._pipeline.hst123.update_image_wcs" title="Link to this definition"></a></dt>
+<dd><p>Run STScI <code class="docutils literal notranslate"><span class="pre">updatewcs</span></code> on a calibrated image after header hygiene.</p>
+<p>Skips images already marked <code class="docutils literal notranslate"><span class="pre">TWEAKSUC</span></code> or hierarchically aligned. Otherwise
+resolves CRDS paths, optionally calls AstrometryDB (<code class="docutils literal notranslate"><span class="pre">use_db</span></code>), then applies
+<code class="docutils literal notranslate"><span class="pre">fix_hdu_wcs_keys</span></code> and <code class="docutils literal notranslate"><span class="pre">fix_idcscale</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>image</strong><span class="classifier">str</span></dt><dd><p>Path to the FITS file.</p>
+</dd>
+<dt><strong>options</strong><span class="classifier">dict</span></dt><dd><p>Unused legacy parameter (detector defaults come from <code class="docutils literal notranslate"><span class="pre">self.options</span></code>).</p>
+</dd>
+<dt><strong>use_db</strong><span class="classifier">bool, optional</span></dt><dd><p>Forwarded to <code class="xref py py-func docutils literal notranslate"><span class="pre">run_updatewcs()</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>bool or None</dt><dd><p>True on success, None if <code class="docutils literal notranslate"><span class="pre">updatewcs</span></code> raised.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-hst123.utils.options">
+<span id="cli-options-and-redo-helpers"></span><h2>CLI options and redo helpers<a class="headerlink" href="#module-hst123.utils.options" title="Link to this heading"></a></h2>
+<p>CLI options: RA/Dec, work dir, download, tweakreg, drizzle, DOLPHOT, scrape-dolphot.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.options.add_options">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.options.</span></span><span class="sig-name descname"><span class="pre">add_options</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parser</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">usage</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">version</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/options.html#add_options"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.options.add_options" title="Link to this definition"></a></dt>
+<dd><p>Register hst123 arguments on an argparse parser. Returns the parser.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.options.want_redo_astrodrizzle">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.options.</span></span><span class="sig-name descname"><span class="pre">want_redo_astrodrizzle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/options.html#want_redo_astrodrizzle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.options.want_redo_astrodrizzle" title="Link to this definition"></a></dt>
+<dd><p>Return True if AstroDrizzle should overwrite existing drizzle outputs.</p>
+<p>True when <code class="docutils literal notranslate"><span class="pre">--clobber</span></code>, <code class="docutils literal notranslate"><span class="pre">--redo</span></code>, or <code class="docutils literal notranslate"><span class="pre">--redo-astrodrizzle</span></code> is set.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.options.want_redo_astrometry">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.options.</span></span><span class="sig-name descname"><span class="pre">want_redo_astrometry</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/options.html#want_redo_astrometry"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.options.want_redo_astrometry" title="Link to this definition"></a></dt>
+<dd><p>Return True if alignment should not be skipped based on prior success headers.</p>
+<p>True when <code class="docutils literal notranslate"><span class="pre">--clobber</span></code>, <code class="docutils literal notranslate"><span class="pre">--redo</span></code>, or <code class="docutils literal notranslate"><span class="pre">--redo-astrometry</span></code> is set.</p>
+</dd></dl>
+
+</section>
+<section id="module-hst123.utils.paths">
+<span id="path-helpers"></span><h2>Path helpers<a class="headerlink" href="#module-hst123.utils.paths" title="Link to this heading"></a></h2>
+<p>Path helpers for FITS files (stable across <a class="reference external" href="https://docs.python.org/3/library/os.html#os.chdir" title="(in Python v3.14)"><code class="xref py py-func docutils literal notranslate"><span class="pre">os.chdir()</span></code></a>).</p>
+<p>The pipeline changes the working directory to <code class="docutils literal notranslate"><span class="pre">&lt;work-dir&gt;/workspace</span></code> for
+alignment; relative paths must be normalized to absolute before that.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.paths.normalize_fits_path">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.paths.</span></span><span class="sig-name descname"><span class="pre">normalize_fits_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/paths.html#normalize_fits_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.paths.normalize_fits_path" title="Link to this definition"></a></dt>
+<dd><p>Return an absolute, normalized <code class="docutils literal notranslate"><span class="pre">path</span></code> for FITS references.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>path</strong><span class="classifier">str</span></dt><dd><p>User-supplied path; empty string is returned unchanged.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>str</dt><dd><p><code class="docutils literal notranslate"><span class="pre">os.path.normpath</span></code> of the expanded absolute path.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>After alignment, the process cwd is <code class="docutils literal notranslate"><span class="pre">&lt;work-dir&gt;/workspace</span></code> when
+<code class="docutils literal notranslate"><span class="pre">--work-dir</span></code> is set; unresolved relative paths would double-resolve
+(e.g. <code class="docutils literal notranslate"><span class="pre">test_data/foo.fits</span></code> under <code class="docutils literal notranslate"><span class="pre">work_dir</span></code>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.paths.normalize_work_and_raw_dirs">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.paths.</span></span><span class="sig-name descname"><span class="pre">normalize_work_and_raw_dirs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">work_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">raw_dir</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/paths.html#normalize_work_and_raw_dirs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.paths.normalize_work_and_raw_dirs" title="Link to this definition"></a></dt>
+<dd><p>Resolve CLI <code class="docutils literal notranslate"><span class="pre">--work-dir</span></code> and <code class="docutils literal notranslate"><span class="pre">--raw-dir</span></code> to absolute paths.</p>
+<p>Default raw directory is <code class="docutils literal notranslate"><span class="pre">&lt;work-dir&gt;/raw</span></code>. Call once after parsing
+arguments so paths remain valid after <code class="docutils literal notranslate"><span class="pre">os.chdir(work_dir)</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>work_dir</strong><span class="classifier">str or None</span></dt><dd><p><code class="docutils literal notranslate"><span class="pre">--work-dir</span></code> value, or None for current directory.</p>
+</dd>
+<dt><strong>raw_dir</strong><span class="classifier">str or None</span></dt><dd><p><code class="docutils literal notranslate"><span class="pre">--raw-dir</span></code>; if <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;.&quot;</span></code>, or <code class="docutils literal notranslate"><span class="pre">&quot;./&quot;</span></code>, use <code class="docutils literal notranslate"><span class="pre">&lt;work&gt;/raw</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>tuple of str</dt><dd><p><code class="docutils literal notranslate"><span class="pre">(work_abs,</span> <span class="pre">raw_abs)</span></code> absolute paths.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.paths.pipeline_chip_output_dir">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.paths.</span></span><span class="sig-name descname"><span class="pre">pipeline_chip_output_dir</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">work_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/os.html#os.PathLike" title="(in Python v3.14)"><span class="pre">PathLike</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/paths.html#pipeline_chip_output_dir"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.paths.pipeline_chip_output_dir" title="Link to this definition"></a></dt>
+<dd><p>Directory for DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.chipN.fits</span></code> and <code class="docutils literal notranslate"><span class="pre">*.chipN.sky.fits</span></code> (base <code class="docutils literal notranslate"><span class="pre">work_dir</span></code>).</p>
+<p>Chip sidecars are written here even when the parent exposure lives under
+<a class="reference internal" href="#hst123.utils.paths.pipeline_workspace_dir" title="hst123.utils.paths.pipeline_workspace_dir"><code class="xref py py-func docutils literal notranslate"><span class="pre">pipeline_workspace_dir()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.paths.pipeline_workspace_dir">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.paths.</span></span><span class="sig-name descname"><span class="pre">pipeline_workspace_dir</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">work_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/os.html#os.PathLike" title="(in Python v3.14)"><span class="pre">PathLike</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/paths.html#pipeline_workspace_dir"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.paths.pipeline_workspace_dir" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">&lt;work_dir&gt;/workspace</span></code> — calibrated inputs, TweakReg scratch, etc.</p>
+<p>Drizzled stacks (per-epoch <code class="docutils literal notranslate"><span class="pre">*.ut*.drc.fits</span></code> and <code class="docutils literal notranslate"><span class="pre">--drizzle-all</span></code>) are written
+under <code class="docutils literal notranslate"><span class="pre">&lt;work_dir&gt;/drizzle/</span></code>, not here. The main <strong>reference</strong> drizzle
+(<code class="docutils literal notranslate"><span class="pre">*.ref_*.drc.fits</span></code>) stays in <code class="docutils literal notranslate"><span class="pre">work_dir</span></code> root.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>str or None</dt><dd><p>Absolute path, or None if <em>work_dir</em> is missing/empty.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-hst123.utils.stdio">
+<span id="parallel-blas-openmp-guard"></span><h2>Parallel BLAS / OpenMP guard<a class="headerlink" href="#module-hst123.utils.stdio" title="Link to this heading"></a></h2>
+<p>Context managers to silence stdout/stderr during noisy imports or C I/O.</p>
+<p>Use <a class="reference internal" href="#hst123.utils.stdio.suppress_stdout" title="hst123.utils.stdio.suppress_stdout"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout()</span></code></a> for Python-level streams and
+<a class="reference internal" href="#hst123.utils.stdio.suppress_stdout_fd" title="hst123.utils.stdio.suppress_stdout_fd"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout_fd()</span></code></a> when C libraries write to file descriptor 1.</p>
+<p><a class="reference internal" href="#hst123.utils.stdio.limit_blas_threads_when_parallel" title="hst123.utils.stdio.limit_blas_threads_when_parallel"><code class="xref py py-func docutils literal notranslate"><span class="pre">limit_blas_threads_when_parallel()</span></code></a> avoids BLAS/OpenMP oversubscription when
+DrizzlePac uses multiple workers (<code class="docutils literal notranslate"><span class="pre">num_cores</span></code> &gt; 1).</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.stdio.limit_blas_threads_when_parallel">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.stdio.</span></span><span class="sig-name descname"><span class="pre">limit_blas_threads_when_parallel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">num_cores</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Iterator" title="(in Python v3.14)"><span class="pre">Iterator</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/stdio.html#limit_blas_threads_when_parallel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.stdio.limit_blas_threads_when_parallel" title="Link to this definition"></a></dt>
+<dd><p>When <em>num_cores</em> &gt; 1, set common thread env vars to <code class="docutils literal notranslate"><span class="pre">1</span></code> for the duration.</p>
+<p>Multi-worker DrizzlePac plus multi-threaded NumPy/BLAS often oversubscribes
+CPUs; capping worker-local BLAS threads usually improves wall time without
+changing outputs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.stdio.suppress_stdout">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.stdio.</span></span><span class="sig-name descname"><span class="pre">suppress_stdout</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Iterator" title="(in Python v3.14)"><span class="pre">Iterator</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/stdio.html#suppress_stdout"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.stdio.suppress_stdout" title="Link to this definition"></a></dt>
+<dd><p>Redirect <code class="docutils literal notranslate"><span class="pre">sys.stdout</span></code> and <code class="docutils literal notranslate"><span class="pre">sys.stderr</span></code> to <code class="docutils literal notranslate"><span class="pre">os.devnull</span></code> until exit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Yields<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>None</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Does not affect the C runtime <code class="docutils literal notranslate"><span class="pre">stdout</span></code>; see <a class="reference internal" href="#hst123.utils.stdio.suppress_stdout_fd" title="hst123.utils.stdio.suppress_stdout_fd"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout_fd()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.stdio.suppress_stdout_fd">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.stdio.</span></span><span class="sig-name descname"><span class="pre">suppress_stdout_fd</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Iterator" title="(in Python v3.14)"><span class="pre">Iterator</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/stdio.html#suppress_stdout_fd"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.stdio.suppress_stdout_fd" title="Link to this definition"></a></dt>
+<dd><p>Redirect OS file descriptor 1 (stdout) to <code class="docutils literal notranslate"><span class="pre">os.devnull</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Yields<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>None</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>For C extensions (e.g. DrizzlePac <code class="docutils literal notranslate"><span class="pre">photeq</span></code>) that write to the C stdio
+<code class="docutils literal notranslate"><span class="pre">stdout</span></code>. Python <a class="reference internal" href="#hst123.utils.stdio.suppress_stdout" title="hst123.utils.stdio.suppress_stdout"><code class="xref py py-func docutils literal notranslate"><span class="pre">suppress_stdout()</span></code></a> does not catch those writes.
+Stderr (fd 2) is left unchanged so <a class="reference external" href="https://docs.python.org/3/library/logging.html#module-logging" title="(in Python v3.14)"><code class="xref py py-mod docutils literal notranslate"><span class="pre">logging</span></code></a> handlers on stderr still work.</p>
+</dd></dl>
+
+</section>
+<section id="work-directory-cleanup">
+<h2>Work directory cleanup<a class="headerlink" href="#work-directory-cleanup" title="Link to this heading"></a></h2>
+<p>After AstroDrizzle or TweakReg, the pipeline can remove scratch FITS and replay
+external logs into the session log. Use <code class="docutils literal notranslate"><span class="pre">--keep-drizzle-artifacts</span></code> to retain
+intermediates.</p>
+<p id="module-hst123.utils.workdir_cleanup">Relocate or remove drizzlepac / TweakReg scratch files in the work directory.</p>
+<p>Default pipeline behavior keeps the work tree tidy: logs go under <code class="docutils literal notranslate"><span class="pre">logs/</span></code> and
+common intermediate FITS/text files from AstroDrizzle are deleted after a
+successful step. Use <code class="docutils literal notranslate"><span class="pre">--keep-drizzle-artifacts</span></code> to skip this.</p>
+<p>Intermediate names such as <code class="docutils literal notranslate"><span class="pre">single_sci.fits</span></code>, <code class="docutils literal notranslate"><span class="pre">single_wht.fits</span></code>,
+<code class="docutils literal notranslate"><span class="pre">staticMask.fits</span></code>, and <code class="docutils literal notranslate"><span class="pre">drz_med.fits</span></code> are produced by DrizzlePac during
+<code class="docutils literal notranslate"><span class="pre">run_astrodrizzle</span></code>. WFPC2 pipeline scratch files matching
+<code class="docutils literal notranslate"><span class="pre">*hst123drz*_c0m.fits</span></code> / <code class="docutils literal notranslate"><span class="pre">*hst123drz*_c1m.fits</span></code> come from
+<code class="docutils literal notranslate"><span class="pre">wfpc2_astrodrizzle_scratch_paths</span></code> in <code class="docutils literal notranslate"><span class="pre">hst123.utils.astrodrizzle_helpers</span></code>.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.workdir_cleanup.cleanup_after_astrodrizzle">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.workdir_cleanup.</span></span><span class="sig-name descname"><span class="pre">cleanup_after_astrodrizzle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">work_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">log</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/logging.html#logging.Logger" title="(in Python v3.14)"><span class="pre">Logger</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">keep_artifacts</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">base_work_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/os.html#os.PathLike" title="(in Python v3.14)"><span class="pre">PathLike</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/workdir_cleanup.html#cleanup_after_astrodrizzle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.workdir_cleanup.cleanup_after_astrodrizzle" title="Link to this definition"></a></dt>
+<dd><p>After a successful AstroDrizzle run: remove well-known scratch products.</p>
+<p><code class="docutils literal notranslate"><span class="pre">astrodrizzle.log</span></code> is normally written under <code class="docutils literal notranslate"><span class="pre">.hst123_runfiles/</span></code> and
+ingested into the session log (nothing to archive in the work root).</p>
+<p>Matching uses both fixed basenames (legacy drizzle cwd) and globs because
+DrizzlePac often emits <strong>root-prefixed</strong> mask names (e.g. <code class="docutils literal notranslate"><span class="pre">*_crmask.fits</span></code>)
+rather than bare <code class="docutils literal notranslate"><span class="pre">crmask.fits</span></code> in <code class="docutils literal notranslate"><span class="pre">work_dir</span></code>.</p>
+<p>When <code class="docutils literal notranslate"><span class="pre">--drizzle-all</span></code> is used, drizzle products live under
+<code class="docutils literal notranslate"><span class="pre">&lt;base_work_dir&gt;/drizzle/</span></code>. <em>work_dir</em> is typically <code class="docutils literal notranslate"><span class="pre">&lt;base&gt;/workspace</span></code> (the
+AstroDrizzle scratch/output tree); DrizzlePac may also drop <code class="docutils literal notranslate"><span class="pre">staticMask.fits</span></code>
+and similar files in the <strong>base</strong> work directory, so pass <em>base_work_dir</em> to
+scrub both trees.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.workdir_cleanup.cleanup_after_tweakreg">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.workdir_cleanup.</span></span><span class="sig-name descname"><span class="pre">cleanup_after_tweakreg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">work_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">log</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/logging.html#logging.Logger" title="(in Python v3.14)"><span class="pre">Logger</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">keep_artifacts</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/workdir_cleanup.html#cleanup_after_tweakreg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.workdir_cleanup.cleanup_after_tweakreg" title="Link to this definition"></a></dt>
+<dd><p>After TweakReg: replay shift / headerlet text into the session log, then
+remove those files (no separate log copies under <code class="docutils literal notranslate"><span class="pre">logs/</span></code> unless
+<em>keep_artifacts</em>). Also remove shifts WCS helper and extracted headerlet FITS.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.workdir_cleanup.remove_files_matching_globs">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.workdir_cleanup.</span></span><span class="sig-name descname"><span class="pre">remove_files_matching_globs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">work_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/os.html#os.PathLike" title="(in Python v3.14)"><span class="pre">PathLike</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">patterns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Sequence" title="(in Python v3.14)"><span class="pre">Sequence</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">log</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/logging.html#logging.Logger" title="(in Python v3.14)"><span class="pre">Logger</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_each_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/workdir_cleanup.html#remove_files_matching_globs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.workdir_cleanup.remove_files_matching_globs" title="Link to this definition"></a></dt>
+<dd><p>Remove regular files under <code class="docutils literal notranslate"><span class="pre">work_dir</span></code> matching each glob in <code class="docutils literal notranslate"><span class="pre">patterns</span></code>.</p>
+<p>Patterns are joined with <code class="docutils literal notranslate"><span class="pre">work_dir</span></code> (not the process CWD), so cleanup
+finds products under <code class="docutils literal notranslate"><span class="pre">--work-dir</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">test_data/*.drc.noise.fits</span></code>)
+regardless of where the CLI was launched.</p>
+<p>The same path is only removed once even if multiple patterns match.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>work_dir</strong></dt><dd><p>Working directory containing pipeline outputs.</p>
+</dd>
+<dt><strong>patterns</strong></dt><dd><p>Glob patterns relative to <code class="docutils literal notranslate"><span class="pre">work_dir</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">*drc.noise.fits</span></code>).</p>
+</dd>
+<dt><strong>log</strong></dt><dd><p>If set and <code class="docutils literal notranslate"><span class="pre">log_each_path</span></code> is True, <code class="docutils literal notranslate"><span class="pre">log.info</span></code> each removed file.</p>
+</dd>
+<dt><strong>log_each_path</strong></dt><dd><p>Log every removal (default False for silent bulk deletes).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>int</dt><dd><p>Number of files removed.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.workdir_cleanup.remove_superseded_instrument_mask_reference_drizzle">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.workdir_cleanup.</span></span><span class="sig-name descname"><span class="pre">remove_superseded_instrument_mask_reference_drizzle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">logical_drc_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/os.html#os.PathLike" title="(in Python v3.14)"><span class="pre">PathLike</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">log</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/logging.html#logging.Logger" title="(in Python v3.14)"><span class="pre">Logger</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">keep_artifacts</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/workdir_cleanup.html#remove_superseded_instrument_mask_reference_drizzle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.workdir_cleanup.remove_superseded_instrument_mask_reference_drizzle" title="Link to this definition"></a></dt>
+<dd><p>Remove the instrument-only reference drizzle produced when <code class="docutils literal notranslate"><span class="pre">n_input</span> <span class="pre">&lt;</span> <span class="pre">3</span></code>.</p>
+<p><code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.hst123.pick_reference()</span></code> first drizzles to <code class="docutils literal notranslate"><span class="pre">{inst}.ref.drc.fits</span></code>
+(e.g. <code class="docutils literal notranslate"><span class="pre">acs_wfc_full.ref.drc.fits</span></code>) to build static masks, then drizzles again
+to the filter-named product (e.g. <code class="docutils literal notranslate"><span class="pre">acs.f814w.ref_0001.drc.fits</span></code>). The first
+file is interstitial and should be deleted after the final reference succeeds.</p>
+</dd></dl>
+
+</section>
+<section id="module-hst123.utils.dolphot_catalog_hdf5">
+<span id="dolphot-catalog-hdf5"></span><h2>DOLPHOT catalog → HDF5<a class="headerlink" href="#module-hst123.utils.dolphot_catalog_hdf5" title="Link to this heading"></a></h2>
+<p>Parse DOLPHOT multi-extension output (catalog, <code class="docutils literal notranslate"><span class="pre">.columns</span></code>, <code class="docutils literal notranslate"><span class="pre">.param</span></code>, <code class="docutils literal notranslate"><span class="pre">.data</span></code>,
+<code class="docutils literal notranslate"><span class="pre">.info</span></code>, <code class="docutils literal notranslate"><span class="pre">.warnings</span></code>) and export a single HDF5 file with a labeled catalog plus metadata.</p>
+<p>Designed against DOLPHOT 3.x text products: whitespace-separated numeric <code class="docutils literal notranslate"><span class="pre">dpXXXX</span></code> catalog,
+one descriptive line per column in <code class="docutils literal notranslate"><span class="pre">dpXXXX.columns</span></code>, and sidecar metadata files.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">DolphotColumn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index_1based</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_0based</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">description</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">raw_line</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#DolphotColumn"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="Link to this definition"></a></dt>
+<dd><p>One row from a DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> file.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.description">
+<span class="sig-name descname"><span class="pre">description</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.description" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_0based">
+<span class="sig-name descname"><span class="pre">index_0based</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_0based" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_1based">
+<span class="sig-name descname"><span class="pre">index_1based</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.index_1based" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.DolphotColumn.raw_line">
+<span class="sig-name descname"><span class="pre">raw_line</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn.raw_line" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.dolphot_columns_to_astropy_table">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">dolphot_columns_to_astropy_table</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">catalog</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#dolphot_columns_to_astropy_table"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.dolphot_columns_to_astropy_table" title="Link to this definition"></a></dt>
+<dd><p>Build an <a class="reference external" href="https://docs.astropy.org/en/stable/api/astropy.table.Table.html#astropy.table.Table" title="(in Astropy v7.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">astropy.table.Table</span></code></a> with descriptive column names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>catalog</strong><span class="classifier">ndarray</span></dt><dd><p>Output of <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array" title="hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_dolphot_catalog_array()</span></code></a>.</p>
+</dd>
+<dt><strong>columns</strong><span class="classifier">list of DolphotColumn</span></dt><dd><p>From <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file" title="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file"><code class="xref py py-func docutils literal notranslate"><span class="pre">parse_dolphot_columns_file()</span></code></a>.</p>
+</dd>
+<dt><strong>names</strong><span class="classifier">list of str, optional</span></dt><dd><p>HDF5-safe names; defaults to <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names" title="hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names"><code class="xref py py-func docutils literal notranslate"><span class="pre">unique_hdf5_column_names()</span></code></a>.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.find_column_index_0based">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">find_column_index_0based</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">image</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#find_column_index_0based"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.find_column_index_0based" title="Link to this definition"></a></dt>
+<dd><p>Match DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> semantics used by
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">hst123.primitives.scrape_dolphot.ScrapeDolphotPrimitive.get_dolphot_column()</span></code>.</p>
+<p><em>key</em> must appear in the column description. If <em>image</em> is non-empty, it must
+appear in the description (after stripping a <code class="docutils literal notranslate"><span class="pre">.fits</span></code> suffix). If <em>image</em> is
+empty, any column whose description contains <em>key</em> may match—the first such
+column is returned (same as substring <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">in</span> <span class="pre">line</span></code> being true for every line).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.group_param_by_image">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">group_param_by_image</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">param</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#group_param_by_image"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.group_param_by_image" title="Link to this definition"></a></dt>
+<dd><p>Split flat <code class="docutils literal notranslate"><span class="pre">imgNNNN_*</span></code> keys into per-image dicts (<code class="docutils literal notranslate"><span class="pre">img0001</span></code>, …).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">load_dolphot_catalog_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#load_dolphot_catalog_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.load_dolphot_catalog_array" title="Link to this definition"></a></dt>
+<dd><p>Load the main DOLPHOT catalog (numeric rows, whitespace-separated).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>path</strong><span class="classifier">path-like</span></dt><dd><p>Path to <code class="docutils literal notranslate"><span class="pre">dpXXXX</span></code> (no extension), same as <code class="docutils literal notranslate"><span class="pre">dolphot['base']</span></code> in the pipeline.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>numpy.ndarray</dt><dd><p>2-D float array of shape (n_sources, n_columns).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>Uses <a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.loadtxt.html#numpy.loadtxt" title="(in NumPy v2.4)"><code class="xref py py-func docutils literal notranslate"><span class="pre">numpy.loadtxt()</span></code></a>. Scraping uses a single load plus vectorized
+filtering (see <code class="xref py py-mod docutils literal notranslate"><span class="pre">hst123.primitives.scrape_dolphot</span></code>) so the catalog is
+read once per scrape.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.merge_image_metadata">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">merge_image_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">param</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">info</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">warnings</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Mapping" title="(in Python v3.14)"><span class="pre">Mapping</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#merge_image_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.merge_image_metadata" title="Link to this definition"></a></dt>
+<dd><p>Combine parsed sidecars into one JSON-serializable tree keyed by <code class="docutils literal notranslate"><span class="pre">img0000</span></code> .. <code class="docutils literal notranslate"><span class="pre">imgNNNN</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_column_index_and_description">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_column_index_and_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">line</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_column_index_and_description"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_column_index_and_description" title="Link to this definition"></a></dt>
+<dd><p>Parse a single <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> line of the form <code class="docutils literal notranslate"><span class="pre">N.</span> <span class="pre">description</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>(1-based index, description) or None if the line does not match.</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_columns_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_columns_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_columns_file" title="Link to this definition"></a></dt>
+<dd><p>Read a DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> file into structured column definitions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>path</strong><span class="classifier">path-like</span></dt><dd><p>Path to <code class="docutils literal notranslate"><span class="pre">dpXXXX.columns</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>list of DolphotColumn</dt><dd><p>One entry per line, in file order (column 1 .. N).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_data_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_data_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_data_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_data_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.data</span></code>: WCS, alignment iteration counts, PSF quality, aperture-correction stats.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_info_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_info_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_info_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_info_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.info</span></code>: MJD per input image, limits, filter/exptime lines, alignment, apcor.</p>
+<p>Structure varies slightly by instrument; unknown lines are kept in <code class="docutils literal notranslate"><span class="pre">extra_lines</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_param_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_param_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_param_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_param_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.param</span></code> (<code class="docutils literal notranslate"><span class="pre">key</span> <span class="pre">=</span> <span class="pre">value</span></code> lines, DOLPHOT style).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.parse_dolphot_warnings_file">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">parse_dolphot_warnings_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#parse_dolphot_warnings_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.parse_dolphot_warnings_file" title="Link to this definition"></a></dt>
+<dd><p>Parse <code class="docutils literal notranslate"><span class="pre">dpXXXX.warnings</span></code> into all lines and optional buckets by image path.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.read_dolphot_catalog_hdf5">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">read_dolphot_catalog_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">photometry_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'photometry'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#read_dolphot_catalog_hdf5"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.read_dolphot_catalog_hdf5" title="Link to this definition"></a></dt>
+<dd><p>Read back a table written by <a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5" title="hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5"><code class="xref py py-func docutils literal notranslate"><span class="pre">write_dolphot_catalog_hdf5()</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>astropy.table.Table</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">unique_hdf5_column_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#hst123.utils.dolphot_catalog_hdf5.DolphotColumn" title="hst123.utils.dolphot_catalog_hdf5.DolphotColumn"><span class="pre">DolphotColumn</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#unique_hdf5_column_names"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.unique_hdf5_column_names" title="Link to this definition"></a></dt>
+<dd><p>Return safe column names, de-duplicated with numeric suffixes if needed.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5">
+<span class="sig-prename descclassname"><span class="pre">hst123.utils.dolphot_catalog_hdf5.</span></span><span class="sig-name descname"><span class="pre">write_dolphot_catalog_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">out_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">base</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">photometry_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'photometry'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_raw_sidecars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compression</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dolphot_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_dolphot_directory_text</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span></span><a class="reference internal" href="_modules/hst123/utils/dolphot_catalog_hdf5.html#write_dolphot_catalog_hdf5"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.utils.dolphot_catalog_hdf5.write_dolphot_catalog_hdf5" title="Link to this definition"></a></dt>
+<dd><p>Write one HDF5 file with the full DOLPHOT catalog and metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>out_path</strong><span class="classifier">path-like</span></dt><dd><p>Output <code class="docutils literal notranslate"><span class="pre">.h5</span></code> file.</p>
+</dd>
+<dt><strong>base</strong><span class="classifier">path-like</span></dt><dd><p>DOLPHOT output base path <strong>without extension</strong> (same as pipeline <code class="docutils literal notranslate"><span class="pre">dolphot['base']</span></code>).</p>
+</dd>
+<dt><strong>photometry_path</strong><span class="classifier">str</span></dt><dd><p>HDF5 path for the <a class="reference external" href="https://docs.astropy.org/en/stable/api/astropy.table.Table.html#astropy.table.Table" title="(in Astropy v7.2)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Table</span></code></a> (Astropy default metadata).</p>
+</dd>
+<dt><strong>include_raw_sidecars</strong><span class="classifier">bool</span></dt><dd><p>If True, store UTF-8 text of <code class="docutils literal notranslate"><span class="pre">.param</span></code>, <code class="docutils literal notranslate"><span class="pre">.info</span></code>, <code class="docutils literal notranslate"><span class="pre">.data</span></code>, <code class="docutils literal notranslate"><span class="pre">.warnings</span></code>,
+and <code class="docutils literal notranslate"><span class="pre">.columns</span></code> as datasets under <code class="docutils literal notranslate"><span class="pre">metadata/raw/</span></code>.</p>
+</dd>
+<dt><strong>compression</strong><span class="classifier">bool</span></dt><dd><p>If True, use gzip compression on the table (requires Astropy + h5py).</p>
+</dd>
+<dt><strong>dolphot_dir</strong><span class="classifier">path-like, optional</span></dt><dd><p>Directory scanned for a full file manifest (default: <code class="docutils literal notranslate"><span class="pre">base.parent</span></code>, i.e.
+the DOLPHOT output folder such as <code class="docutils literal notranslate"><span class="pre">&lt;work&gt;/dolphot/</span></code>). Every file path,
+size, and mtime are stored. Optional text embedding under
+<code class="docutils literal notranslate"><span class="pre">metadata/dolphot_directory/text_embed/</span></code> when <em>embed_dolphot_directory_text</em>
+is True.</p>
+</dd>
+<dt><strong>embed_dolphot_directory_text</strong><span class="classifier">bool, optional</span></dt><dd><p>If True, embed small UTF-8 text files from <em>dolphot_dir</em> (can be slow for
+large trees). Default False (manifest only).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt>pathlib.Path</dt><dd><p>Path to the written file.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>ImportError</dt><dd><p>If <code class="docutils literal notranslate"><span class="pre">h5py</span></code> is not installed.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-hst123.datamodels.hst_model">
+<span id="data-model"></span><h2>Data model<a class="headerlink" href="#module-hst123.datamodels.hst_model" title="Link to this heading"></a></h2>
+<p>Lightweight HST file handle with path properties and metadata (dict-based).</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hst123.datamodels.hst_model.HSTModel">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">hst123.datamodels.hst_model.</span></span><span class="sig-name descname"><span class="pre">HSTModel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filepath</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/datamodels/hst_model.html#HSTModel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.datamodels.hst_model.HSTModel" title="Link to this definition"></a></dt>
+<dd><p>Base class for associating a FITS path with metadata.</p>
+<p>Subclasses may extend <a class="reference internal" href="#hst123.datamodels.hst_model.HSTModel.on_init" title="hst123.datamodels.hst_model.HSTModel.on_init"><code class="xref py py-meth docutils literal notranslate"><span class="pre">on_init()</span></code></a> for additional setup.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>filepath</strong><span class="classifier">str or None</span></dt><dd><p>Path to an HST data file, or None for in-memory-only use.</p>
+</dd>
+<dt><strong>meta</strong><span class="classifier">dict, optional</span></dt><dd><p>Initial metadata merged into <code class="xref py py-attr docutils literal notranslate"><span class="pre">meta</span></code>.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Attributes<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt><strong>filepath</strong><span class="classifier">str or None</span></dt><dd><p>Path passed at construction.</p>
+</dd>
+<dt><strong>meta</strong><span class="classifier">dict</span></dt><dd><p>Metadata dictionary (e.g. <code class="docutils literal notranslate"><span class="pre">model_type</span></code>, <code class="docutils literal notranslate"><span class="pre">filename</span></code>).</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<dl class="py property">
+<dt class="sig sig-object py" id="hst123.datamodels.hst_model.HSTModel.basename">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">basename</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><a class="headerlink" href="#hst123.datamodels.hst_model.HSTModel.basename" title="Link to this definition"></a></dt>
+<dd><p>Base filename of <code class="xref py py-attr docutils literal notranslate"><span class="pre">filepath</span></code>, or None if no path is set.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>str or None</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="hst123.datamodels.hst_model.HSTModel.dirname">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">dirname</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><a class="headerlink" href="#hst123.datamodels.hst_model.HSTModel.dirname" title="Link to this definition"></a></dt>
+<dd><p>Directory containing <code class="xref py py-attr docutils literal notranslate"><span class="pre">filepath</span></code>, or None if no path is set.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>str or None</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123.datamodels.hst_model.HSTModel.init_meta">
+<span class="sig-name descname"><span class="pre">init_meta</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/datamodels/hst_model.html#HSTModel.init_meta"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.datamodels.hst_model.HSTModel.init_meta" title="Link to this definition"></a></dt>
+<dd><p>Reset metadata and merge optional user values.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>meta</strong><span class="classifier">dict, optional</span></dt><dd><p>Keys merged into <code class="xref py py-attr docutils literal notranslate"><span class="pre">meta</span></code>.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hst123.datamodels.hst_model.HSTModel.on_init">
+<span class="sig-name descname"><span class="pre">on_init</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/hst123/datamodels/hst_model.html#HSTModel.on_init"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.datamodels.hst_model.HSTModel.on_init" title="Link to this definition"></a></dt>
+<dd><p>Hook invoked after <a class="reference internal" href="#hst123.datamodels.hst_model.HSTModel.init_meta" title="hst123.datamodels.hst_model.HSTModel.init_meta"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_meta()</span></code></a>; default sets model type and filename.</p>
+<p>Override in subclasses for custom initialization.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="primitives-base-class">
+<h2>Primitives base class<a class="headerlink" href="#primitives-base-class" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="hst123.primitives.base.BasePrimitive">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">hst123.primitives.base.</span></span><span class="sig-name descname"><span class="pre">BasePrimitive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pipeline</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/hst123/primitives/base.html#BasePrimitive"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#hst123.primitives.base.BasePrimitive" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Attach to the pipeline and share options/state via <code class="docutils literal notranslate"><span class="pre">self._p</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt><strong>pipeline</strong></dt><dd><p>The running <a class="reference internal" href="#hst123._pipeline.hst123" title="hst123._pipeline.hst123"><code class="xref py py-class docutils literal notranslate"><span class="pre">hst123</span></code></a> instance (required).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even">Attributes<span class="colon">:</span></dt>
+<dd class="field-even"><dl class="simple">
+<dt><strong>_p</strong></dt><dd><p>Same object as <a class="reference internal" href="#hst123.primitives.base.BasePrimitive.pipeline" title="hst123.primitives.base.BasePrimitive.pipeline"><code class="xref py py-attr docutils literal notranslate"><span class="pre">pipeline</span></code></a>.</p>
+</dd>
+<dt><strong>_log</strong></dt><dd><p>Logger named after the primitive module (<code class="docutils literal notranslate"><span class="pre">hst123.primitives…</span></code>).</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>TypeError</dt><dd><p>If <code class="docutils literal notranslate"><span class="pre">pipeline</span></code> is None.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<dl class="py property">
+<dt class="sig sig-object py" id="hst123.primitives.base.BasePrimitive.pipeline">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">pipeline</span></span><a class="headerlink" href="#hst123.primitives.base.BasePrimitive.pipeline" title="Link to this definition"></a></dt>
+<dd><p>Pipeline instance (alias of <code class="docutils literal notranslate"><span class="pre">self._p</span></code>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><dl class="simple">
+<dt>object</dt><dd></dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="zeropoints.html" class="btn btn-neutral float-left" title="Zero points" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, C. D. Kilpatrick.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

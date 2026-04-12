@@ -1,0 +1,482 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>hst123.utils.workdir_cleanup &mdash; hst123 1.0.1.dev127+g5eee3491a</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" href="../../../_static/hst123-docs.css" type="text/css" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=66f05667"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            hst123
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../user_guide.html">User guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../zeropoints.html">Zero points</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">hst123</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">hst123.utils.workdir_cleanup</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for hst123.utils.workdir_cleanup</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Relocate or remove drizzlepac / TweakReg scratch files in the work directory.</span>
+
+<span class="sd">Default pipeline behavior keeps the work tree tidy: logs go under ``logs/`` and</span>
+<span class="sd">common intermediate FITS/text files from AstroDrizzle are deleted after a</span>
+<span class="sd">successful step. Use ``--keep-drizzle-artifacts`` to skip this.</span>
+
+<span class="sd">Intermediate names such as ``single_sci.fits``, ``single_wht.fits``,</span>
+<span class="sd">``staticMask.fits``, and ``drz_med.fits`` are produced by DrizzlePac during</span>
+<span class="sd">``run_astrodrizzle``. WFPC2 pipeline scratch files matching</span>
+<span class="sd">``*hst123drz*_c0m.fits`` / ``*hst123drz*_c1m.fits`` come from</span>
+<span class="sd">``wfpc2_astrodrizzle_scratch_paths`` in ``hst123.utils.astrodrizzle_helpers``.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Sequence</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+
+
+<div class="viewcode-block" id="remove_files_matching_globs">
+<a class="viewcode-back" href="../../../api.html#hst123.utils.workdir_cleanup.remove_files_matching_globs">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">remove_files_matching_globs</span><span class="p">(</span>
+    <span class="n">work_dir</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">patterns</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">log</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">Logger</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">log_each_path</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Remove regular files under ``work_dir`` matching each glob in ``patterns``.</span>
+
+<span class="sd">    Patterns are joined with ``work_dir`` (not the process CWD), so cleanup</span>
+<span class="sd">    finds products under ``--work-dir`` (e.g. ``test_data/*.drc.noise.fits``)</span>
+<span class="sd">    regardless of where the CLI was launched.</span>
+
+<span class="sd">    The same path is only removed once even if multiple patterns match.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    work_dir</span>
+<span class="sd">        Working directory containing pipeline outputs.</span>
+<span class="sd">    patterns</span>
+<span class="sd">        Glob patterns relative to ``work_dir`` (e.g. ``*drc.noise.fits``).</span>
+<span class="sd">    log</span>
+<span class="sd">        If set and ``log_each_path`` is True, ``log.info`` each removed file.</span>
+<span class="sd">    log_each_path</span>
+<span class="sd">        Log every removal (default False for silent bulk deletes).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    int</span>
+<span class="sd">        Number of files removed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">wd</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">fspath</span><span class="p">(</span><span class="n">work_dir</span><span class="p">)))</span>
+    <span class="n">removed</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">seen</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">patterns</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="n">pattern</span><span class="p">)):</span>
+            <span class="n">ap</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">ap</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">ap</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">ap</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">ap</span><span class="p">)</span>
+                <span class="n">removed</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="n">log</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">log_each_path</span><span class="p">:</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Removing file: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">ap</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">log</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Could not remove </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">ap</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">removed</span></div>
+
+
+
+<span class="c1"># Exact basenames often left in the work directory (cwd during drizzle) or next</span>
+<span class="c1"># to the drizzle output (e.g. ``work_dir/drizzle/`` when ``--drizzle-all``).</span>
+<span class="c1"># ``single_sci.fits`` / ``single_wht.fits``: separation-step intermediates from</span>
+<span class="c1"># DrizzlePac during :func:`drizzlepac.astrodrizzle.AstroDrizzle`.</span>
+<span class="n">_INTERSTITIAL_EXACT</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">(</span>
+    <span class="p">{</span>
+        <span class="s2">&quot;staticMask.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;drz_med.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;drz.mask.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;drz.weight.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;catalog.coo&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;crclean.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;crmask.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;dqmask.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;final_mask.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;single_mask.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;single_sci.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;single_wht.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;blt.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;sci1.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;sci2.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;shifts_wcs.fits&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;skymask_cat&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+<span class="p">)</span>
+
+<span class="c1"># Glob patterns relative to work_dir (headerlets; drizzlepac temp FITS).</span>
+<span class="c1"># DrizzlePac often writes root-prefixed names (e.g. ``wfpc2..._1_staticMask.fits``),</span>
+<span class="c1"># not only the legacy bare basenames in ``_INTERSTITIAL_EXACT``.</span>
+<span class="n">_INTERSTITIAL_GLOBS</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">&quot;*_hlet.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*drztmp*.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*_skymatch_mask_*.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*staticMask.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*StaticMask.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*drz_med.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.drz.mask.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.drz.weight.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*crmask.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*dqmask.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*final_mask.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*single_mask.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*single_sci.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*single_wht.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*blt.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*crclean.fits&quot;</span><span class="p">,</span>
+    <span class="c1"># WFPC2 scratch copies beside inputs: ``wfpc2_astrodrizzle_scratch_paths``</span>
+    <span class="c1"># in ``hst123.utils.astrodrizzle_helpers``.</span>
+    <span class="s2">&quot;*hst123drz*_c0m.fits&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*hst123drz*_c1m.fits&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_logs_dir</span><span class="p">(</span><span class="n">work_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">work_dir</span><span class="p">,</span> <span class="s2">&quot;logs&quot;</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_archive_file</span><span class="p">(</span><span class="n">work_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">basename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">log</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">Logger</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Move ``work_dir/basename`` into ``work_dir/logs/`` with a timestamp suffix.&quot;&quot;&quot;</span>
+    <span class="n">src</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">work_dir</span><span class="p">,</span> <span class="n">basename</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">src</span><span class="p">):</span>
+        <span class="k">return</span>
+    <span class="n">logs</span> <span class="o">=</span> <span class="n">_logs_dir</span><span class="p">(</span><span class="n">work_dir</span><span class="p">)</span>
+    <span class="n">root</span><span class="p">,</span> <span class="n">ext</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">basename</span><span class="p">)</span>
+    <span class="n">stamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y%m</span><span class="si">%d</span><span class="s2">T%H%M%S&quot;</span><span class="p">)</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">root</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">stamp</span><span class="si">}{</span><span class="n">ext</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">ext</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">root</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">stamp</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">dst</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">logs</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+    <span class="n">shutil</span><span class="o">.</span><span class="n">move</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dst</span><span class="p">)</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Archived pipeline sidecar file: </span><span class="si">%s</span><span class="s2"> -&gt; </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">dst</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="remove_superseded_instrument_mask_reference_drizzle">
+<a class="viewcode-back" href="../../../api.html#hst123.utils.workdir_cleanup.remove_superseded_instrument_mask_reference_drizzle">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">remove_superseded_instrument_mask_reference_drizzle</span><span class="p">(</span>
+    <span class="n">logical_drc_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">log</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">Logger</span><span class="p">,</span>
+    <span class="n">keep_artifacts</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Remove the instrument-only reference drizzle produced when ``n_input &lt; 3``.</span>
+
+<span class="sd">    :meth:`hst123.hst123.pick_reference` first drizzles to ``{inst}.ref.drc.fits``</span>
+<span class="sd">    (e.g. ``acs_wfc_full.ref.drc.fits``) to build static masks, then drizzles again</span>
+<span class="sd">    to the filter-named product (e.g. ``acs.f814w.ref_0001.drc.fits``). The first</span>
+<span class="sd">    file is interstitial and should be deleted after the final reference succeeds.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">keep_artifacts</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">logical_drc_path</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">drc</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">fspath</span><span class="p">(</span><span class="n">logical_drc_path</span><span class="p">)))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">drc</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;.drc.fits&quot;</span><span class="p">):</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Skip interstitial ref removal (not .drc.fits): </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">drc</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">hst123.utils.astrodrizzle_helpers</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+        <span class="n">drizzle_canonical_weight_mask_paths</span><span class="p">,</span>
+        <span class="n">drizzle_sidecar_paths</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">hst123.utils.astrodrizzle_paths</span><span class="w"> </span><span class="kn">import</span> <span class="n">logical_driz_to_internal_astrodrizzle</span>
+
+    <span class="n">internal</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">logical_driz_to_internal_astrodrizzle</span><span class="p">(</span><span class="n">drc</span><span class="p">))</span>
+    <span class="n">candidates</span> <span class="o">=</span> <span class="p">[</span><span class="n">drc</span><span class="p">,</span> <span class="n">internal</span><span class="p">]</span>
+    <span class="n">sci</span><span class="p">,</span> <span class="n">wht</span><span class="p">,</span> <span class="n">ctx</span> <span class="o">=</span> <span class="n">drizzle_sidecar_paths</span><span class="p">(</span><span class="n">internal</span><span class="p">)</span>
+    <span class="n">candidates</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">sci</span><span class="p">,</span> <span class="n">wht</span><span class="p">,</span> <span class="n">ctx</span><span class="p">])</span>
+    <span class="n">candidates</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">drizzle_canonical_weight_mask_paths</span><span class="p">(</span><span class="n">internal</span><span class="p">))</span>
+    <span class="c1"># drizzlepac median product: ``{root}_med.fits`` with root ``*.drz``</span>
+    <span class="k">if</span> <span class="n">internal</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;.fits&quot;</span><span class="p">):</span>
+        <span class="n">candidates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">internal</span><span class="p">[:</span><span class="o">-</span><span class="mi">5</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;_med.fits&quot;</span><span class="p">)</span>
+
+    <span class="n">removed</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">seen</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">candidates</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">p</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+            <span class="n">removed</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">p</span><span class="p">))</span>
+        <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Could not remove interstitial ref drizzle </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">removed</span><span class="p">:</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="s2">&quot;Removed superseded instrument-mask reference drizzle (</span><span class="si">%d</span><span class="s2"> file(s)): </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="nb">len</span><span class="p">(</span><span class="n">removed</span><span class="p">),</span>
+            <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">removed</span><span class="p">)),</span>
+        <span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_remove_interstitial_drizzle_scratch_files</span><span class="p">(</span>
+    <span class="n">directory</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">log</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">Logger</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Delete DrizzlePac / pipeline scratch FITS and sidecar text under *directory*.</span>
+
+<span class="sd">    *directory* must exist; callers pass ``work_dir`` and optionally</span>
+<span class="sd">    ``work_dir/drizzle`` (``--drizzle-all`` output root) because AstroDrizzle</span>
+<span class="sd">    writes intermediates relative to CWD and beside the output path.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">removed</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">_INTERSTITIAL_EXACT</span><span class="p">:</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">directory</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+                <span class="n">removed</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Could not remove </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">_INTERSTITIAL_GLOBS</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">directory</span><span class="p">,</span> <span class="n">pattern</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+                <span class="n">removed</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">path</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Could not remove </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">removed</span>
+
+
+<div class="viewcode-block" id="cleanup_after_astrodrizzle">
+<a class="viewcode-back" href="../../../api.html#hst123.utils.workdir_cleanup.cleanup_after_astrodrizzle">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cleanup_after_astrodrizzle</span><span class="p">(</span>
+    <span class="n">work_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">log</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">Logger</span><span class="p">,</span>
+    <span class="n">keep_artifacts</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">base_work_dir</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    After a successful AstroDrizzle run: remove well-known scratch products.</span>
+
+<span class="sd">    ``astrodrizzle.log`` is normally written under ``.hst123_runfiles/`` and</span>
+<span class="sd">    ingested into the session log (nothing to archive in the work root).</span>
+
+<span class="sd">    Matching uses both fixed basenames (legacy drizzle cwd) and globs because</span>
+<span class="sd">    DrizzlePac often emits **root-prefixed** mask names (e.g. ``*_crmask.fits``)</span>
+<span class="sd">    rather than bare ``crmask.fits`` in ``work_dir``.</span>
+
+<span class="sd">    When ``--drizzle-all`` is used, drizzle products live under</span>
+<span class="sd">    ``&lt;base_work_dir&gt;/drizzle/``. *work_dir* is typically ``&lt;base&gt;/workspace`` (the</span>
+<span class="sd">    AstroDrizzle scratch/output tree); DrizzlePac may also drop ``staticMask.fits``</span>
+<span class="sd">    and similar files in the **base** work directory, so pass *base_work_dir* to</span>
+<span class="sd">    scrub both trees.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">keep_artifacts</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">work_dir</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">wd</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">work_dir</span><span class="p">))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">wd</span><span class="p">):</span>
+        <span class="k">return</span>
+
+    <span class="n">_archive_file</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="s2">&quot;astrodrizzle.log&quot;</span><span class="p">,</span> <span class="n">log</span><span class="p">)</span>
+
+    <span class="n">scan_dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">wd</span><span class="p">]</span>
+    <span class="n">d_sub</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="s2">&quot;drizzle&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">d_sub</span><span class="p">):</span>
+        <span class="n">scan_dirs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">d_sub</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">base_work_dir</span><span class="p">:</span>
+        <span class="n">bw</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">fspath</span><span class="p">(</span><span class="n">base_work_dir</span><span class="p">)))</span>
+        <span class="k">if</span> <span class="n">bw</span> <span class="o">!=</span> <span class="n">wd</span><span class="p">:</span>
+            <span class="n">scan_dirs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">bw</span><span class="p">)</span>
+            <span class="n">bd</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">bw</span><span class="p">,</span> <span class="s2">&quot;drizzle&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">bd</span><span class="p">):</span>
+                <span class="n">scan_dirs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">bd</span><span class="p">)</span>
+
+    <span class="c1"># De-duplicate (workspace/drizzle should not appear when drizzle/ is only under base)</span>
+    <span class="n">seen_dir</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">uniq_dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">scan_dirs</span><span class="p">:</span>
+        <span class="n">ad</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">ad</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">seen_dir</span> <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">ad</span><span class="p">):</span>
+            <span class="n">seen_dir</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">ad</span><span class="p">)</span>
+            <span class="n">uniq_dirs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ad</span><span class="p">)</span>
+
+    <span class="n">removed</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">uniq_dirs</span><span class="p">:</span>
+        <span class="n">removed</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">_remove_interstitial_drizzle_scratch_files</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="n">log</span><span class="p">))</span>
+
+    <span class="k">if</span> <span class="n">removed</span><span class="p">:</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="s2">&quot;Removed </span><span class="si">%d</span><span class="s2"> drizzle/tweakreg scratch file(s): </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="nb">len</span><span class="p">(</span><span class="n">removed</span><span class="p">),</span>
+            <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">removed</span><span class="p">))[:</span><span class="mi">20</span><span class="p">])</span>
+            <span class="o">+</span> <span class="p">(</span><span class="s2">&quot; …&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">removed</span><span class="p">))</span> <span class="o">&gt;</span> <span class="mi">20</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="cleanup_after_tweakreg">
+<a class="viewcode-back" href="../../../api.html#hst123.utils.workdir_cleanup.cleanup_after_tweakreg">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cleanup_after_tweakreg</span><span class="p">(</span>
+    <span class="n">work_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">log</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">Logger</span><span class="p">,</span>
+    <span class="n">keep_artifacts</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    After TweakReg: replay shift / headerlet text into the session log, then</span>
+<span class="sd">    remove those files (no separate log copies under ``logs/`` unless</span>
+<span class="sd">    *keep_artifacts*). Also remove shifts WCS helper and extracted headerlet FITS.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">keep_artifacts</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">work_dir</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">wd</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">work_dir</span><span class="p">))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">wd</span><span class="p">):</span>
+        <span class="k">return</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">hst123.utils.logging</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span><span class="p">,</span> <span class="n">ingest_text_file_to_logger</span>
+
+    <span class="n">tr_detail</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;hst123.tweakreg&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_ingest_and_remove</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+            <span class="k">return</span>
+        <span class="n">ingest_text_file_to_logger</span><span class="p">(</span>
+            <span class="n">path</span><span class="p">,</span>
+            <span class="n">tr_detail</span><span class="p">,</span>
+            <span class="n">log_tag</span><span class="o">=</span><span class="n">tag</span><span class="p">,</span>
+            <span class="n">replay_full</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">begin_end_markers</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">compact_ws</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">delete_after</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="n">_ingest_and_remove</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="s2">&quot;drizzle_shifts.txt&quot;</span><span class="p">),</span> <span class="s2">&quot;tweakreg shifts&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="s2">&quot;drizzle_shifts_*.txt&quot;</span><span class="p">))):</span>
+        <span class="n">_ingest_and_remove</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s2">&quot;tweakreg shifts&quot;</span><span class="p">)</span>
+    <span class="n">_ingest_and_remove</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="s2">&quot;headerlet.log&quot;</span><span class="p">),</span> <span class="s2">&quot;headerlet&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">_INTERSTITIAL_GLOBS</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="n">pattern</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Removed headerlet scratch: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Could not remove </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+
+    <span class="n">sw</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="s2">&quot;shifts_wcs.fits&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">sw</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">sw</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Removed </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">sw</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Could not remove </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">sw</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, C. D. Kilpatrick.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

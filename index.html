@@ -1,0 +1,196 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to hst123’s documentation! &mdash; hst123 1.0.1.dev127+g5eee3491a</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" href="_static/hst123-docs.css" type="text/css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=66f05667"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Installation" href="installation.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="#" class="icon icon-home">
+            hst123
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="zeropoints.html">Zero points</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="#">hst123</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="#" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Welcome to hst123’s documentation!</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/index.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="welcome-to-hst123-s-documentation">
+<h1>Welcome to hst123’s documentation!<a class="headerlink" href="#welcome-to-hst123-s-documentation" title="Link to this heading"></a></h1>
+<p><strong>hst123</strong> is a Python pipeline for <em>Hubble Space Telescope</em> data: query and
+download from MAST, align images (TweakReg / JHAT), combine with AstroDrizzle,
+optionally run DOLPHOT for PSF photometry, and scrape DOLPHOT catalogs at a
+target position.</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="installation.html"><span class="doc">Installation</span></a> — Python 3.12, Conda, DrizzlePac, optional DOLPHOT.</p></li>
+<li><p><a class="reference internal" href="user_guide.html"><span class="doc">User guide</span></a> — Work-directory layout, CLI overview, outputs, formats.</p></li>
+<li><p><a class="reference internal" href="api.html"><span class="doc">API reference</span></a> — <code class="docutils literal notranslate"><span class="pre">hst123</span></code> class, utilities, DOLPHOT HDF5 export.</p></li>
+</ul>
+<section id="quick-install">
+<h2>Quick install<a class="headerlink" href="#quick-install" title="Link to this heading"></a></h2>
+<p>From the repository root (see <a class="reference internal" href="installation.html"><span class="doc">Installation</span></a> for detail):</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>-f<span class="w"> </span>environment.yml
+conda<span class="w"> </span>activate<span class="w"> </span>hst123
+pip<span class="w"> </span>install<span class="w"> </span>drizzlepac
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+<p>Build this documentation locally:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[docs]&quot;</span>
+<span class="nb">cd</span><span class="w"> </span>docs<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>make<span class="w"> </span>html
+</pre></div>
+</div>
+<p>The <a class="reference external" href="https://github.com/charliekilpatrick/hst123/actions/workflows/documentation.yml">documentation workflow</a>
+publishes to <a class="reference external" href="https://charliekilpatrick.github.io/hst123/">GitHub Pages</a>.</p>
+</section>
+<section id="repository-layout">
+<h2>Repository layout<a class="headerlink" href="#repository-layout" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><strong>hst123/</strong> — <code class="docutils literal notranslate"><span class="pre">_pipeline</span></code> (CLI and orchestration), <code class="docutils literal notranslate"><span class="pre">primitives/</span></code> (FITS,
+photometry, astrometry, DOLPHOT, scrape), <code class="docutils literal notranslate"><span class="pre">utils/</span></code> (options, logging, paths,
+AstroDrizzle helpers, DOLPHOT utilities, bundled STScI WCS under
+<code class="docutils literal notranslate"><span class="pre">utils.stwcs</span></code>), <code class="docutils literal notranslate"><span class="pre">datamodels/</span></code>.</p></li>
+<li><p><strong>tests/</strong> — <code class="docutils literal notranslate"><span class="pre">pytest</span></code> suite (markers: <code class="docutils literal notranslate"><span class="pre">network</span></code>, <code class="docutils literal notranslate"><span class="pre">dolphot</span></code>).</p></li>
+<li><p><strong>docs/</strong> — Sphinx (reStructuredText + MyST Markdown): this site, changelog,
+zeropoints.</p></li>
+</ul>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#python-and-environment">Python and environment</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user_guide.html#work-directory-layout">Work directory layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user_guide.html#supported-instruments-and-file-types">Supported instruments and file types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user_guide.html#command-line-usage">Command-line usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user_guide.html#output-data-formats">Output data formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user_guide.html#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user_guide.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#pre-releases-historical">Pre-releases (historical)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#documentation-sphinx">Documentation (Sphinx)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#releases">Releases</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="zeropoints.html">Zero points</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api.html#entry-point">Entry point</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#pipeline-class">Pipeline class</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#module-hst123.utils.options">CLI options and redo helpers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#module-hst123.utils.paths">Path helpers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#module-hst123.utils.stdio">Parallel BLAS / OpenMP guard</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#work-directory-cleanup">Work directory cleanup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#module-hst123.utils.dolphot_catalog_hdf5">DOLPHOT catalog → HDF5</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#module-hst123.datamodels.hst_model">Data model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#primitives-base-class">Primitives base class</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+<section id="indices-and-tables">
+<h2>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
+<li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
+<li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="installation.html" class="btn btn-neutral float-right" title="Installation" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, C. D. Kilpatrick.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

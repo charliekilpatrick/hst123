@@ -1,0 +1,148 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Changelog &mdash; hst123 1.0.1.dev127+g5eee3491a</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" href="_static/hst123-docs.css" type="text/css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=66f05667"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Zero points" href="zeropoints.html" />
+    <link rel="prev" title="User guide" href="user_guide.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            hst123
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User guide</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Changelog</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#pre-releases-historical">Pre-releases (historical)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#documentation-sphinx">Documentation (Sphinx)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#releases">Releases</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="zeropoints.html">Zero points</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">hst123</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Changelog</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/changelog.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section class="tex2jax_ignore mathjax_ignore" id="changelog">
+<h1>Changelog<a class="headerlink" href="#changelog" title="Link to this heading"></a></h1>
+<p>Notable changes to hst123. Version numbering follows semantic versioning for full releases.</p>
+<section id="pre-releases-historical">
+<h2>Pre-releases (historical)<a class="headerlink" href="#pre-releases-historical" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><strong>v1.00</strong> (2019-02-07) — Base: download, tweakreg, drizzle, dolphot parameters.</p></li>
+<li><p><strong>v1.01</strong> (2019-02-15) — Run dolphot and scrape dolphot output.</p></li>
+<li><p><strong>v1.02</strong> (2019-02-22) — Fake star injection.</p></li>
+<li><p><strong>v1.03</strong> (2019-06-02) — Drizzle-all options and option/syntax cleanup.</p></li>
+<li><p><strong>v1.04</strong> (2020-02-10) — Python 3.7.</p></li>
+<li><p><strong>v1.05</strong> (2020-03-04) — Sanitizing reference images for tweakreg/dolphot.</p></li>
+<li><p><strong>v1.06</strong> (2020-03-07) — Archiving (<code class="docutils literal notranslate"><span class="pre">--archive</span></code>) for large-volume analysis.</p></li>
+<li><p><strong>v1.07</strong> (2020-03-08) — Archiving updates; <code class="docutils literal notranslate"><span class="pre">construct_hst_archive.py</span></code> helper.</p></li>
+</ul>
+</section>
+<section id="documentation-sphinx">
+<h2>Documentation (Sphinx)<a class="headerlink" href="#documentation-sphinx" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Expanded sources: <code class="docutils literal notranslate"><span class="pre">installation.rst</span></code> (Python 3.12, Conda, DrizzlePac, DOLPHOT helper), <code class="docutils literal notranslate"><span class="pre">user_guide.rst</span></code> (work-directory layout, CLI overview, redo flags, output formats), <code class="docutils literal notranslate"><span class="pre">api.rst</span></code> (CLI entry point, full <code class="docutils literal notranslate"><span class="pre">hst123</span></code> pipeline class, <code class="docutils literal notranslate"><span class="pre">options</span></code>, <code class="docutils literal notranslate"><span class="pre">paths</span></code>, <code class="docutils literal notranslate"><span class="pre">stdio</span></code>, <code class="docutils literal notranslate"><span class="pre">workdir_cleanup</span></code>, <code class="docutils literal notranslate"><span class="pre">dolphot_catalog_hdf5</span></code>, <code class="docutils literal notranslate"><span class="pre">datamodels</span></code>, <code class="docutils literal notranslate"><span class="pre">BasePrimitive</span></code>).</p></li>
+</ul>
+</section>
+<section id="releases">
+<h2>Releases<a class="headerlink" href="#releases" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><strong>Unreleased</strong> — <strong>Python:</strong> <strong>3.12</strong> only (<code class="docutils literal notranslate"><span class="pre">requires-python</span></code> <code class="docutils literal notranslate"><span class="pre">&gt;=3.12,&lt;3.13</span></code>; NumPy 1.x / Astropy 5.x / DrizzlePac stack). <strong>Documentation:</strong> Sphinx uses <strong>MyST</strong> (Markdown) + reStructuredText, <strong>sphinx_rtd_theme</strong>, custom CSS/layout (Swift_host_subtraction-style), intersphinx (Python/NumPy/Astropy), and GitHub Pages via CI; README badges for build, docs workflow, and site. <code class="docutils literal notranslate"><span class="pre">hst123.utils.dolphot_catalog_hdf5</span></code>: parse DOLPHOT <code class="docutils literal notranslate"><span class="pre">*.columns</span></code> / <code class="docutils literal notranslate"><span class="pre">*.param</span></code> / <code class="docutils literal notranslate"><span class="pre">*.info</span></code> / <code class="docutils literal notranslate"><span class="pre">*.data</span></code> / <code class="docutils literal notranslate"><span class="pre">*.warnings</span></code> and write <strong>HDF5</strong> (<code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">h5py</span></code> or <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">.[hdf5]</span></code>) with the full numeric catalog plus descriptive column names and JSON metadata (merged per <code class="docutils literal notranslate"><span class="pre">imgNNNN</span></code> when possible). <code class="docutils literal notranslate"><span class="pre">get_dolphot_column</span></code> uses <code class="docutils literal notranslate"><span class="pre">parse_column_index_and_description</span></code> for robust column index parsing. <code class="docutils literal notranslate"><span class="pre">install_psfs</span></code> ends with <code class="docutils literal notranslate"><span class="pre">relocate_all_legacy_psf_into_canonical_layout</span></code>: merges legacy <code class="docutils literal notranslate"><span class="pre">dolphot2.0/...</span></code> <strong><code class="docutils literal notranslate"><span class="pre">*.psf</span></code></strong> into the canonical tree for <strong>ACS</strong>, <strong>WFC3</strong> (<code class="docutils literal notranslate"><span class="pre">wfc3/data</span></code>, <code class="docutils literal notranslate"><span class="pre">wfc3/IR</span></code>, <code class="docutils literal notranslate"><span class="pre">wfc3/UVIS</span></code>), and <strong>WFPC2</strong> (<code class="docutils literal notranslate"><span class="pre">wfpc2/data</span></code>), including <strong>sibling</strong> <code class="docutils literal notranslate"><span class="pre">dolphot2.0/</span></code> next to <code class="docutils literal notranslate"><span class="pre">dolphot3.1/</span></code> (common conda layout). <code class="docutils literal notranslate"><span class="pre">relocate_acs_psf_into_canonical_layout</span></code> remains for ACS-only use. <code class="docutils literal notranslate"><span class="pre">hst123-install-dolphot</span></code> applies <code class="docutils literal notranslate"><span class="pre">apply_dolphot_source_patches</span></code> before <code class="docutils literal notranslate"><span class="pre">make</span></code>: patches upstream <code class="docutils literal notranslate"><span class="pre">dolphot.c</span></code> (<code class="docutils literal notranslate"><span class="pre">main</span></code> stack buffer 82→4096 bytes) to avoid macOS <code class="docutils literal notranslate"><span class="pre">sprintf</span></code> overflow / SIGTRAP on long absolute output paths; <code class="docutils literal notranslate"><span class="pre">--no-source-patches</span></code> opts out. <code class="docutils literal notranslate"><span class="pre">tests/test_dolphot_c_python_parity.py</span></code> documents C vs Python parity for calcsky, splitgroups, acsmask, wfc3mask, wfpc2mask (optional binaries + DOLPHOT tree; marker <code class="docutils literal notranslate"><span class="pre">dolphot_parity</span></code>). <code class="docutils literal notranslate"><span class="pre">hst123.utils.progress_log.LoggedProgress</span></code>: throttled <code class="docutils literal notranslate"><span class="pre">logger.info</span></code> progress lines (<code class="docutils literal notranslate"><span class="pre">#---</span></code> bar, %, counts, elapsed, est. total duration, remaining) for reuse; wired to calcsky stage 1 in <code class="docutils literal notranslate"><span class="pre">write_sky_fits_fallback</span></code> / <code class="docutils literal notranslate"><span class="pre">compute_sky_map_dolphot</span></code> (Python per-row updates; <strong>Numba: one full parallel pass</strong> then a single progress completion—no sequential batched kernels that ruined throughput). Disable with <code class="docutils literal notranslate"><span class="pre">HST123_CALCSKY_PROGRESS=0</span></code> or <code class="docutils literal notranslate"><span class="pre">HST123_PROGRESS_LOG=0</span></code>. Optional <strong><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">.[perf]</span></code></strong> adds <code class="docutils literal notranslate"><span class="pre">numba</span></code>; <code class="docutils literal notranslate"><span class="pre">environment.yml</span></code> includes <code class="docutils literal notranslate"><span class="pre">numba</span></code> for conda users. <code class="docutils literal notranslate"><span class="pre">*drc.noise.fits</span></code> (sky copy for drizzled stacks) removed in <code class="docutils literal notranslate"><span class="pre">run_dolphot</span></code> and <code class="docutils literal notranslate"><span class="pre">get_dolphot_photometry</span></code> primitive cleanup with <code class="docutils literal notranslate"><span class="pre">respect_keep_artifacts=False</span></code> so they are still removed when <code class="docutils literal notranslate"><span class="pre">--keep-drizzle-artifacts</span></code> is set (not in per-filter astrodrizzle cleanup, which would delete prior filters’ noise). Same glob listed in <code class="docutils literal notranslate"><span class="pre">settings.pipeline_products</span></code> for scripted cleanup; see <code class="docutils literal notranslate"><span class="pre">tests/test_pipeline_cleanup_validation.py</span></code>. Removed legacy CLI <code class="docutils literal notranslate"><span class="pre">--make-clean</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-large-reduction</span></code>, <code class="docutils literal notranslate"><span class="pre">--large-num</span></code> and <code class="docutils literal notranslate"><span class="pre">hst123.make_clean</span></code> / <code class="docutils literal notranslate"><span class="pre">check_large_reduction</span></code>. CI: workflow uses <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-e</span> <span class="pre">&quot;.[test]&quot;</span></code>; <code class="docutils literal notranslate"><span class="pre">_psf_already_satisfied</span></code> treats ACS WFC PAM as present if either <code class="docutils literal notranslate"><span class="pre">make_root</span></code> or <code class="docutils literal notranslate"><span class="pre">source_dir</span></code> has a valid <code class="docutils literal notranslate"><span class="pre">acs/data</span></code> payload; scrape-dolphot unit tests supply minimal <code class="docutils literal notranslate"><span class="pre">pipeline.options</span></code>. Pure-Python DOLPHOT <code class="docutils literal notranslate"><span class="pre">splitgroups</span></code> (<code class="docutils literal notranslate"><span class="pre">hst123.utils.dolphot_splitgroups</span></code>); <code class="docutils literal notranslate"><span class="pre">HST123_DOLPHOT_SPLITGROUPS_EXTERNAL=1</span></code> forces the C binary. <code class="docutils literal notranslate"><span class="pre">DOLPHOT_REQUIRED_SCRIPTS</span></code> no longer lists <code class="docutils literal notranslate"><span class="pre">splitgroups</span></code>. DOLPHOT installer: <code class="docutils literal notranslate"><span class="pre">ACS_WFC_PAM.tar.gz</span></code> extracts under <code class="docutils literal notranslate"><span class="pre">dolphot2.0/acs/data/</span></code>; files are now copied to <code class="docutils literal notranslate"><span class="pre">acs/data/</span></code> and <code class="docutils literal notranslate"><span class="pre">dolphot_acs_data_dir</span></code> prefers directories that contain both PAM FITS. Python <code class="docutils literal notranslate"><span class="pre">calcsky</span></code> port: vectorized second pass (summed-area table); Numba first pass uses precomputed annulus offsets and a per-row scratch buffer (no per-pixel <code class="docutils literal notranslate"><span class="pre">calloc</span></code>).</p></li>
+<li><p><strong>v1.1.0</strong> (2025-03-02) — Post–v1.07: refactored pipeline (utils, primitives), setuptools-scm versioning, tests and docs updates.</p></li>
+</ul>
+<p><em>Full releases are added here when tagging. Run from the repo root:</em>
+<em><code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">scripts/update_changelog.py</span> <span class="pre">&quot;Brief</span> <span class="pre">summary</span> <span class="pre">of</span> <span class="pre">changes&quot;</span></code></em></p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="user_guide.html" class="btn btn-neutral float-left" title="User guide" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="zeropoints.html" class="btn btn-neutral float-right" title="Zero points" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, C. D. Kilpatrick.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

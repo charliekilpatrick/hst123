@@ -1,0 +1,165 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Installation &mdash; hst123 1.0.1.dev127+g5eee3491a</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" href="_static/hst123-docs.css" type="text/css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=66f05667"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="User guide" href="user_guide.html" />
+    <link rel="prev" title="Welcome to hst123’s documentation!" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            hst123
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#python-and-environment">Python and environment</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#conda-recommended">Conda (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#pip-install-alone-without-conda"><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> alone (without Conda)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#stsci-wcs-stwcs">STScI WCS (<code class="docutils literal notranslate"><span class="pre">stwcs</span></code>)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#dolphot-optional">DOLPHOT (optional)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#documentation-build">Documentation build</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="zeropoints.html">Zero points</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">hst123</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Installation</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/installation.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="installation">
+<span id="id1"></span><h1>Installation<a class="headerlink" href="#installation" title="Link to this heading"></a></h1>
+<section id="python-and-environment">
+<h2>Python and environment<a class="headerlink" href="#python-and-environment" title="Link to this heading"></a></h2>
+<p><strong>hst123</strong> requires <strong>Python 3.12</strong> only (see <code class="docutils literal notranslate"><span class="pre">requires-python</span></code> in <code class="docutils literal notranslate"><span class="pre">pyproject.toml</span></code>: <code class="docutils literal notranslate"><span class="pre">&gt;=3.12,&lt;3.13</span></code>). The stack is validated with NumPy 1.x, Astropy 5.x, SciPy 1.x, and DrizzlePac; use the provided Conda environment when possible so binary wheels match.</p>
+<section id="conda-recommended">
+<h3>Conda (recommended)<a class="headerlink" href="#conda-recommended" title="Link to this heading"></a></h3>
+<p>From the repository root:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>-f<span class="w"> </span>environment.yml
+conda<span class="w"> </span>activate<span class="w"> </span>hst123
+pip<span class="w"> </span>install<span class="w"> </span>drizzlepac
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+<p>This installs the <code class="docutils literal notranslate"><span class="pre">hst123</span></code> and <code class="docutils literal notranslate"><span class="pre">hst123-install-dolphot</span></code> console scripts.</p>
+</section>
+<section id="pip-install-alone-without-conda">
+<h3><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> alone (without Conda)<a class="headerlink" href="#pip-install-alone-without-conda" title="Link to this heading"></a></h3>
+<p>Use a <strong>venv with Python 3.12</strong>, then <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">drizzlepac</span></code> and <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-e</span> <span class="pre">.</span></code> from the repo. If NumPy/Astropy must build from source, prefer installing those from Conda first or match the pins in <code class="docutils literal notranslate"><span class="pre">pyproject.toml</span></code>.</p>
+</section>
+<section id="stsci-wcs-stwcs">
+<h3>STScI WCS (<code class="docutils literal notranslate"><span class="pre">stwcs</span></code>)<a class="headerlink" href="#stsci-wcs-stwcs" title="Link to this heading"></a></h3>
+<p>WCS utilities used for alignment (<code class="docutils literal notranslate"><span class="pre">updatewcs</span></code>, <code class="docutils literal notranslate"><span class="pre">HSTWCS</span></code>, <code class="docutils literal notranslate"><span class="pre">altwcs</span></code>) are <strong>bundled</strong> under <code class="docutils literal notranslate"><span class="pre">hst123.utils.stwcs</span></code> (see <code class="docutils literal notranslate"><span class="pre">STWCS_VENDOR.txt</span></code>). The package on PyPI named <code class="docutils literal notranslate"><span class="pre">stwcs</span></code> is <strong>not</strong> an hst123 dependency; DrizzlePac may install it for its own use. Application code should use <code class="docutils literal notranslate"><span class="pre">hst123.utils.stsci_wcs</span></code>.</p>
+</section>
+<section id="dolphot-optional">
+<h3>DOLPHOT (optional)<a class="headerlink" href="#dolphot-optional" title="Link to this heading"></a></h3>
+<p>DOLPHOT is <strong>not</strong> bundled. For <code class="docutils literal notranslate"><span class="pre">--run-dolphot</span></code> / <code class="docutils literal notranslate"><span class="pre">--scrape-dolphot</span></code>, install DOLPHOT with the helper after activating your environment:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>activate<span class="w"> </span>hst123
+hst123-install-dolphot
+</pre></div>
+</div>
+<p>The helper downloads DOLPHOT 3.1 sources and PSF tables under <code class="docutils literal notranslate"><span class="pre">$CONDA_PREFIX/opt/hst123-dolphot</span></code>, runs <code class="docutils literal notranslate"><span class="pre">make</span></code>, and symlinks <code class="docutils literal notranslate"><span class="pre">dolphot</span></code>, <code class="docutils literal notranslate"><span class="pre">calcsky</span></code>, and related tools into <code class="docutils literal notranslate"><span class="pre">$CONDA_PREFIX/bin</span></code>. Masking (ACS/WFC3/WFPC2) and <code class="docutils literal notranslate"><span class="pre">splitgroups</span></code> use <strong>Python implementations</strong> by default (see <code class="docutils literal notranslate"><span class="pre">hst123.utils.dolphot_mask</span></code>, <code class="docutils literal notranslate"><span class="pre">hst123.utils.dolphot_splitgroups</span></code>); set <code class="docutils literal notranslate"><span class="pre">HST123_DOLPHOT_MASK_EXTERNAL=1</span></code> or <code class="docutils literal notranslate"><span class="pre">HST123_DOLPHOT_SPLITGROUPS_EXTERNAL=1</span></code> to force C binaries.</p>
+<p>Without Conda, pass <code class="docutils literal notranslate"><span class="pre">--dolphot-dir</span> <span class="pre">/path/to/dolphot</span></code> to the installer or add DOLPHOT to <code class="docutils literal notranslate"><span class="pre">PATH</span></code> manually. See <code class="docutils literal notranslate"><span class="pre">hst123-install-dolphot</span> <span class="pre">--help</span></code> and the <a class="reference external" href="http://americano.dolphinsim.com/dolphot/">DOLPHOT website</a>.</p>
+</section>
+<section id="documentation-build">
+<h3>Documentation build<a class="headerlink" href="#documentation-build" title="Link to this heading"></a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[docs]&quot;</span>
+<span class="nb">cd</span><span class="w"> </span>docs<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>make<span class="w"> </span>html
+</pre></div>
+</div>
+<p>Output is under <code class="docutils literal notranslate"><span class="pre">docs/build/html/</span></code>. The project also publishes docs to <a class="reference external" href="https://charliekilpatrick.github.io/hst123/">GitHub Pages</a> via CI.</p>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="Welcome to hst123’s documentation!" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="user_guide.html" class="btn btn-neutral float-right" title="User guide" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, C. D. Kilpatrick.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
