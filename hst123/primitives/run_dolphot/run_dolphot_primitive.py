@@ -901,7 +901,36 @@ class DolphotPrimitive(BasePrimitive):
         )
         return outimg
 
-    def get_dolphot_photometry(self, split_images, reference):
+    def collect_existing_split_images(self, image):
+        """
+        Return chip FITS paths if a complete, up-to-date chip set exists without
+        re-running mask, splitgroups, or per-chip calcsky.
+
+        Returns ``None`` if chips are missing, incomplete, or newer science data
+        implies a full :meth:`prepare_dolphot` run.
+        """
+        p = self._p
+        from hst123.utils.dolphot_splitgroups import count_expected_split_outputs
+
+        expected = count_expected_split_outputs(image)
+        if expected == 0:
+            return []
+        chips = glob.glob(self._chip_glob_pattern(image))
+        if len(chips) != expected:
+            return None
+        if self._input_fits_newer_than_chip_products(image):
+            return None
+        outimg = []
+        for im in sorted(chips):
+            if p.split_image_contains(
+                im, p.coord
+            ) or p.options["args"].include_all_splits:
+                outimg.append(im)
+        if not outimg:
+            return None
+        return outimg
+
+    def get_dolphot_photometry(self, split_images, reference, visit_obstable=None):
         """
         Scrape photometry from dolphot catalog for pipeline coord and print final photometry.
 
@@ -914,6 +943,9 @@ class DolphotPrimitive(BasePrimitive):
             Split image paths (for obstable).
         reference : str
             Reference image path for WCS and scraping.
+        visit_obstable : astropy.table.Table, optional
+            Per-visit observation table for fast chip-level metadata (see
+            :meth:`hst123.hst123.expand_obstable_for_split_images`).
         """
         from hst123.utils.logging import make_banner
 
@@ -938,30 +970,44 @@ class DolphotPrimitive(BasePrimitive):
                     get_limits=True,
                     scrapeall=opt.scrape_all,
                     brightest=opt.brightest,
+                    visit_obstable=visit_obstable,
                 )
                 p.final_phot = phot
+                if getattr(opt, "write_dolphot_hdf5", True):
+                    try:
+                        from pathlib import Path
+
+                        from hst123.utils.dolphot_catalog_hdf5 import (
+                            write_dolphot_catalog_hdf5,
+                        )
+
+                        base = Path(dp["base"])
+                        wda = os.path.abspath(
+                            os.path.expanduser(getattr(opt, "work_dir", None) or ".")
+                        )
+                        out_h5 = Path(wda) / (base.name + ".h5")
+                        dolphot_dir = base.parent
+                        write_dolphot_catalog_hdf5(
+                            out_h5,
+                            base,
+                            include_raw_sidecars=True,
+                            dolphot_dir=dolphot_dir,
+                            embed_dolphot_directory_text=False,
+                        )
+                        log.info(
+                            "Wrote DOLPHOT HDF5 archive: %s "
+                            "(photometry table, parsed sidecars; manifest of %s)",
+                            out_h5,
+                            dolphot_dir,
+                        )
+                    except ImportError as exc:
+                        log.info(
+                            "DOLPHOT HDF5 not written (install h5py: pip install h5py): %s",
+                            exc,
+                        )
+                    except Exception as exc:
+                        log.warning("DOLPHOT HDF5 not written: %s", exc)
                 if phot:
-                    if getattr(opt, "write_dolphot_hdf5", False):
-                        try:
-                            from pathlib import Path
-
-                            from hst123.utils.dolphot_catalog_hdf5 import (
-                                write_dolphot_catalog_hdf5,
-                            )
-
-                            base = Path(dp["base"])
-                            out_h5 = base.with_suffix(".h5")
-                            write_dolphot_catalog_hdf5(
-                                out_h5,
-                                base,
-                                include_raw_sidecars=False,
-                            )
-                            log.info("DOLPHOT catalog HDF5: %s", out_h5)
-                        except Exception as exc:
-                            log.warning(
-                                "Could not write DOLPHOT HDF5 (--write-dolphot-hdf5): %s",
-                                exc,
-                            )
                     make_banner(
                         "Printing out the final photometry for: {ra} {dec}\n"
                         "There is photometry for {n} sources".format(

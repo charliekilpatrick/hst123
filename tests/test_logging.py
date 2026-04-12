@@ -22,12 +22,36 @@ from hst123.utils.logging import (
     get_logger,
     ingest_text_file_to_logger,
     log_pipeline_configuration,
+    log_pipeline_phase_summary,
     make_banner,
     run_external_command,
     green,
     red,
     end,
 )
+
+
+class TestLogPipelinePhaseSummary:
+    """Used at the end of :func:`hst123.main` for wall-clock / phase timing."""
+
+    def test_empty_phases_logs_no_phases(self, caplog):
+        caplog.set_level(logging.INFO)
+        log = get_logger("hst123.phase")
+        log_pipeline_phase_summary(log, [], wall_seconds=1.23)
+        assert "Pipeline timing" in caplog.text
+        assert "1.2" in caplog.text
+
+    def test_phases_joined(self, caplog):
+        caplog.set_level(logging.INFO)
+        log = get_logger("hst123.phase")
+        log_pipeline_phase_summary(
+            log,
+            [("config", 0.1), ("ingest", 0.2)],
+            wall_seconds=0.55,
+        )
+        assert "config=0.1s" in caplog.text
+        assert "ingest=0.2s" in caplog.text
+        assert "wall=" in caplog.text
 
 
 class TestCompressLoggerName:
@@ -184,6 +208,7 @@ def test_log_pipeline_configuration_logs_version_and_flags(tmp_path, caplog, mon
         redo_astrometry=False,
         redo_astrodrizzle=False,
         drizzle_num_cores=4,
+        write_dolphot_hdf5=True,
     )
     caplog.set_level(logging.INFO)
     log = get_logger("hst123")
@@ -198,6 +223,7 @@ def test_log_pipeline_configuration_logs_version_and_flags(tmp_path, caplog, mon
     assert "12 00 00" in text
     assert "dl=True" in text
     assert "dp run=True" in text
+    assert "hdf5=True" in text
     assert "after=2020-01-01" in text
     assert "max_cores=4" in text
     assert "redo=False" in text

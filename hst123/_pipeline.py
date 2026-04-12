@@ -82,7 +82,9 @@ from hst123.utils.astrodrizzle_helpers import (
     build_wfpc2_skymask_catalog,
     combine_type_and_nhigh,
     wfpc2_astrodrizzle_scratch_paths,
+    canonical_drizzle_input_stem,
     drizzle_product_catalog_header,
+    drizzle_reference_inputs_match,
     drizzle_sidecar_paths,
     remove_internal_linear_drizzle_products,
     rename_astrodrizzle_sidecars,
@@ -109,6 +111,7 @@ from hst123.utils.wcs_utils import (
 )
 from hst123.primitives import FitsHelper, PhotometryHelper
 from hst123.primitives.astrometry import AstrometryPrimitive, parse_coord
+from hst123.primitives.astrometry.alignment_meta import alignment_done_on_primary_header
 from hst123.primitives.run_dolphot import DolphotPrimitive
 from hst123.primitives.scrape_dolphot import ScrapeDolphotPrimitive
 
@@ -326,6 +329,122 @@ class hst123(object):
   # Observation table: per-image metadata, visits, drizname, optional listing file
   # ---------------------------------------------------------------------------
 
+  def expand_obstable_for_split_images(self, visit_obstable, split_images):
+    """
+    Build one obstable row per DOLPHOT split/chip path from the visit table.
+
+    Avoids :meth:`input_list` over ``split_images``, which re-opens every chip
+    FITS many times per file (very slow on network-backed storage).
+
+    Parameters
+    ----------
+    visit_obstable : astropy.table.Table
+        Per-visit observation table (same exposures as the parents of *split_images*).
+    split_images : list of str
+        Chip-level FITS paths (e.g. ``*.chipN.fits``) or undivided exposures.
+
+    Returns
+    -------
+    astropy.table.Table or None
+        Table aligned to *split_images*, or None if a parent exposure cannot be matched.
+    """
+    import re
+
+    from astropy.table import Table
+
+    from hst123.utils.paths import normalize_fits_path
+
+    if visit_obstable is None or len(visit_obstable) == 0:
+        return None
+    if not split_images:
+        return None
+
+    by_base = {}
+    for row in visit_obstable:
+        b = os.path.basename(normalize_fits_path(str(row["image"])))
+        by_base[b] = row
+
+    out = []
+    for sp in split_images:
+        spn = normalize_fits_path(str(sp))
+        bn = os.path.basename(spn)
+        m = re.match(r"^(.+)\.chip(\d+)\.fits$", bn, re.I)
+        if m:
+            parent_bn = m.group(1) + ".fits"
+            chip_num = int(m.group(2))
+        else:
+            parent_bn = bn
+            chip_num = None
+        if parent_bn not in by_base:
+            return None
+        src = by_base[parent_bn]
+        r = {name: src[name] for name in visit_obstable.colnames}
+        r["image"] = spn
+        if chip_num is not None:
+            r["chip"] = chip_num
+        out.append(r)
+
+    return Table(rows=out, names=list(visit_obstable.colnames))
+
+  def refresh_obstable_zeropoints_from_fits(self, obstable):
+    """
+    Recompute ``zeropoint`` for each row with one :meth:`FitsPrimitive.get_zpt`
+    call per image (single FITS open each), preserving chip-specific calibration.
+    """
+    if obstable is None or len(obstable) == 0:
+        return
+    zptype = self.magsystem
+    for i in range(len(obstable)):
+        img = str(obstable["image"][i])
+        ccd = obstable["chip"][i]
+        try:
+            ccd = int(ccd)
+        except (TypeError, ValueError):
+            ccd = 1
+        zp = self._fits.get_zpt(img, ccdchip=ccd, zptype=zptype)
+        if zp is not None:
+            obstable["zeropoint"][i] = zp
+
+  def _log_obstable_inputs_summary(self, obstable, *, include_debug_table=True):
+    """
+    Log the compact one-line input summary (and optional debug table) for an
+    existing observation table — without re-opening FITS files.
+
+    Used at the end of :func:`main` to avoid a second full :meth:`input_list`
+    pass over all exposures (that duplicate was charged to the ``post_visit``
+    pipeline phase).
+    """
+    if obstable is None or len(obstable) == 0:
+        return
+    form = "{file: <36} {inst: <18} {filt: <10} "
+    form += "{exp: <12} {date: <10} {time: <10}"
+    bits = [
+        "%s|%s/%s"
+        % (
+            os.path.basename(row["image"]),
+            row["instrument"].upper(),
+            row["filter"].upper(),
+        )
+        for row in obstable
+    ]
+    log.info("inputs n=%d: %s", len(obstable), " ".join(bits))
+    if not include_debug_table:
+        return
+    log.debug(
+        "inputs table:\n%s",
+        "\n".join(
+            form.format(
+                file=os.path.basename(row["image"]),
+                inst=row["instrument"].upper(),
+                filt=row["filter"].upper(),
+                exp="%7.4f" % row["exptime"],
+                date=Time(row["datetime"]).datetime.strftime("%Y-%m-%d"),
+                time=Time(row["datetime"]).datetime.strftime("%H:%M:%S"),
+            )
+            for row in obstable
+        ),
+    )
+
   def input_list(self, img, show=True, save=False, file=None, image_number=[]):
     """
     Build the observation metadata table for a list of FITS paths.
@@ -404,34 +523,8 @@ class hst123(object):
         obstable, self.options["global_defaults"]["visit"], log=log
     )
 
-    # One compact line (avoid N+1 INFO lines per input_list call)
-    form = '{file: <36} {inst: <18} {filt: <10} '
-    form += '{exp: <12} {date: <10} {time: <10}'
     if show:
-        bits = [
-            "%s|%s/%s"
-            % (
-                os.path.basename(row["image"]),
-                row["instrument"].upper(),
-                row["filter"].upper(),
-            )
-            for row in obstable
-        ]
-        log.info("inputs n=%d: %s", len(obstable), " ".join(bits))
-        log.debug(
-            "inputs table:\n%s",
-            "\n".join(
-                form.format(
-                    file=os.path.basename(row["image"]),
-                    inst=row["instrument"].upper(),
-                    filt=row["filter"].upper(),
-                    exp="%7.4f" % row["exptime"],
-                    date=Time(row["datetime"]).datetime.strftime("%Y-%m-%d"),
-                    time=Time(row["datetime"]).datetime.strftime("%H:%M:%S"),
-                )
-                for row in obstable
-            ),
-        )
+        self._log_obstable_inputs_summary(obstable, include_debug_table=True)
 
     # Iterate over visit, instrument, filter to add group-specific info.
     # Use object dtype so full paths are never truncated (fixed-width U99
@@ -470,15 +563,11 @@ class hst123(object):
             wd_base = os.path.abspath(
                 os.path.expanduser(self.options["args"].work_dir)
             )
-            driz_root = pipeline_workspace_dir(wd_base) or wd_base
-            # Per-epoch drizzle products live under workspace/; --drizzle-all
-            # consolidated outputs use <work-dir>/drizzle/ (base, not workspace/).
-            if self.options["args"].drizzle_all:
-                drizzle_dir = os.path.join(wd_base, "drizzle")
-                os.makedirs(drizzle_dir, exist_ok=True)
-                drizname = os.path.join(drizzle_dir, drizname)
-            else:
-                drizname = os.path.join(driz_root, drizname)
+            # All stacked drizzle products (per-visit ut* names and --drizzle-all) go
+            # under <work-dir>/drizzle/ — never workspace/drizzle/.
+            drizzle_dir = os.path.join(wd_base, "drizzle")
+            os.makedirs(drizzle_dir, exist_ok=True)
+            drizname = os.path.join(drizzle_dir, drizname)
 
         obstable[i]['drizname'] = drizname
 
@@ -1358,17 +1447,14 @@ class hst123(object):
         hdu = fits.open(drizname)
         try:
             hdr = drizzle_product_catalog_header(hdu)
-            # Check for NINPUT and INPUT names
-            if "NINPUT" in hdr and "INPUT" in hdr:
-                ninput = len(reference_images)
-                str_input = ",".join([s.split(".")[0] for s in reference_images])
-
-                if hdr["INPUT"].startswith(str_input) and hdr["NINPUT"] == ninput:
-                    log.warning(
-                        "Drizzled image %s exists; skipping astrodrizzle.",
-                        drizname,
-                    )
-                    return drizname
+            # NINPUT/INPUT must match current exposure list. INPUT may list WFPC2
+            # scratch stems (*_hst123drz*_c0m); compare via canonical roots.
+            if drizzle_reference_inputs_match(reference_images, hdr):
+                log.warning(
+                    "Drizzled image %s exists; skipping astrodrizzle.",
+                    drizname,
+                )
+                return drizname
         finally:
             hdu.close()
 
@@ -1615,16 +1701,20 @@ class hst123(object):
     bool or None
         True on success, None if ``updatewcs`` raised.
     """
+    image = normalize_fits_path(image)
     hdu = fits.open(image, mode='readonly')
-    if 'TWEAKSUC' in hdu[0].header.keys() and hdu[0].header['TWEAKSUC']==1:
-        return True
+    try:
+        if alignment_done_on_primary_header(hdu[0].header):
+            return True
+    finally:
+        hdu.close()
 
-    # Check for hierarchical alignment.  If image has been shifted with
-    # hierarchical alignment, we don't want to shift it again
-    if 'HIERARCH' in hdu[0].header.keys() and hdu[0].header['HIERARCH']==1:
-        return True
-
-    hdu.close()
+    if image.endswith(".fits") and not image.endswith(".rawtmp.fits"):
+        rt = image[:-5] + ".rawtmp.fits"
+        if os.path.isfile(rt):
+            with fits.open(rt, mode="readonly") as h_raw:
+                if alignment_done_on_primary_header(h_raw[0].header):
+                    return True
 
     message = 'Updating WCS for {file}'
     log.info(message.format(file=image))
@@ -2075,10 +2165,24 @@ class hst123(object):
 
     weight_file, mask_file = rename_astrodrizzle_sidecars(internal_output, log)
 
-    # Get comma-separated list of base input files
+    # Comma-separated INPUT for provenance: stable exposure roots (not scratch
+    # names) so pick_reference can skip when the reference drizzle is reused.
     ninput = len(tmp_input)
     tmp_input = sorted(tmp_input)
-    str_input = ','.join([s.split('.')[0] for s in tmp_input])
+    if len(obstable["image"]) == ninput:
+        str_input = ",".join(
+            sorted(
+                os.path.splitext(os.path.basename(str(img)))[0]
+                for img in obstable["image"]
+            )
+        )
+    elif len(obstable["image"]) == 1 and ninput == 2:
+        stem = os.path.splitext(os.path.basename(str(obstable["image"][0])))[0]
+        str_input = ",".join(sorted([stem, stem]))
+    else:
+        str_input = ",".join(
+            sorted(canonical_drizzle_input_stem(s) for s in tmp_input)
+        )
 
     origzpt = self._fits.get_zpt(internal_output)
 
@@ -2804,13 +2908,21 @@ class hst123(object):
         self.updatewcs = False
 
 
-  def get_dolphot_photometry(self, split_images, reference):
+  def get_dolphot_photometry(self, split_images, reference, visit_obstable=None):
     """
     Parse DOLPHOT output for the pipeline coordinate and print summary photometry.
 
     Delegates to :meth:`hst123.primitives.run_dolphot.DolphotPrimitive.get_dolphot_photometry`.
+
+    Parameters
+    ----------
+    visit_obstable : astropy.table.Table, optional
+        Per-visit observation table. When provided, scraping reuses it for chip-level
+        paths instead of rebuilding metadata via :meth:`input_list` on every split FITS.
     """
-    self._dolphot.get_dolphot_photometry(split_images, reference)
+    self._dolphot.get_dolphot_photometry(
+        split_images, reference, visit_obstable=visit_obstable
+    )
 
   @log_calls
   def handle_args(self, parser):
@@ -2981,8 +3093,16 @@ def main():
     )
     _phase("config")
 
-    # Handle file downloads - first check what products are available
-    hst.productlist = hst.get_productlist(hst.coord, default['radius'])
+    # MAST query is only needed for downloads or archive-based ingest.
+    need_mast = opt.download or (opt.archive and not opt.skip_copy)
+    if need_mast:
+        hst.productlist = hst.get_productlist(hst.coord, default["radius"])
+    else:
+        hst.productlist = None
+        log.info(
+            "Skipping MAST catalog query (no --download and no archive copy); "
+            "using raw_dir → work_dir ingest only.",
+        )
     _phase("mast_catalog_query")
     if opt.download:
         banner = f'Downloading HST data from MAST for: {ra} {dec} ({coord_str})'
@@ -3038,7 +3158,9 @@ def main():
         # Get metadata on all input images and put them into an obstable
         make_banner('Organizing input images by visit')
         # Going forward, we'll refer everything to obstable for imgs + metadata
-        table = hst.input_list(hst.input_images, show=True)
+        # save=True: retain table so the final "Complete list" step can log without
+        # re-reading every FITS (avoids ~O(n_images) duplicate work in post_visit).
+        table = hst.input_list(hst.input_images, show=True, save=True)
         if table is None or len(table) == 0:
             log.error(
                 "No valid FITS inputs after filtering (missing files or bad headers). Exiting."
@@ -3096,22 +3218,50 @@ def main():
                 log.info(message.format(files=','.join(map(str,
                     obstable['image']))))
                 prep_list = list(obstable['image'])
-                cores = max(1, int(getattr(opt, "drizzle_num_cores", 1) or 1))
-                if cores > 1 and len(prep_list) > 1:
-                    n = min(cores, len(prep_list))
-                    log.info(
-                        "DOLPHOT prepare using %d thread(s) for %d image(s) "
-                        "(--max-cores)",
-                        n,
-                        len(prep_list),
+                skip_prepare = opt.scrape_dolphot and (
+                    not opt.run_dolphot
+                    or (
+                        not want_redo_dolphot(opt)
+                        and dolphot_catalog_already_present(hst.dolphot)
                     )
-                    with ThreadPoolExecutor(max_workers=n) as pool:
-                        split_lists = list(pool.map(hst._dolphot.prepare_dolphot, prep_list))
-                    for outimg in split_lists:
-                        split_images.extend(outimg)
-                else:
+                )
+                used_cached_chips = False
+                if skip_prepare:
+                    collected = []
+                    good = True
                     for image in prep_list:
-                        split_images.extend(hst._dolphot.prepare_dolphot(image))
+                        chips = hst._dolphot.collect_existing_split_images(image)
+                        if chips is None:
+                            good = False
+                            break
+                        collected.extend(chips)
+                    if good and collected:
+                        split_images = collected
+                        used_cached_chips = True
+                        log.info(
+                            "Skipping DOLPHOT prepare (mask/split/calcsky): "
+                            "reusing existing chip FITS for scrape.",
+                        )
+                if not used_cached_chips:
+                    split_images = []
+                    cores = max(1, int(getattr(opt, "drizzle_num_cores", 1) or 1))
+                    if cores > 1 and len(prep_list) > 1:
+                        n = min(cores, len(prep_list))
+                        log.info(
+                            "DOLPHOT prepare using %d thread(s) for %d image(s) "
+                            "(--max-cores)",
+                            n,
+                            len(prep_list),
+                        )
+                        with ThreadPoolExecutor(max_workers=n) as pool:
+                            split_lists = list(
+                                pool.map(hst._dolphot.prepare_dolphot, prep_list)
+                            )
+                        for outimg in split_lists:
+                            split_images.extend(outimg)
+                    else:
+                        for image in prep_list:
+                            split_images.extend(hst._dolphot.prepare_dolphot(image))
             _phase(f"visit_{i}_dolphot_prepare")
 
             if os.path.exists(hst.reference):
@@ -3149,8 +3299,13 @@ def main():
             _phase(f"visit_{i}_dolphot_execute")
 
             # Scrape data from the dolphot catalog for the input coordinates
-            if opt.scrape_dolphot: hst._dolphot.get_dolphot_photometry(split_images,
-                hst.reference)
+            if opt.scrape_dolphot:
+                hst._dolphot.get_dolphot_photometry(
+                    split_images,
+                    hst.reference,
+                    visit_obstable=obstable,
+                )
+            _phase(f"visit_{i}_scrape_dolphot")
 
             # Do fake star injection if --do-fake is passed
             if opt.do_fake: hst._dolphot.do_fake(obstable, hst.reference)
@@ -3159,7 +3314,10 @@ def main():
 
     # Write out a list of the input images with metadata for easy reference
     make_banner('Complete list of input images')
-    hst.input_list(hst.input_images, show=True, save=False, file=None)
+    if hst.input_images and hst.obstable is not None:
+        hst._log_obstable_inputs_summary(hst.obstable, include_debug_table=False)
+    else:
+        hst.input_list(hst.input_images, show=True, save=False, file=None)
 
     # Clean up interstitial files in working directory
     if opt.cleanup:

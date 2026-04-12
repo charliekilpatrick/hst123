@@ -218,14 +218,19 @@ def add_options(parser=None, usage=None, version=None):
         help='Skip cuts to dolphot output file.')
     parser.add_argument('--brightest', default=False, action='store_true',
         help='Sort output source files by signal-to-noise in reference image.')
+    parser.set_defaults(write_dolphot_hdf5=True)
+    parser.add_argument(
+        '--no-write-dolphot-hdf5',
+        dest='write_dolphot_hdf5',
+        action='store_false',
+        help='Skip writing <dolphot-base>.h5 after scrape (default: write when h5py is installed).',
+    )
     parser.add_argument(
         '--write-dolphot-hdf5',
-        default=False,
+        dest='write_dolphot_hdf5',
         action='store_true',
-        help='After scrape, write the DOLPHOT catalog to <base>.h5 (requires h5py; '
-        'pip install .[hdf5]).',
+        help=argparse.SUPPRESS,
     )
-
 
     return(parser)
 

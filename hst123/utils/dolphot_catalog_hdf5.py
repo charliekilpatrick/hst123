@@ -529,6 +529,80 @@ def merge_image_metadata(
     return merged
 
 
+def _embed_dolphot_directory_metadata(
+    hf: Any,
+    dolphot_dir: Path,
+    *,
+    embed_text: bool = False,
+    max_text_bytes: int = 8 * 1024 * 1024,
+) -> None:
+    """
+    Under ``metadata/dolphot_directory/``, store a JSON manifest of every file
+    under *dolphot_dir* (path, size, mtime). Optionally embed UTF-8 text for
+    non-FITS files up to *max_text_bytes* (skips binary-looking content).
+    """
+    import h5py
+
+    root = dolphot_dir.resolve()
+    manifest: list[dict[str, Any]] = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        rel = p.relative_to(root).as_posix()
+        manifest.append(
+            {"relpath": rel, "size": st.st_size, "mtime": st.st_mtime}
+        )
+
+    meta = hf.require_group("metadata")
+    gpath = "metadata/dolphot_directory"
+    if gpath in hf:
+        del hf[gpath]
+    dg = meta.create_group("dolphot_directory")
+    dt = h5py.string_dtype(encoding="utf-8")
+    mj = dg.create_dataset("manifest_json", (1,), dtype=dt)
+    mj[0] = json.dumps(manifest, indent=2)
+    dg.attrs["root"] = str(root)
+    dg.attrs["n_files"] = len(manifest)
+    dg.attrs["text_embed"] = bool(embed_text)
+
+    if not embed_text:
+        return
+
+    tg = dg.create_group("text_embed")
+    i = 0
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(root).as_posix()
+        if ".fits" in p.name.lower():
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        if st.st_size == 0 or st.st_size > max_text_bytes:
+            continue
+        try:
+            raw = p.read_bytes()
+        except OSError:
+            continue
+        if b"\x00" in raw[:8192]:
+            continue
+        try:
+            txt = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            txt = raw.decode("utf-8", errors="replace")
+        ds = tg.create_dataset(f"file_{i:06d}", (1,), dtype=dt)
+        ds[0] = txt
+        ds.attrs["relpath"] = rel
+        ds.attrs["size_bytes"] = st.st_size
+        i += 1
+
+
 def write_dolphot_catalog_hdf5(
     out_path: PathLike,
     base: PathLike,
@@ -536,6 +610,8 @@ def write_dolphot_catalog_hdf5(
     photometry_path: str = "photometry",
     include_raw_sidecars: bool = True,
     compression: bool = True,
+    dolphot_dir: Optional[PathLike] = None,
+    embed_dolphot_directory_text: bool = False,
 ) -> Path:
     """
     Write one HDF5 file with the full DOLPHOT catalog and metadata.
@@ -557,6 +633,16 @@ def write_dolphot_catalog_hdf5(
     compression : bool
         If True, use gzip compression on the table (requires Astropy + h5py).
 
+    dolphot_dir : path-like, optional
+        Directory scanned for a full file manifest (default: ``base.parent``, i.e.
+        the DOLPHOT output folder such as ``<work>/dolphot/``). Every file path,
+        size, and mtime are stored. Optional text embedding under
+        ``metadata/dolphot_directory/text_embed/`` when *embed_dolphot_directory_text*
+        is True.
+    embed_dolphot_directory_text : bool, optional
+        If True, embed small UTF-8 text files from *dolphot_dir* (can be slow for
+        large trees). Default False (manifest only).
+
     Returns
     -------
     pathlib.Path
@@ -576,6 +662,10 @@ def write_dolphot_catalog_hdf5(
 
     base = Path(base)
     out_path = Path(out_path)
+    if dolphot_dir is None:
+        dolphot_dir = base.parent
+    else:
+        dolphot_dir = Path(dolphot_dir)
 
     col_path = Path(str(base) + ".columns")
     if not col_path.is_file():
@@ -635,12 +725,12 @@ def write_dolphot_catalog_hdf5(
         )
         root.attrs["dolphot_merged_metadata_json"] = json.dumps(merged, indent=2)
 
-        meta = hf.create_group("metadata")
+        meta = hf.require_group("metadata")
         meta.attrs["global_param_json"] = json.dumps(merged.get("global_param", {}), indent=2)
         meta.attrs["merged_images_json"] = json.dumps(merged.get("images", {}), indent=2)
 
         if include_raw_sidecars:
-            raw = meta.create_group("raw")
+            raw = meta.require_group("raw")
             if col_path.is_file():
                 _write_str_dataset(raw, "columns", col_path.read_text(encoding="utf-8", errors="replace"))
             if param_p.is_file():
@@ -651,6 +741,13 @@ def write_dolphot_catalog_hdf5(
                 _write_str_dataset(raw, "data", data_p.read_text(encoding="utf-8", errors="replace"))
             if warn_p.is_file():
                 _write_str_dataset(raw, "warnings", warn_p.read_text(encoding="utf-8", errors="replace"))
+
+        if dolphot_dir.is_dir():
+            _embed_dolphot_directory_metadata(
+                hf,
+                dolphot_dir,
+                embed_text=embed_dolphot_directory_text,
+            )
 
     return out_path
 

@@ -150,6 +150,11 @@ class FitsHelper(BasePrimitive):
             f = str(fits.getval(image, "FILTNAM1"))
             if len(f.strip()) == 0:
                 f = str(fits.getval(image, "FILTNAM2"))
+            if len(f.strip()) == 0:
+                try:
+                    f = str(fits.getval(image, "FILTER"))
+                except Exception:
+                    f = ""
         else:
             try:
                 f = str(fits.getval(image, "FILTER"))
@@ -157,7 +162,7 @@ class FitsHelper(BasePrimitive):
                 f = str(fits.getval(image, "FILTER1"))
                 if "clear" in f.lower():
                     f = str(fits.getval(image, "FILTER2"))
-        return f.lower()
+        return f.lower().strip()
 
     def get_instrument(self, image):
         """

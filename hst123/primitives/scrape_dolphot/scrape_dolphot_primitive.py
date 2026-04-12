@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from astropy.io import fits
@@ -23,6 +24,19 @@ from hst123.utils.dolphot_catalog_hdf5 import (
 from hst123.utils.wcs_utils import wcs_from_fits_hdu
 
 log = logging.getLogger(__name__)
+
+# Limiting-magnitude statistics do not need every neighbor in the aperture; a
+# modest random sample keeps scrape time bounded for large catalogs.
+_LIMIT_SAMPLE_MAX = 400
+
+
+def _subsample_limit_rows(limit_data, max_rows, rng):
+    """Randomly subsample ``[dist, row]`` limit rows for fast limit estimation."""
+    if len(limit_data) <= max_rows:
+        return limit_data
+    pick = rng.choice(len(limit_data), size=max_rows, replace=False)
+    pick.sort()
+    return [limit_data[i] for i in pick]
 
 
 class ScrapeDolphotPrimitive(BasePrimitive):
@@ -276,6 +290,38 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                     limit_data.append([dist, line])
         return limit_data
 
+    def _calc_avg_stats_array(self, obstable, rd, measurement_idx, colfile):
+        """Vector-friendly path when the DOLPHOT row is a 1-D float array."""
+        p = self._p
+        estr = "Magnitude uncertainty"
+        cstr = "Measured counts"
+        mjds, err, counts, exptime, zpt = [], [], [], [], []
+        for row in obstable:
+            img = row["image"]
+            pair = measurement_idx.get(img) if measurement_idx else None
+            if pair and pair[0] is not None and pair[1] is not None:
+                ei, ci = pair
+                if ei >= len(rd) or ci >= len(rd):
+                    error = count = None
+                else:
+                    error = str(float(rd[ei]))
+                    count = str(float(rd[ci]))
+            else:
+                error = self.get_dolphot_data(rd, colfile, estr, img)
+                count = self.get_dolphot_data(rd, colfile, cstr, img)
+            if error and count:
+                mjds.append(Time(row["datetime"]).mjd)
+                err.append(error)
+                counts.append(count)
+                exptime.append(row["exptime"])
+                zpt.append(row["zeropoint"])
+        if len(mjds) > 0:
+            avg_mjd = np.mean(mjds)
+            total_exptime = np.sum(exptime)
+            mag, magerr = p._phot.avg_magnitudes(err, counts, exptime, zpt)
+            return (avg_mjd, mag, magerr, total_exptime)
+        return (np.nan, np.nan, np.nan, np.nan)
+
     def calc_avg_stats(self, obstable, data, colfile, measurement_idx=None):
         """
         Compute average MJD, magnitude, error, and total exptime for one source/filter.
@@ -315,6 +361,10 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 for img in imgs
             }
         rd = self._row_tokens(data)
+        if isinstance(rd, np.ndarray) and rd.ndim == 1 and measurement_idx:
+            return self._calc_avg_stats_array(
+                obstable, rd, measurement_idx, colfile
+            )
         mjds, err, counts, exptime, filts, det, zpt = [], [], [], [], [], [], []
         for row in obstable:
             img = row["image"]
@@ -503,8 +553,15 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         return final_phot
 
     def scrapedolphot(
-        self, coord, reference, images, dolphot, scrapeall=False,
-        get_limits=False, brightest=False
+        self,
+        coord,
+        reference,
+        images,
+        dolphot,
+        scrapeall=False,
+        get_limits=False,
+        brightest=False,
+        visit_obstable=None,
     ):
         """
         Scrape dolphot catalog for sources near coord; return list of photometry tables.
@@ -525,6 +582,10 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             If True, compute limit magnitudes. Default False.
         brightest : bool, optional
             If True, sort by brightness instead of separation. Default False.
+        visit_obstable : astropy.table.Table, optional
+            Per-visit observation table. When provided, chip-level metadata is derived
+            from this table instead of calling :meth:`input_list` on every split FITS
+            (avoids repeated FITS I/O).
 
         Returns
         -------
@@ -584,7 +645,13 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         columns = self._columns_for(colfile)
         if columns is None:
             columns = parse_dolphot_columns_file(os.path.abspath(colfile))
-        obstable = p.input_list(images, show=False, save=False)
+        obstable = None
+        if visit_obstable is not None:
+            obstable = p.expand_obstable_for_split_images(visit_obstable, images)
+            if obstable is not None:
+                p.refresh_obstable_zeropoints_from_fits(obstable)
+        if obstable is None:
+            obstable = p.input_list(images, show=False, save=False)
         if not obstable:
             _scrapedolphot_cleanup(None, note="empty_obstable")
             return None
@@ -694,6 +761,24 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 xcol=ix,
                 ycol=iy,
             )
+            if limit_data:
+                n_lim = len(limit_data)
+                limit_data = _subsample_limit_rows(
+                    limit_data,
+                    _LIMIT_SAMPLE_MAX,
+                    np.random.default_rng(
+                        (hash(os.path.basename(base)) & 0xFFFFFFFF)
+                        ^ (int(float(x) * 1000) & 0xFFFF)
+                        ^ (int(float(y) * 1000) & 0xFFFF)
+                    ),
+                )
+                if len(limit_data) < n_lim:
+                    log.info(
+                        "Limit sample: using %d of %d random aperture sources "
+                        "for fast limit statistics.",
+                        len(limit_data),
+                        n_lim,
+                    )
         log.info(
             "Scrape: x=%s y=%s r=%s px | %d source(s) in %s near %.6f %.6f",
             "%7.2f" % float(x),
@@ -731,8 +816,8 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 data[0]["sep"],
                 data[0]["sn"],
             )
-        final_phot = []
-        for dat in data:
+
+        def _parse_one(dat):
             finished = False
             limit_radius = dolphot.get("limit_radius", 10.0)
             limit_data_cur = limit_data
@@ -747,9 +832,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 )
                 finished = True
                 if "LIMIT" in source_phot.keys():
-                    if any(
-                        np.isnan(row["LIMIT"]) for row in source_phot
-                    ):
+                    if any(np.isnan(row["LIMIT"]) for row in source_phot):
                         if limit_radius < 80:
                             limit_radius = 2 * limit_radius
                             finished = False
@@ -765,6 +848,14 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                                 xcol=ix,
                                 ycol=iy,
                             )
+                            if len(limit_data_cur) > _LIMIT_SAMPLE_MAX:
+                                limit_data_cur = _subsample_limit_rows(
+                                    limit_data_cur,
+                                    _LIMIT_SAMPLE_MAX,
+                                    np.random.default_rng(
+                                        int(limit_radius * 1000) & 0xFFFFFFFF
+                                    ),
+                                )
             source_phot.meta["separation"] = dat["sep"]
             source_phot.meta["magsystem"] = p.magsystem
             if "x" in source_phot.meta.keys() and "y" in source_phot.meta.keys():
@@ -776,6 +867,18 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 source_phot.meta["ra"] = coord_out.ra.degree
                 source_phot.meta["dec"] = coord_out.dec.degree
             source_phot.sort(["MJD", "FILTER"])
-            final_phot.append(source_phot)
+            return source_phot
+
+        mc = getattr(p.options["args"], "max_cores", None)
+        if mc is None:
+            mc = min(8, (os.cpu_count() or 4))
+        else:
+            mc = max(1, int(mc))
+        n_workers = min(mc, len(data)) if len(data) > 1 else 1
+        if n_workers > 1 and len(data) > 1:
+            with ThreadPoolExecutor(max_workers=n_workers) as ex:
+                final_phot = list(ex.map(_parse_one, data))
+        else:
+            final_phot = [_parse_one(dat) for dat in data]
         _scrapedolphot_cleanup(final_phot, note="ok")
         return final_phot

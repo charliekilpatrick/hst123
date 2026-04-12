@@ -6,8 +6,10 @@ import numpy as np
 from astropy.io import fits
 
 from hst123.utils.astrodrizzle_helpers import (
+    canonical_drizzle_input_stem,
     combine_type_and_nhigh,
     drizzle_canonical_weight_mask_paths,
+    drizzle_reference_inputs_match,
     drizzle_sidecar_paths,
     resolve_drizzle_clean_flag,
     rename_astrodrizzle_sidecars,
@@ -15,6 +17,22 @@ from hst123.utils.astrodrizzle_helpers import (
     wcs_image_hdu_index,
     write_drc_multis_extension_if_requested,
 )
+
+
+def test_canonical_drizzle_input_stem_wfpc2_scratch():
+    s = "/w/u2460107t_hst123drz8297683a44664ac2_c0m.fits"
+    assert canonical_drizzle_input_stem(s) == "u2460107t_c0m"
+    assert canonical_drizzle_input_stem("u2460107t_c0m.fits") == "u2460107t_c0m"
+
+
+def test_drizzle_reference_inputs_match_scratch_vs_workspace():
+    hdr = fits.Header()
+    hdr["NINPUT"] = 2
+    hdr["INPUT"] = (
+        "/x/u2460107t_hst123drz111_c0m,/y/u2460108t_hst123drz222_c0m"
+    )
+    paths = ["/data/u2460108t_c0m.fits", "/data/u2460107t_c0m.fits"]
+    assert drizzle_reference_inputs_match(paths, hdr)
 
 
 def test_wfpc2_astrodrizzle_scratch_paths_pairs_c1m(tmp_path):

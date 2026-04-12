@@ -48,6 +48,13 @@ class TestAddOptions:
         args = parser.parse_args(["0", "0", "--max-cores", "8"])
         assert args.max_cores == 8
 
+    def test_write_dolphot_hdf5_defaults(self):
+        parser = options.add_options()
+        args = parser.parse_args(["0", "0"])
+        assert args.write_dolphot_hdf5 is True
+        args = parser.parse_args(["0", "0", "--no-write-dolphot-hdf5"])
+        assert args.write_dolphot_hdf5 is False
+
     def test_uses_provided_parser(self):
         import argparse
         p = argparse.ArgumentParser()
@@ -116,3 +123,15 @@ def test_handle_args_redo_sets_both_redo_flags(monkeypatch):
     assert opt.redo is True
     assert opt.redo_astrometry is True
     assert opt.redo_astrodrizzle is True
+
+
+def test_handle_args_max_cores_sets_drizzle_num_cores(monkeypatch):
+    """``main`` uses :meth:`~hst123.hst123.handle_args` to map ``--max-cores`` to DrizzlePac."""
+    import hst123 as _hst
+
+    monkeypatch.setattr(sys, "argv", ["hst123", "0", "0", "--max-cores", "3"])
+    hst = _hst.hst123()
+    monkeypatch.setattr(hst._dolphot, "check_for_dolphot", lambda: True)
+    opt = hst.handle_args(hst.add_options())
+    assert opt.drizzle_num_cores == 3
+    assert hst.options["drizzle_defaults"]["num_cores"] == 3

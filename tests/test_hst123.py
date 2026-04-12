@@ -1,4 +1,6 @@
 """Unit tests for hst123.hst123 class methods."""
+import os
+
 import numpy as np
 import pytest
 
@@ -211,3 +213,56 @@ class TestGetDolphotData:
             row, str(colfile), "VEGAMAG", "j12345678_flc.fits"
         )
         assert val is None
+
+
+class TestExpandObstableForSplitImages:
+    def test_maps_chip_paths_from_parent_row(self, hst123_instance, tmp_path):
+        _require_hst123()
+        from astropy.table import Table
+
+        parent = str(tmp_path / "foo_c0m.fits")
+        chip1 = str(tmp_path / "foo_c0m.chip1.fits")
+        visit = Table(
+            [
+                [parent],
+                [100.0],
+                ["2020-01-01T00:00:00"],
+                ["f555w"],
+                ["wfpc2_wfpc2_full"],
+                ["wfpc2_wfpc2"],
+                [25.0],
+                [1],
+                [0],
+            ],
+            names=hst123_instance.names,
+        )
+        out = hst123_instance.expand_obstable_for_split_images(visit, [chip1])
+        assert out is not None
+        assert len(out) == 1
+        assert os.path.basename(str(out["image"][0])) == "foo_c0m.chip1.fits"
+        assert int(out["chip"][0]) == 1
+
+    def test_returns_none_when_parent_missing(self, hst123_instance, tmp_path):
+        _require_hst123()
+        from astropy.table import Table
+
+        parent = str(tmp_path / "foo_c0m.fits")
+        orphan_chip = str(tmp_path / "other_c0m.chip1.fits")
+        visit = Table(
+            [
+                [parent],
+                [100.0],
+                ["2020-01-01T00:00:00"],
+                ["f555w"],
+                ["wfpc2_wfpc2_full"],
+                ["wfpc2_wfpc2"],
+                [25.0],
+                [1],
+                [0],
+            ],
+            names=hst123_instance.names,
+        )
+        assert (
+            hst123_instance.expand_obstable_for_split_images(visit, [orphan_chip])
+            is None
+        )
