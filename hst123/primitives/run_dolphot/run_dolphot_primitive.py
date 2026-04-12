@@ -214,42 +214,76 @@ class DolphotPrimitive(BasePrimitive):
             return os.path.join(cod, f"{stem}.chip?.fits")
         return image.replace(".fits", ".chip?.fits")
 
+    def _input_fits_newer_than_chip_products(self, image) -> bool:
+        """
+        Return True if the science FITS was modified after split chip FITS were written.
+
+        Used to invalidate a full set of ``*.chipN.fits`` when the input exposure was
+        replaced or re-calibrated (same stem, newer mtime than all chips).
+        """
+        chips = glob.glob(self._chip_glob_pattern(image))
+        if not chips:
+            return False
+        try:
+            im_mtime = os.path.getmtime(image)
+        except OSError:
+            return False
+        try:
+            newest_chip = max(os.path.getmtime(c) for c in chips)
+        except OSError:
+            return False
+        return im_mtime > newest_chip
+
     def needs_to_split_groups(self, image):
-        """Return True if per-chip files are missing (SCI extensions or 3-D WFPC2-style primary)."""
+        """
+        Return True if splitgroups should run.
+
+        Splitting is skipped when the expected number of ``<stem>.chipN.fits`` files
+        already exist next to the exposure (or under the pipeline chip output directory)
+        **and** the science FITS is not newer than those chip files (see
+        :meth:`_input_fits_newer_than_chip_products`).
+        """
         from hst123.utils.dolphot_splitgroups import count_expected_split_outputs
 
         expected = count_expected_split_outputs(image)
         if expected == 0:
             return False
-        return len(glob.glob(self._chip_glob_pattern(image))) != expected
+        n = len(glob.glob(self._chip_glob_pattern(image)))
+        if n != expected:
+            return True
+        return self._input_fits_newer_than_chip_products(image)
+
+    def dolphot_mask_markers_done_in_primary(self, image) -> bool:
+        """
+        Return True if the primary HDU indicates DOLPHOT masking already ran.
+
+        WFPC2 / WFC3 / ACS write DOLWFPC2, DOL_WFC3, or DOL_ACS = 0 in the science
+        file after ``*mask``; that is the on-disk status used to skip re-masking.
+        Other instruments are not checked here (see :meth:`needs_to_be_masked`).
+        """
+        p = self._p
+        with fits.open(image) as hdulist:
+            header = hdulist[0].header
+        inst = p._fits.get_instrument(image).split("_")[0].upper()
+        if inst == "WFPC2":
+            return "DOLWFPC2" in header and header["DOLWFPC2"] == 0
+        if inst == "WFC3":
+            return "DOL_WFC3" in header and header["DOL_WFC3"] == 0
+        if inst == "ACS":
+            return "DOL_ACS" in header and header["DOL_ACS"] == 0
+        return False
 
     def needs_to_be_masked(self, image):
         """
-        Return True if image should be masked (DOL* header not set to 0 for this instrument).
+        Return True if the DOLPHOT mask step should run for this exposure.
 
-        Parameters
-        ----------
-        image : str
-            Path to FITS image.
-
-        Returns
-        -------
-        bool
-            True if *mask should be run (WFPC2, WFC3, ACS).
+        For ACS / WFC3 / WFPC2, masking is **skipped** when the primary header already
+        has the corresponding DOL* keyword set to 0 (mask already applied on disk).
         """
         p = self._p
-        hdulist = fits.open(image)
-        header = hdulist[0].header
         inst = p._fits.get_instrument(image).split("_")[0].upper()
-        if inst == "WFPC2":
-            if "DOLWFPC2" in header.keys() and header["DOLWFPC2"] == 0:
-                return False
-        if inst == "WFC3":
-            if "DOL_WFC3" in header.keys() and header["DOL_WFC3"] == 0:
-                return False
-        if inst == "ACS":
-            if "DOL_ACS" in header.keys() and header["DOL_ACS"] == 0:
-                return False
+        if inst in ("WFPC2", "WFC3", "ACS"):
+            return not self.dolphot_mask_markers_done_in_primary(image)
         return True
 
     def split_groups(self, image, delete_non_science=True):
@@ -826,8 +860,22 @@ class DolphotPrimitive(BasePrimitive):
         if self.needs_to_be_masked(image):
             inst = p._fits.get_instrument(image).split("_")[0]
             self.mask_image(image, inst)
+        else:
+            log.info(
+                "Skipping DOLPHOT mask for %s: primary header indicates mask "
+                "already applied (DOL* marker).",
+                os.path.basename(image),
+            )
+        from hst123.utils.dolphot_splitgroups import count_expected_split_outputs
+
         if self.needs_to_split_groups(image):
             self.split_groups(image)
+        elif count_expected_split_outputs(image) > 0:
+            log.info(
+                "Skipping splitgroups for %s: expected chip FITS present and "
+                "not older than the science file.",
+                os.path.basename(image),
+            )
         outimg = []
         split_images = glob.glob(self._chip_glob_pattern(image))
         for im in split_images:
@@ -893,6 +941,27 @@ class DolphotPrimitive(BasePrimitive):
                 )
                 p.final_phot = phot
                 if phot:
+                    if getattr(opt, "write_dolphot_hdf5", False):
+                        try:
+                            from pathlib import Path
+
+                            from hst123.utils.dolphot_catalog_hdf5 import (
+                                write_dolphot_catalog_hdf5,
+                            )
+
+                            base = Path(dp["base"])
+                            out_h5 = base.with_suffix(".h5")
+                            write_dolphot_catalog_hdf5(
+                                out_h5,
+                                base,
+                                include_raw_sidecars=False,
+                            )
+                            log.info("DOLPHOT catalog HDF5: %s", out_h5)
+                        except Exception as exc:
+                            log.warning(
+                                "Could not write DOLPHOT HDF5 (--write-dolphot-hdf5): %s",
+                                exc,
+                            )
                     make_banner(
                         "Printing out the final photometry for: {ra} {dec}\n"
                         "There is photometry for {n} sources".format(

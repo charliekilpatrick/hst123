@@ -153,6 +153,12 @@ def load_dolphot_catalog_array(path: PathLike) -> np.ndarray:
     -------
     numpy.ndarray
         2-D float array of shape (n_sources, n_columns).
+
+    Notes
+    -----
+    Uses :func:`numpy.loadtxt`. Scraping uses a single load plus vectorized
+    filtering (see :mod:`hst123.primitives.scrape_dolphot`) so the catalog is
+    read once per scrape.
     """
     path = Path(path)
     return np.loadtxt(path, dtype=np.float64)

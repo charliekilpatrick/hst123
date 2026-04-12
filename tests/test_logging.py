@@ -180,6 +180,7 @@ def test_log_pipeline_configuration_logs_version_and_flags(tmp_path, caplog, mon
         keep_drizzle_artifacts=False,
         keep_objfile=False,
         redo=False,
+        redo_dolphot=False,
         redo_astrometry=False,
         redo_astrodrizzle=False,
         drizzle_num_cores=4,

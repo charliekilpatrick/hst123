@@ -1,5 +1,7 @@
 # Zero points
 
+For pipeline behavior and file layout, see {doc}`user_guide`. This page summarizes magnitude systems and zeropoints.
+
 hst123 reports magnitudes in the **AB system** by default. DOLPHOT uses the **Vega** system; hst123 converts using header keywords.
 
 All HST images provide `PHOTFLAM` and `PHOTPLAM` per chip. The AB zero point used in hst123 is:

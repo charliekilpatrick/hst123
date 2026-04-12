@@ -127,13 +127,6 @@ class PhotometryHelper(BasePrimitive):
             except Exception:
                 pass
         if not idx:
-            self._primitive_cleanup(
-                "avg_magnitudes",
-                validation_notes={
-                    "skipped": "no_valid_rows",
-                    "n_input": len(magerrs),
-                },
-            )
             return (float("NaN"), float("NaN"))
         magerrs = np.array([float(m) for m in magerrs])[idx]
         counts = np.array([float(c) for c in counts])[idx]
@@ -142,16 +135,6 @@ class PhotometryHelper(BasePrimitive):
         flux = counts / exptimes * 10 ** (0.4 * (27.5 - zpt))
         fluxerr = 1.0 / 1.086 * magerrs * flux
         mag, magerr = weighted_avg_flux_to_mag(flux, fluxerr)
-        self._primitive_cleanup(
-            "avg_magnitudes",
-            validation_notes={
-                "mag": mag,
-                "magerr": magerr,
-                "mag_finite": bool(np.isfinite(mag)),
-                "magerr_finite": bool(np.isfinite(magerr)),
-                "n_used": len(idx),
-            },
-        )
         return mag, magerr
 
     def estimate_mag_limit(self, mags, errs, limit=3.0):
@@ -181,20 +164,8 @@ class PhotometryHelper(BasePrimitive):
             errs = np.array(errs)
         except ValueError:
             log.warning(warning)
-            self._primitive_cleanup(
-                "estimate_mag_limit",
-                validation_notes={"skipped": "value_error"},
-            )
             return np.nan
         result = estimate_limit_from_snr_bins(mags, errs, snr_target=limit)
         if np.isnan(result):
             log.warning(warning)
-        self._primitive_cleanup(
-            "estimate_mag_limit",
-            validation_notes={
-                "limit_mag": result,
-                "limit_finite": bool(np.isfinite(result)),
-                "snr_target": limit,
-            },
-        )
         return result

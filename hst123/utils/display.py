@@ -21,10 +21,13 @@ def format_instrument_display_name(inst):
     return inst.upper()
 
 
-def show_photometry_data(phottable, form, header, units, log, file=None, avg=False):
+def show_photometry_data(
+    phottable, form, header, units, log, file=None, avg=False, log_rows=True
+):
     """Log and optionally write photometry rows (form uses date, inst, filt, exp, mag, err, optional lim)."""
     if avg:
-        log.info("# Average photometry")
+        if log_rows:
+            log.info("# Average photometry")
         if file:
             file.write("\n# Average Photometry \n")
     else:
@@ -33,14 +36,17 @@ def show_photometry_data(phottable, form, header, units, log, file=None, avg=Fal
             line = out.format(key=key, val=phottable.meta[key])
             if file:
                 file.write(line + "\n")
-            log.info(line)
+            if log_rows:
+                log.info(line)
 
     if header:
-        log.info(header)
+        if log_rows:
+            log.info(header)
     if file and header:
         file.write(header + "\n")
     if units:
-        log.info(units)
+        if log_rows:
+            log.info(units)
     if file and units:
         file.write(units + "\n")
 
@@ -62,7 +68,8 @@ def show_photometry_data(phottable, form, header, units, log, file=None, avg=Fal
             datakeys["lim"] = "%3.4f" % row["LIMIT"]
 
         line = form.format(**datakeys)
-        log.info(line)
+        if log_rows:
+            log.info(line)
         if file:
             file.write(line + "\n")
 
@@ -111,11 +118,15 @@ def show_photometry(
     coord=None,
     options=None,
     log=None,
+    log_rows=None,
 ):
     """Display/write photometry as LaTeX, plain text, and/or SNANA (snana needs coord, options). Returns None."""
     if log is None:
         import logging
         log = logging.getLogger(__name__)
+
+    if log_rows is None:
+        log_rows = f is None
 
     keys = final_photometry.colnames
     if (
@@ -159,11 +170,24 @@ def show_photometry(
         )
         if len(final_photometry) > 0:
             show_photometry_data(
-                final_photometry, form, header, units, log, file=f
+                final_photometry,
+                form,
+                header,
+                units,
+                log,
+                file=f,
+                log_rows=log_rows,
             )
         if len(avg_photometry) > 0:
             show_photometry_data(
-                avg_photometry, form, header, units, log, file=f, avg=True
+                avg_photometry,
+                form,
+                header,
+                units,
+                log,
+                file=f,
+                avg=True,
+                log_rows=log_rows,
             )
 
     if show:
@@ -183,10 +207,23 @@ def show_photometry(
         header = form.format(**headkeys)
         if len(final_photometry) > 0:
             show_photometry_data(
-                final_photometry, form, header, "", log, file=f
+                final_photometry,
+                form,
+                header,
+                "",
+                log,
+                file=f,
+                log_rows=log_rows,
             )
         if len(avg_photometry) > 0:
             show_photometry_data(
-                avg_photometry, form, header, "", log, file=f, avg=True
+                avg_photometry,
+                form,
+                header,
+                "",
+                log,
+                file=f,
+                avg=True,
+                log_rows=log_rows,
             )
     return None

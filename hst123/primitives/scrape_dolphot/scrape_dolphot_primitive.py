@@ -1,10 +1,11 @@
 """Read DOLPHOT catalogs, parse photometry, compute limits, print results. Used by pipeline scrapedolphot."""
+from __future__ import annotations
+
 import logging
 import os
 import shutil
 
 import numpy as np
-import progressbar
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -13,7 +14,12 @@ from astropy.coordinates import SkyCoord
 
 from hst123.primitives.base import BasePrimitive
 from hst123.utils.display import show_photometry as display_show_photometry
-from hst123.utils.dolphot_catalog_hdf5 import parse_column_index_and_description
+from hst123.utils.dolphot_catalog_hdf5 import (
+    find_column_index_0based,
+    load_dolphot_catalog_array,
+    parse_column_index_and_description,
+    parse_dolphot_columns_file,
+)
 from hst123.utils.wcs_utils import wcs_from_fits_hdu
 
 log = logging.getLogger(__name__)
@@ -26,6 +32,32 @@ class ScrapeDolphotPrimitive(BasePrimitive):
     Provides get_dolphot_column, get_dolphot_data, get_limit_data, calc_avg_stats,
     parse_phot, print_final_phot, and scrapedolphot for pipeline coord.
     """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self._col_cache: dict[tuple[str, float], list] = {}
+
+    def _columns_for(self, colfile):
+        """Parse and cache ``*.columns`` by (abspath, mtime)."""
+        if not isinstance(colfile, str):
+            colfile = str(colfile)
+        p = os.path.abspath(os.path.expanduser(colfile))
+        try:
+            mtime = os.path.getmtime(p)
+        except OSError:
+            return None
+        key = (p, mtime)
+        if key not in self._col_cache:
+            self._col_cache[key] = parse_dolphot_columns_file(p)
+        return self._col_cache[key]
+
+    @staticmethod
+    def _row_tokens(row):
+        if isinstance(row, str):
+            return row.split()
+        if isinstance(row, np.ndarray):
+            return row
+        return row
 
     def get_dolphot_column(self, colfile, key, image, offset=0):
         """
@@ -47,6 +79,12 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         int or None
             Column index (0-based) + offset, or None if not found.
         """
+        columns = self._columns_for(colfile)
+        if columns is not None:
+            idx = find_column_index_0based(columns, key, image)
+            if idx is not None:
+                return idx + offset
+            return None
         coldata = ""
         with open(colfile) as colfile_data:
             for line in colfile_data:
@@ -85,7 +123,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             Cell value, or None if column missing or invalid.
         """
         colnum = self.get_dolphot_column(colfile, key, image)
-        rdata = row.split() if isinstance(row, str) else row
+        rdata = self._row_tokens(row)
         if colnum is not None:
             if colnum < 0 or colnum > len(rdata) - 1:
                 log.error(
@@ -93,7 +131,10 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                     colnum,
                 )
                 return None
-            return rdata[colnum]
+            v = rdata[colnum]
+            if isinstance(v, (np.floating, float, np.integer, int)):
+                return str(float(v))
+            return str(v)
         return None
 
     def print_final_phot(self, final_phot, dolphot, allphot=True):
@@ -119,23 +160,33 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 num = str(i).zfill(len(str(len(final_phot))))
                 out = outfile.replace(".phot", "_" + num + ".phot")
             snana = out.replace(".phot", ".snana")
-            message = "Photometry for source {n} ".format(n=i)
-            keys = phot.meta.keys()
-            if "x" in keys and "y" in keys and "separation" in keys:
-                message += (
-                    "at x,y={x},{y}; offset from target {sep} pix"
-                ).format(
-                    x=phot.meta["x"],
-                    y=phot.meta["y"],
-                    sep=phot.meta["separation"],
-                )
-            log.info(message)
             with open(out, "w") as f:
-                display_show_photometry(phot, f=f, coord=p.coord, options=p.options, log=log)
+                display_show_photometry(
+                    phot,
+                    f=f,
+                    coord=p.coord,
+                    options=p.options,
+                    log=log,
+                    log_rows=False,
+                )
             written.append(out)
             with open(snana, "w") as f:
-                display_show_photometry(phot, f=f, snana=True, show=False, coord=p.coord, options=p.options, log=log)
+                display_show_photometry(
+                    phot,
+                    f=f,
+                    snana=True,
+                    show=False,
+                    coord=p.coord,
+                    options=p.options,
+                    log=log,
+                    log_rows=False,
+                )
             written.append(snana)
+        log.info(
+            "Wrote photometry for %d source(s) to %s and matching .snana files.",
+            len(final_phot),
+            dolphot["final_phot"],
+        )
         self._primitive_cleanup(
             "print_final_phot",
             validate_text_paths=written,
@@ -143,7 +194,19 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             validation_notes={"n_sources": len(final_phot)},
         )
 
-    def get_limit_data(self, dolphot, coord, w, x, y, colfile, limit_radius):
+    def get_limit_data(
+        self,
+        dolphot,
+        coord,
+        w,
+        x,
+        y,
+        colfile,
+        limit_radius,
+        catalog=None,
+        xcol=None,
+        ycol=None,
+    ):
         """
         Get dolphot rows within limit_radius (arcsec) of (x, y) for limit estimation.
 
@@ -161,32 +224,59 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             Dolphot .columns file path.
         limit_radius : float
             Radius in pixels (derived from arcsec) for inclusion.
+        catalog : ndarray, optional
+            Pre-loaded 2-D catalog (n_sources, n_columns). When given with *xcol*
+            and *ycol*, uses a vectorized pass (fast).
+        xcol, ycol : int, optional
+            0-based column indices for Object X / Y on the reference image.
 
         Returns
         -------
         list of list
-            Each element [dist, line] for sources within radius.
+            Each element [dist, line] where *line* is a catalog row (ndarray) or
+            original text line (str).
         """
-        limit_data = []
         if coord.dec.degree < 89:
             dec1 = coord.dec.degree + limit_radius / 3600.0
         else:
             dec1 = coord.dec.degree - limit_radius / 3600.0
         coord1 = SkyCoord(coord.ra.degree, dec1, unit="deg")
         x1, y1 = wcs.utils.skycoord_to_pixel(coord1, w, origin=1)
-        radius = np.sqrt((x - x1) ** 2 + (y - y1) ** 2)
+        radius = float(np.sqrt((x - x1) ** 2 + (y - y1) ** 2))
+
+        if (
+            catalog is not None
+            and xcol is not None
+            and ycol is not None
+            and catalog.ndim == 2
+        ):
+            xline = catalog[:, xcol].astype(np.float64, copy=False) + 0.5
+            yline = catalog[:, ycol].astype(np.float64, copy=False) + 0.5
+            dist = np.hypot(xline - x, yline - y)
+            m = dist < radius
+            ii = np.flatnonzero(m)
+            return [[float(dist[i]), catalog[i]] for i in ii]
+
+        limit_data = []
+        xi = xcol
+        yi = ycol
+        if xi is None:
+            xi = self.get_dolphot_column(colfile, "Object X", "")
+        if yi is None:
+            yi = self.get_dolphot_column(colfile, "Object Y", "")
+        if xi is None or yi is None:
+            return limit_data
         with open(dolphot["base"]) as dp:
             for line in dp:
-                xcol = self.get_dolphot_column(colfile, "Object X", "")
-                ycol = self.get_dolphot_column(colfile, "Object Y", "")
-                xline = float(line.split()[xcol]) + 0.5
-                yline = float(line.split()[ycol]) + 0.5
+                parts = line.split()
+                xline = float(parts[xi]) + 0.5
+                yline = float(parts[yi]) + 0.5
                 dist = np.sqrt((xline - x) ** 2 + (yline - y) ** 2)
                 if dist < radius:
                     limit_data.append([dist, line])
         return limit_data
 
-    def calc_avg_stats(self, obstable, data, colfile):
+    def calc_avg_stats(self, obstable, data, colfile, measurement_idx=None):
         """
         Compute average MJD, magnitude, error, and total exptime for one source/filter.
 
@@ -198,6 +288,9 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             Dolphot row(s) or line for this source.
         colfile : str
             Dolphot .columns file.
+        measurement_idx : dict, optional
+            Maps each ``obstable['image']`` to ``(magnitude_uncertainty_col,
+            measured_counts_col)`` 0-based indices. Built automatically when omitted.
 
         Returns
         -------
@@ -207,10 +300,35 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         p = self._p
         estr = "Magnitude uncertainty"
         cstr = "Measured counts"
+        if measurement_idx is None:
+            columns = self._columns_for(colfile)
+            if columns is None:
+                columns = parse_dolphot_columns_file(
+                    os.path.abspath(str(colfile))
+                )
+            imgs = list(dict.fromkeys(obstable["image"]))
+            measurement_idx = {
+                img: (
+                    find_column_index_0based(columns, estr, img),
+                    find_column_index_0based(columns, cstr, img),
+                )
+                for img in imgs
+            }
+        rd = self._row_tokens(data)
         mjds, err, counts, exptime, filts, det, zpt = [], [], [], [], [], [], []
         for row in obstable:
-            error = self.get_dolphot_data(data, colfile, estr, row["image"])
-            count = self.get_dolphot_data(data, colfile, cstr, row["image"])
+            img = row["image"]
+            pair = measurement_idx.get(img) if measurement_idx else None
+            if pair and pair[0] is not None and pair[1] is not None:
+                ei, ci = pair
+                if ei >= len(rd) or ci >= len(rd):
+                    error = count = None
+                else:
+                    error = str(float(rd[ei]))
+                    count = str(float(rd[ci]))
+            else:
+                error = self.get_dolphot_data(data, colfile, estr, img)
+                count = self.get_dolphot_data(data, colfile, cstr, img)
             if error and count:
                 mjds.append(Time(row["datetime"]).mjd)
                 err.append(error)
@@ -226,7 +344,15 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             return (avg_mjd, mag, magerr, total_exptime)
         return (np.nan, np.nan, np.nan, np.nan)
 
-    def parse_phot(self, obstable, row, cfile, limit_data=None):
+    def parse_phot(
+        self,
+        obstable,
+        row,
+        cfile,
+        limit_data=None,
+        measurement_idx=None,
+        columns=None,
+    ):
         """
         Build photometry table for one dolphot source (per instrument/filter, with optional limits).
 
@@ -240,6 +366,10 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             Dolphot .columns file.
         limit_data : list, optional
             From get_limit_data for limit magnitude estimation. Default None.
+        measurement_idx : dict, optional
+            Precomputed per-image column indices for ``calc_avg_stats``.
+        columns : list, optional
+            Parsed ``*.columns`` definitions (avoids re-parsing when given).
 
         Returns
         -------
@@ -248,6 +378,21 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         """
         p = self._p
         limit_data = limit_data or []
+        if columns is None:
+            columns = self._columns_for(cfile)
+        if columns is None:
+            columns = parse_dolphot_columns_file(os.path.abspath(str(cfile)))
+        if measurement_idx is None:
+            estr = "Magnitude uncertainty"
+            cstr = "Measured counts"
+            imgs = list(dict.fromkeys(obstable["image"]))
+            measurement_idx = {
+                img: (
+                    find_column_index_0based(columns, estr, img),
+                    find_column_index_0based(columns, cstr, img),
+                )
+                for img in imgs
+            }
         fnames = [
             "MJD",
             "INSTRUMENT",
@@ -282,14 +427,17 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 for filt in list(set(visittable["filter"])):
                     ftable = visittable[visittable["filter"] == filt]
                     mjd, mag, err, exptime = self.calc_avg_stats(
-                        ftable, row, cfile
+                        ftable, row, cfile, measurement_idx=measurement_idx
                     )
                     new_row = (mjd, inst, filt, exptime, mag, err, 0)
                     if limit_data:
                         mags, errs = [], []
                         for data in limit_data:
                             mjd, limmag, limerr, exp = self.calc_avg_stats(
-                                ftable, data[1], cfile
+                                ftable,
+                                data[1],
+                                cfile,
+                                measurement_idx=measurement_idx,
                             )
                             if (
                                 not np.isnan(limmag)
@@ -320,14 +468,17 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             for filt in list(set(insttable["filter"])):
                 ftable = insttable[insttable["filter"] == filt]
                 mjd, mag, err, exptime = self.calc_avg_stats(
-                    ftable, row, cfile
+                    ftable, row, cfile, measurement_idx=measurement_idx
                 )
                 new_row = (mjd, inst, filt, exptime, mag, err, 1)
                 if limit_data:
                     mags, errs = [], []
                     for data in limit_data:
                         mjd, limmag, limerr, exp = self.calc_avg_stats(
-                            ftable, data[1], cfile
+                            ftable,
+                            data[1],
+                            cfile,
+                            measurement_idx=measurement_idx,
                         )
                         if not np.isnan(limmag) and not np.isnan(limerr):
                             mags.append(limmag)
@@ -380,8 +531,6 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         list of astropy.table.Table or None
             One table per source with meta (x, y, separation, etc.); None if no sources or error.
         """
-        import filecmp
-
         p = self._p
         wd = os.path.abspath(
             os.path.expanduser(getattr(p.options["args"], "work_dir", None) or ".")
@@ -431,36 +580,61 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 "scrape data from the dolphot catalog. Exiting..."
             )
             return None
+
+        columns = self._columns_for(colfile)
+        if columns is None:
+            columns = parse_dolphot_columns_file(os.path.abspath(colfile))
+        obstable = p.input_list(images, show=False, save=False)
+        if not obstable:
+            _scrapedolphot_cleanup(None, note="empty_obstable")
+            return None
+        estr = "Magnitude uncertainty"
+        cstr = "Measured counts"
+        imgs = list(dict.fromkeys(obstable["image"]))
+        measurement_idx = {
+            img: (
+                find_column_index_0based(columns, estr, img),
+                find_column_index_0based(columns, cstr, img),
+            )
+            for img in imgs
+        }
+
         if not os.path.exists(dolphot["original"]):
             shutil.copyfile(dolphot["base"], dolphot["original"])
+        typecol = find_column_index_0based(columns, "Object type", "")
         if not p.options["args"].no_cuts:
-            log.info("Cutting bad sources from dolphot catalog.")
-            f = open("tmp", "w")
-            numlines = sum(1 for _ in open(base))
-            log.info(
-                "There are %s sources in dolphot file %s. Cutting bad sources...",
-                numlines,
-                dolphot["base"],
-            )
-            bar = progressbar.ProgressBar(maxval=numlines).start()
-            typecol = self.get_dolphot_column(colfile, "Object type", "")
-            with open(dolphot["base"]) as dolphot_file:
-                for i, line in enumerate(dolphot_file):
-                    bar.update(i)
-                    if int(line.split()[typecol]) == 1:
-                        f.write(line)
-            bar.finish()
-            f.close()
-            log.info("Done cutting bad sources")
-            if filecmp.cmp(dolphot["base"], "tmp"):
-                log.info("No changes to dolphot file %s.", dolphot["base"])
-                os.remove("tmp")
+            catalog = load_dolphot_catalog_array(base)
+            if typecol is None:
+                log.warning(
+                    "Object type column not found; skipping cuts to dolphot output."
+                )
             else:
-                log.info("Updating dolphot file %s.", dolphot["base"])
-                shutil.move("tmp", dolphot["base"])
+                n0 = len(catalog)
+                good = catalog[:, typecol] == 1
+                n1 = int(np.count_nonzero(good))
+                log.info(
+                    "Dolphot catalog %s: %d sources, %d after type==1 cut.",
+                    os.path.basename(base),
+                    n0,
+                    n1,
+                )
+                if n1 < n0:
+                    catalog = catalog[good]
+                    np.savetxt(base, catalog, fmt="%.16g")
         else:
             if os.path.exists(dolphot["original"]):
                 shutil.copyfile(dolphot["original"], dolphot["base"])
+            catalog = load_dolphot_catalog_array(base)
+
+        ix = find_column_index_0based(columns, "Object X", "")
+        iy = find_column_index_0based(columns, "Object Y", "")
+        isn = find_column_index_0based(columns, "Signal-to-noise", "")
+        icnt = find_column_index_0based(columns, "Normalized count rate", "")
+        if ix is None or iy is None:
+            log.error("Dolphot columns file missing Object X / Object Y.")
+            _scrapedolphot_cleanup(None, note="missing_xy_columns")
+            return None
+
         with fits.open(reference) as hdu:
             w = wcs_from_fits_hdu(hdu, 0)
             x, y = wcs.utils.skycoord_to_pixel(coord, w, origin=1)
@@ -477,74 +651,86 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 coord1 = SkyCoord(ra, dec1, unit="deg")
                 x1, y1 = wcs.utils.skycoord_to_pixel(coord1, w, origin=1)
                 radius = np.sqrt((x - x1) ** 2 + (y - y1) ** 2)
-        log.info(
-            "Looking for a source around x=%s, y=%s in %s with a radius of %s",
-            "%7.2f" % float(x),
-            "%7.2f" % float(y),
-            reference,
-            "%7.4f" % float(radius),
-        )
+
+        xline = catalog[:, ix].astype(np.float64, copy=False) + 0.5
+        yline = catalog[:, iy].astype(np.float64, copy=False) + 0.5
+        dist = np.hypot(xline - x, yline - y)
+        mask = dist < float(radius)
+        idx = np.flatnonzero(mask)
         data = []
-        with open(dolphot["base"]) as dp:
-            for line in dp:
-                xcol = self.get_dolphot_column(colfile, "Object X", "")
-                ycol = self.get_dolphot_column(colfile, "Object Y", "")
-                xline = float(line.split()[xcol]) + 0.5
-                yline = float(line.split()[ycol]) + 0.5
-                dist = np.sqrt((xline - x) ** 2 + (yline - y) ** 2)
-                sn = self.get_dolphot_data(line, colfile, "Signal-to-noise", "")
-                counts = self.get_dolphot_data(
-                    line, colfile, "Normalized count rate", ""
-                )
-                if dist < radius:
-                    data.append(
-                        {
-                            "sep": dist,
-                            "data": line,
-                            "sn": float(sn),
-                            "counts": float(counts),
-                        }
-                    )
+        for i in idx:
+            row = catalog[i]
+            sn = (
+                float(row[isn])
+                if isn is not None and isn < row.shape[0]
+                else float("nan")
+            )
+            cnt = (
+                float(row[icnt])
+                if icnt is not None and icnt < row.shape[0]
+                else float("nan")
+            )
+            data.append(
+                {
+                    "sep": float(dist[i]),
+                    "data": row,
+                    "sn": sn,
+                    "counts": cnt,
+                }
+            )
+
         limit_data = []
         if get_limits:
             limit_radius = dolphot["limit_radius"]
             limit_data = self.get_limit_data(
-                dolphot, coord, w, x, y, colfile, limit_radius
+                dolphot,
+                coord,
+                w,
+                x,
+                y,
+                colfile,
+                limit_radius,
+                catalog=catalog,
+                xcol=ix,
+                ycol=iy,
             )
         log.info(
-            "Done looking for sources in dolphot file %s. "
-            "hst123 found %s sources around: %s %s",
-            dolphot["base"],
+            "Scrape: x=%s y=%s r=%s px | %d source(s) in %s near %.6f %.6f",
+            "%7.2f" % float(x),
+            "%7.2f" % float(y),
+            "%7.4f" % float(radius),
             len(data),
+            os.path.basename(dolphot["base"]),
             ra,
             dec,
         )
         if len(data) == 0:
             _scrapedolphot_cleanup(None, note="no_sources_in_radius")
             return None
-        if brightest:
-            data = sorted(data, key=lambda obj: obj["counts"], reverse=True)
-            log.warning(
-                "Found more than one source; picking brightest object."
-            )
-        else:
-            data = sorted(data, key=lambda obj: obj["sep"])
-            log.warning(
-                "Found more than one source; picking closest to %s %s",
-                ra,
-                dec,
-            )
+        if len(data) > 1:
+            if brightest:
+                data = sorted(data, key=lambda obj: obj["counts"], reverse=True)
+                if not scrapeall:
+                    log.info(
+                        "Multiple sources in radius: choosing brightest "
+                        "(SN/cnts ordering)."
+                    )
+            else:
+                data = sorted(data, key=lambda obj: obj["sep"])
+                if not scrapeall:
+                    log.info(
+                        "Multiple sources in radius: choosing closest to "
+                        "target (%.6f, %.6f).",
+                        ra,
+                        dec,
+                    )
         if not scrapeall:
             data = [data[0]]
             log.info(
-                "Separation=%s, Signal-to-noise=%s",
+                "Selected source: sep=%.4f px, S/N=%s",
                 data[0]["sep"],
                 data[0]["sn"],
             )
-        obstable = p.input_list(images, show=False, save=False)
-        if not obstable:
-            _scrapedolphot_cleanup(None, note="empty_obstable")
-            return None
         final_phot = []
         for dat in data:
             finished = False
@@ -552,7 +738,12 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             limit_data_cur = limit_data
             while not finished:
                 source_phot = self.parse_phot(
-                    obstable, dat["data"], colfile, limit_data=limit_data_cur
+                    obstable,
+                    dat["data"],
+                    colfile,
+                    limit_data=limit_data_cur,
+                    measurement_idx=measurement_idx,
+                    columns=columns,
                 )
                 finished = True
                 if "LIMIT" in source_phot.keys():
@@ -563,7 +754,16 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                             limit_radius = 2 * limit_radius
                             finished = False
                             limit_data_cur = self.get_limit_data(
-                                dolphot, coord, w, x, y, colfile, limit_radius
+                                dolphot,
+                                coord,
+                                w,
+                                x,
+                                y,
+                                colfile,
+                                limit_radius,
+                                catalog=catalog,
+                                xcol=ix,
+                                ycol=iy,
                             )
             source_phot.meta["separation"] = dat["sep"]
             source_phot.meta["magsystem"] = p.magsystem

@@ -61,7 +61,11 @@ from hst123.utils.stdio import (
     suppress_stdout,
     suppress_stdout_fd,
 )
-from hst123.utils.options import want_redo_astrodrizzle
+from hst123.utils.options import (
+    dolphot_catalog_already_present,
+    want_redo_astrodrizzle,
+    want_redo_dolphot,
+)
 from hst123.utils.paths import (
     normalize_fits_path,
     normalize_work_and_raw_dirs,
@@ -3129,8 +3133,19 @@ def main():
                 make_banner(banner.format(file=hst.dolphot['param']))
                 hst._dolphot.make_dolphot_file(split_images, hst.reference)
 
-                log.info('Starting dolphot run...')
-                hst._dolphot.run_dolphot()
+                skip_dolphot = (
+                    not want_redo_dolphot(opt)
+                    and dolphot_catalog_already_present(hst.dolphot)
+                )
+                if skip_dolphot:
+                    log.info(
+                        "Skipping DOLPHOT run: catalog already present at %s. "
+                        "Use --redo-dolphot or --redo to re-run.",
+                        hst.dolphot["base"],
+                    )
+                else:
+                    log.info("Starting dolphot run...")
+                    hst._dolphot.run_dolphot()
             _phase(f"visit_{i}_dolphot_execute")
 
             # Scrape data from the dolphot catalog for the input coordinates

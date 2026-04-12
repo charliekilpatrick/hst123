@@ -1,0 +1,43 @@
+# Publish the hst123 package to https://pypi.org/project/hst123/
+#
+# Setup (one-time on PyPI):
+#   1. Create the "hst123" project on PyPI (or claim the name if reserved).
+#   2. Publishing → "Add a new publisher" → GitHub → this repo → this workflow file.
+#      (Optional: restrict to a GitHub Environment named "pypi" and add the same
+#       name under "Publisher" on PyPI.)
+#
+# Release:
+#   git tag v1.2.3 && git push origin v1.2.3
+#   (setuptools-scm reads the tag; requires fetch-depth: 0 below)
+#
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install --upgrade pip build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

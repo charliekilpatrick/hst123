@@ -166,7 +166,11 @@ class TestGetLimitData:
         assert len(result) == 1
         # dist = sqrt(0.5^2 + 0.5^2) from (10,10) to (10.5, 10.5)
         assert result[0][0] == pytest.approx(0.707, abs=0.02)
-        assert result[0][1].strip() == "10 10"
+        row = result[0][1]
+        if isinstance(row, str):
+            assert row.strip() == "10 10"
+        else:
+            assert float(row[0]) == 10 and float(row[1]) == 10
 
 
 class TestCalcAvgStats:
@@ -252,8 +256,8 @@ class TestParsePhot:
         assert isinstance(result, Table)
         assert "MJD" in result.colnames
         assert "MAGNITUDE" in result.colnames
-        assert result.meta.get("x") == "100"
-        assert result.meta.get("y") == "200"
+        assert float(result.meta.get("x")) == 100.0
+        assert float(result.meta.get("y")) == 200.0
 
 
 class TestPrintFinalPhot:

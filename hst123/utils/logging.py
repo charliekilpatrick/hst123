@@ -1107,7 +1107,7 @@ def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
     logger.info(
         "MAST dl=%s clob=%s arch=%s [%s] | align=%s skip_tr=%s hier=%s | "
         "drizzle=%s redriz=%s dim=%s by_vis=%s max_cores=%s | dp run=%s scrape=%s %s lim=%s "
-        "clean=%s fake=%s | keep_driz_art=%s keep_obj=%s | redo=%s redo_a=%s redo_d=%s",
+        "clean=%s fake=%s | keep_driz_art=%s keep_obj=%s | redo=%s redo_dp=%s redo_a=%s redo_d=%s",
         opt.download,
         opt.clobber,
         getattr(opt, "archive", None) or "—",
@@ -1129,6 +1129,7 @@ def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
         getattr(opt, "keep_drizzle_artifacts", False),
         getattr(opt, "keep_objfile", False),
         getattr(opt, "redo", False),
+        getattr(opt, "redo_dolphot", False),
         getattr(opt, "redo_astrometry", False),
         getattr(opt, "redo_astrodrizzle", False),
     )

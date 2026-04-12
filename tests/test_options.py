@@ -79,6 +79,33 @@ def test_want_redo_astrodrizzle():
     assert options.want_redo_astrodrizzle(SimpleNamespace(redo_astrodrizzle=True)) is True
 
 
+def test_want_redo_dolphot():
+    assert options.want_redo_dolphot(SimpleNamespace()) is False
+    assert options.want_redo_dolphot(SimpleNamespace(redo=True)) is True
+    assert options.want_redo_dolphot(SimpleNamespace(redo_dolphot=True)) is True
+
+
+def test_dolphot_catalog_already_present(tmp_path):
+    base = tmp_path / "dp0000"
+    col = tmp_path / "dp0000.columns"
+    base.write_text("1 2 3\n")
+    col.write_text("1. col\n")
+    assert options.dolphot_catalog_already_present(
+        {"base": str(base), "colfile": str(col)}
+    )
+    base.write_text("")
+    assert not options.dolphot_catalog_already_present(
+        {"base": str(base), "colfile": str(col)}
+    )
+
+
+def test_redo_dolphot_flag_parses():
+    parser = options.add_options()
+    args = parser.parse_args(["0", "0", "--redo-dolphot"])
+    assert args.redo_dolphot is True
+    assert args.redo is False
+
+
 def test_handle_args_redo_sets_both_redo_flags(monkeypatch):
     """--redo implies redo_astrometry and redo_astrodrizzle (handle_args)."""
     import hst123 as _hst
