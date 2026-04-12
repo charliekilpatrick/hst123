@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Sequence
 from typing import Any
 
 import copy
@@ -108,6 +109,56 @@ def drizzle_product_catalog_header(hdul):
         if "NINPUT" in h1 and "INPUT" in h1:
             return h1
     return h0
+
+
+def canonical_drizzle_input_stem(token: str) -> str:
+    """
+    Normalize a drizzle ``INPUT`` token (path or stem) for comparison across runs.
+
+    WFPC2 scratch copies use ``{{root}}_hst123drz{{tag}}_c0m`` (see
+    :func:`wfpc2_astrodrizzle_scratch_paths`); calibrated files use
+    ``{{root}}_c0m``. Map the former to the latter so an on-disk reference
+    drizzle matches the current exposure list.
+    """
+    t = str(token).strip()
+    if not t:
+        return ""
+    base = os.path.basename(t)
+    lower = base.lower()
+    if lower.endswith(".fits"):
+        base = base[:-5]
+    if "_hst123drz" in base and base.endswith("_c0m"):
+        root = base.split("_hst123drz", 1)[0]
+        return f"{root}_c0m"
+    return base
+
+
+def drizzle_reference_inputs_match(
+    reference_paths: Sequence[str | os.PathLike[str]],
+    hdr,
+) -> bool:
+    """
+    True if *hdr* ``NINPUT`` / ``INPUT`` describe the same exposures as *reference_paths*.
+
+    Comparison is order-independent and uses :func:`canonical_drizzle_input_stem`
+    so scratch-based INPUT records match workspace paths.
+    """
+    if "NINPUT" not in hdr or "INPUT" not in hdr:
+        return False
+    try:
+        n_hdr = int(hdr["NINPUT"])
+    except (TypeError, ValueError):
+        return False
+    paths = [os.fspath(p) for p in reference_paths]
+    if n_hdr != len(paths):
+        return False
+    want = sorted(canonical_drizzle_input_stem(p) for p in paths)
+    raw = str(hdr["INPUT"]).strip()
+    parts = [x.strip() for x in raw.split(",") if x.strip()]
+    if len(parts) != n_hdr:
+        return False
+    got = sorted(canonical_drizzle_input_stem(x) for x in parts)
+    return want == got
 
 
 def rename_astrodrizzle_sidecars(

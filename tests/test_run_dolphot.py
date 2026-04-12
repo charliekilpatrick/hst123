@@ -264,6 +264,17 @@ class TestNeedsToBeMasked:
         prim = DolphotPrimitive(mock_pipeline)
         assert prim.needs_to_be_masked(str(path)) is True
 
+    def test_dolphot_mask_markers_done_in_primary_matches_wfc3(self, tmp_path):
+        mock_pipeline = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "WFC3_UVIS"
+        path = tmp_path / "img.fits"
+        hdu = fits.PrimaryHDU()
+        hdu.header["DOL_WFC3"] = 0
+        hdu.writeto(str(path), overwrite=True)
+        prim = DolphotPrimitive(mock_pipeline)
+        assert prim.dolphot_mask_markers_done_in_primary(str(path)) is True
+
 
 class TestGenerateBaseParamFile:
     def test_writes_nimg_and_dolphot_params(self):

@@ -9,12 +9,11 @@ import os
 
 def pipeline_workspace_dir(work_dir: str | os.PathLike[str] | None) -> str | None:
     """
-    Return ``<work_dir>/workspace`` — calibrated inputs, TweakReg/AstroDrizzle products.
+    Return ``<work_dir>/workspace`` — calibrated inputs, TweakReg scratch, etc.
 
-    The main drizzled **reference** image (``*.ref_*.drc.fits``) stays in
-    ``work_dir``; per-epoch drizzle outputs and science FITS for alignment live
-    under this directory. Consolidated ``--drizzle-all`` products use
-    ``<work_dir>/drizzle/`` (not under ``workspace/``).
+    Drizzled stacks (per-epoch ``*.ut*.drc.fits`` and ``--drizzle-all``) are written
+    under ``<work_dir>/drizzle/``, not here. The main **reference** drizzle
+    (``*.ref_*.drc.fits``) stays in ``work_dir`` root.
 
     Returns
     -------

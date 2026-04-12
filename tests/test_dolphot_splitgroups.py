@@ -89,6 +89,24 @@ def test_needs_to_split_groups_uses_expected_count(minimal_fits_file):
     assert prim.needs_to_split_groups(minimal_fits_file) is False
 
 
+def test_needs_to_split_groups_when_science_newer_than_chips(tmp_path):
+    """Re-calibrated / replaced FLT must re-run splitgroups when chip FITS are stale."""
+    import os
+    import time
+
+    from hst123.primitives.run_dolphot import DolphotPrimitive
+
+    mef = tmp_path / "raw.fits"
+    _two_sci_mef(mef)
+    prim = DolphotPrimitive(object())
+    assert prim.needs_to_split_groups(str(mef)) is True
+    apply_splitgroups(mef)
+    assert prim.needs_to_split_groups(str(mef)) is False
+    t = time.time() + 200.0
+    os.utime(mef, (t, t))
+    assert prim.needs_to_split_groups(str(mef)) is True
+
+
 def test_split_groups_python_path_no_external(tmp_path):
     from hst123.primitives.run_dolphot import DolphotPrimitive
 

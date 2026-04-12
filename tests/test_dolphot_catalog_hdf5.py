@@ -19,8 +19,6 @@ from hst123.utils.dolphot_catalog_hdf5 import (
     write_dolphot_catalog_hdf5,
 )
 
-h5py = pytest.importorskip("h5py")
-
 
 def test_parse_column_index_and_description():
     assert parse_column_index_and_description("3. Object X position on ref") == (
@@ -47,6 +45,7 @@ def test_find_column_index_matches_scrape_semantics(tmp_path):
 
 
 def test_write_dolphot_catalog_hdf5_roundtrip(tmp_path):
+    h5py = pytest.importorskip("h5py")
     base = tmp_path / "dp0000"
     col = tmp_path / "dp0000.columns"
     col.write_text(
@@ -118,6 +117,47 @@ def test_write_dolphot_catalog_hdf5_roundtrip(tmp_path):
         assert "images" in merged
 
 
+def test_write_dolphot_catalog_hdf5_embeds_dolphot_directory_manifest(tmp_path):
+    """Pipeline writes HDF5 with a manifest of every file under ``<work>/dolphot/``."""
+    h5py = pytest.importorskip("h5py")
+    base = tmp_path / "dp0000"
+    col = tmp_path / "dp0000.columns"
+    col.write_text(
+        "1. Extension (zero for base image)\n"
+        "2. Chip (for three-dimensional FITS image)\n"
+        "3. Object X position\n"
+        "4. Measured counts, /tmp/foo.chip2 (ACS_F555W, 100.0 sec)\n",
+        encoding="utf-8",
+    )
+    np.savetxt(
+        base,
+        np.array([[0, 1, 100.0, 50.0], [0, 1, 101.0, 51.0]]),
+    )
+    (tmp_path / "dp0000.param").write_text("Nimg = 1\n", encoding="utf-8")
+    (tmp_path / "dp0000.info").write_text("1 sets of output data\n", encoding="utf-8")
+    (tmp_path / "dp0000.data").write_text("WCS image 1: 1\n", encoding="utf-8")
+    (tmp_path / "dp0000.warnings").write_text("", encoding="utf-8")
+    (tmp_path / "extra_note.txt").write_text("auxiliary file\n", encoding="utf-8")
+
+    out = tmp_path / "bundle.h5"
+    write_dolphot_catalog_hdf5(
+        out,
+        base,
+        compression=False,
+        dolphot_dir=tmp_path,
+    )
+
+    with h5py.File(out, "r") as hf:
+        dg = hf["metadata"]["dolphot_directory"]
+        man = json.loads(dg["manifest_json"][0])
+        rels = {e["relpath"] for e in man}
+        assert "extra_note.txt" in rels
+        assert "dp0000.columns" in rels
+        assert dg.attrs["n_files"] == len(man)
+        assert not bool(dg.attrs["text_embed"])
+        assert "text_embed" not in dg
+
+
 def test_vet_against_sample_dp_catalog_if_present(tmp_path):
     """Optional: vet parsers against local DOLPHOT products if ``test_data/dolphot/dp0000`` exists."""
     sample_dp = Path(__file__).resolve().parents[1] / "test_data" / "dolphot" / "dp0000"
@@ -144,6 +184,7 @@ def test_vet_against_sample_dp_catalog_if_present(tmp_path):
         warn,
     )
     assert "img0001" in merged["images"]
+    pytest.importorskip("h5py")
     out = tmp_path / "vet_dp0000.h5"
     write_dolphot_catalog_hdf5(out, sample_dp, compression=True)
     assert out.is_file()

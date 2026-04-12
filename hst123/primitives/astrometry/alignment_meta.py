@@ -114,3 +114,23 @@ def clear_alignment_provenance(primary_header) -> None:
     for k in (H_ALIGNOK, H_ALIGNMT, H_ALIGNRF):
         if k in primary_header:
             del primary_header[k]
+
+
+def alignment_done_on_primary_header(primary_header) -> bool:
+    """
+    True if this HDU header indicates TweakReg (or hierarchical) alignment completed.
+
+    Uses only ``TWEAKSUC`` and ``HIERARCH`` — not generic ALIGN* provenance alone.
+    Skipping ``updatewcs`` based on ALIGN without a reference match would disagree
+    with :func:`alignment_is_redundant` and could suppress ``updatewcs`` while
+    :meth:`check_images_for_tweakreg` still schedules TweakReg.
+    """
+    try:
+        ts = float(primary_header.get("TWEAKSUC", 0))
+    except (TypeError, ValueError):
+        ts = 0.0
+    if ts == 1.0:
+        return True
+    if "HIERARCH" in primary_header and primary_header.get("HIERARCH") == 1:
+        return True
+    return False

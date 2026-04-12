@@ -31,6 +31,7 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "requests>=2.32.0",
     "scipy>=1.11,<2",  # 1.11+ has reliable wheels on Python 3.12 with NumPy 1.x
+    "h5py>=3.8",  # DOLPHOT catalog HDF5 export (default after scrape)
     "jhat",
 ]
 
@@ -41,8 +42,8 @@ perf = [
 ]
 test = [
     "pytest>=7.0",
-    "h5py>=3.8",
 ]
+# Legacy extra for ``pip install .[hdf5]``; h5py is already a core dependency.
 hdf5 = [
     "h5py>=3.8",
 ]

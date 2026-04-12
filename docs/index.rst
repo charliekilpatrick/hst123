@@ -2,54 +2,54 @@
 Welcome to hst123's documentation!
 ##################################
 
-**hst123** is a Python pipeline for Hubble Space Telescope data: download from
-MAST, align (TweakReg / JHAT), drizzle, run DOLPHOT, and scrape photometry from
-DOLPHOT catalogs. See the :doc:`user_guide` for an overview.
+**hst123** is a Python pipeline for *Hubble Space Telescope* data: query and
+download from MAST, align images (TweakReg / JHAT), combine with AstroDrizzle,
+optionally run DOLPHOT for PSF photometry, and scrape DOLPHOT catalogs at a
+target position.
 
-Installing hst123
-=================
+* :doc:`installation` — Python 3.12, Conda, DrizzlePac, optional DOLPHOT.
+* :doc:`user_guide` — Work-directory layout, CLI overview, outputs, formats.
+* :doc:`api` — ``hst123`` class, utilities, DOLPHOT HDF5 export.
 
-**Requirements:** Python 3.12 (see ``requires-python`` in ``pyproject.toml``), Astropy, DrizzlePac, and related (STScI WCS code is bundled in ``hst123.utils.stwcs``; see ``STWCS_VENDOR.txt`` there)
-dependencies (see ``pyproject.toml``). DOLPHOT is optional; use
-``hst123-install-dolphot`` after activating your environment.
+Quick install
+=============
 
-From the repository root:
+From the repository root (see :doc:`installation` for detail):
 
 .. code-block:: bash
 
    conda env create -f environment.yml
    conda activate hst123
+   pip install drizzlepac
    pip install -e .
 
-Editable install with documentation dependencies:
+Build this documentation locally:
 
 .. code-block:: bash
 
    pip install -e ".[docs]"
-
-Build HTML locally:
-
-.. code-block:: bash
-
    cd docs && make html
 
-The `GitHub Actions documentation workflow
+The `documentation workflow
 <https://github.com/charliekilpatrick/hst123/actions/workflows/documentation.yml>`__
-publishes the built site to **GitHub Pages** (`hosted docs
-<https://charliekilpatrick.github.io/hst123/>`__).
+publishes to `GitHub Pages <https://charliekilpatrick.github.io/hst123/>`__.
 
-Package layout
-==============
+Repository layout
+=================
 
-- **hst123/** — main package: ``_pipeline`` (CLI orchestration), ``primitives/``
-  (FITS, photometry, astrometry, DOLPHOT, scrape), ``utils/`` (logging,
-  options, WCS, AstroDrizzle helpers, DOLPHOT utilities), ``datamodels/``.
-- **docs/** — Sphinx sources (this tree); changelog and zero points as Markdown.
+- **hst123/** — ``_pipeline`` (CLI and orchestration), ``primitives/`` (FITS,
+  photometry, astrometry, DOLPHOT, scrape), ``utils/`` (options, logging, paths,
+  AstroDrizzle helpers, DOLPHOT utilities, bundled STScI WCS under
+  ``utils.stwcs``), ``datamodels/``.
+- **tests/** — ``pytest`` suite (markers: ``network``, ``dolphot``).
+- **docs/** — Sphinx (reStructuredText + MyST Markdown): this site, changelog,
+  zeropoints.
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents
 
+   installation
    user_guide
    changelog
    zeropoints

@@ -61,6 +61,14 @@ def add_options(parser=None, usage=None, version=None):
         action='store_true',
         help='Re-create drizzled products even when the output file already exists.',
     )
+    parser.add_argument(
+        '--redo-dolphot',
+        dest='redo_dolphot',
+        default=False,
+        action='store_true',
+        help='Re-run DOLPHOT even when a catalog already exists under the work '
+        'dolphot directory. Also implied by --redo.',
+    )
     parser.add_argument('--cleanup', default=False, action='store_true',
         help='Clean up interstitial image files (flt/flc/c0m/c1m symlinks) and '
         'DOLPHOT sky sidecars (*.drc.noise.fits) under --work-dir.')
@@ -210,7 +218,19 @@ def add_options(parser=None, usage=None, version=None):
         help='Skip cuts to dolphot output file.')
     parser.add_argument('--brightest', default=False, action='store_true',
         help='Sort output source files by signal-to-noise in reference image.')
-
+    parser.set_defaults(write_dolphot_hdf5=True)
+    parser.add_argument(
+        '--no-write-dolphot-hdf5',
+        dest='write_dolphot_hdf5',
+        action='store_false',
+        help='Skip writing <dolphot-base>.h5 after scrape (default: write when h5py is installed).',
+    )
+    parser.add_argument(
+        '--write-dolphot-hdf5',
+        dest='write_dolphot_hdf5',
+        action='store_true',
+        help=argparse.SUPPRESS,
+    )
 
     return(parser)
 
@@ -239,3 +259,40 @@ def want_redo_astrodrizzle(args) -> bool:
         or getattr(args, "redo", False)
         or getattr(args, "redo_astrodrizzle", False)
     )
+
+
+def want_redo_dolphot(args) -> bool:
+    """
+    Return True if DOLPHOT should be executed even when a catalog already exists.
+
+    True when ``--redo`` or ``--redo-dolphot`` is set.
+    """
+    return bool(
+        getattr(args, "redo", False) or getattr(args, "redo_dolphot", False)
+    )
+
+
+def dolphot_catalog_already_present(dolphot: dict) -> bool:
+    """
+    Return True if the main DOLPHOT catalog file exists and is non-empty and
+    the ``*.columns`` file exists (ready for scraping).
+
+    Parameters
+    ----------
+    dolphot : dict
+        Pipeline ``dolphot`` dict with ``base`` and ``colfile`` paths.
+    """
+    import os
+
+    base = dolphot.get("base")
+    colfile = dolphot.get("colfile")
+    if not base or not os.path.isfile(base):
+        return False
+    try:
+        if os.stat(base).st_size <= 0:
+            return False
+    except OSError:
+        return False
+    if colfile and not os.path.isfile(colfile):
+        return False
+    return True

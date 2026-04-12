@@ -56,19 +56,24 @@ def estimate_limit_from_snr_bins(mags, errs, snr_target=3.0, n_bins=100):
         Estimated limiting magnitude at snr_target; np.nan if insufficient data.
     """
     try:
-        mags = np.array(mags)
-        errs = np.array(errs)
-        bin_mag = np.linspace(np.min(mags), np.max(mags), n_bins)
-        snr = np.zeros(n_bins)
-    except ValueError:
+        mags = np.asarray(mags, dtype=np.float64)
+        errs = np.asarray(errs, dtype=np.float64)
+        lo, hi = np.min(mags), np.max(mags)
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            return np.nan
+        bin_edges = np.linspace(lo, hi, n_bins + 1)
+        inv_err = 1.0 / errs
+        dig = np.searchsorted(bin_edges, mags, side="right") - 1
+        dig = np.clip(dig, 0, n_bins - 1)
+        snr = np.empty(n_bins)
+        for i in range(n_bins - 1):
+            sel = dig == i
+            snr[i] = np.nanmedian(inv_err[sel]) if np.any(sel) else np.nan
+        snr[n_bins - 1] = snr[n_bins - 2] if n_bins > 1 else np.nan
+    except (ValueError, TypeError):
         return np.nan
-    for i in range(n_bins):
-        if i == n_bins - 1:
-            snr[i] = snr[i - 1]
-        else:
-            idx = np.where((mags > bin_mag[i]) & (mags < bin_mag[i + 1]))[0]
-            snr[i] = np.median(1.0 / errs[idx]) if len(idx) > 0 else np.nan
     mask = ~np.isnan(snr)
+    bin_mag = 0.5 * (bin_edges[:-1] + bin_edges[1:])
     bin_mag = bin_mag[mask]
     snr = snr[mask]
     if len(snr) <= 10:
@@ -127,13 +132,6 @@ class PhotometryHelper(BasePrimitive):
             except Exception:
                 pass
         if not idx:
-            self._primitive_cleanup(
-                "avg_magnitudes",
-                validation_notes={
-                    "skipped": "no_valid_rows",
-                    "n_input": len(magerrs),
-                },
-            )
             return (float("NaN"), float("NaN"))
         magerrs = np.array([float(m) for m in magerrs])[idx]
         counts = np.array([float(c) for c in counts])[idx]
@@ -142,16 +140,6 @@ class PhotometryHelper(BasePrimitive):
         flux = counts / exptimes * 10 ** (0.4 * (27.5 - zpt))
         fluxerr = 1.0 / 1.086 * magerrs * flux
         mag, magerr = weighted_avg_flux_to_mag(flux, fluxerr)
-        self._primitive_cleanup(
-            "avg_magnitudes",
-            validation_notes={
-                "mag": mag,
-                "magerr": magerr,
-                "mag_finite": bool(np.isfinite(mag)),
-                "magerr_finite": bool(np.isfinite(magerr)),
-                "n_used": len(idx),
-            },
-        )
         return mag, magerr
 
     def estimate_mag_limit(self, mags, errs, limit=3.0):
@@ -181,20 +169,8 @@ class PhotometryHelper(BasePrimitive):
             errs = np.array(errs)
         except ValueError:
             log.warning(warning)
-            self._primitive_cleanup(
-                "estimate_mag_limit",
-                validation_notes={"skipped": "value_error"},
-            )
             return np.nan
         result = estimate_limit_from_snr_bins(mags, errs, snr_target=limit)
         if np.isnan(result):
             log.warning(warning)
-        self._primitive_cleanup(
-            "estimate_mag_limit",
-            validation_notes={
-                "limit_mag": result,
-                "limit_finite": bool(np.isfinite(result)),
-                "snr_target": limit,
-            },
-        )
         return result

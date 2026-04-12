@@ -5,6 +5,7 @@ import functools
 import glob
 import logging
 import os
+import re
 import random
 import shutil
 import time
@@ -79,6 +80,15 @@ def _resolve_work_dir_chdir(work_dir):
     os.makedirs(target, exist_ok=True)
     os.chdir(target)
     return target
+
+
+def _workspace_rawtmp_path(workspace_fits: str) -> str:
+    """Partner ``*.rawtmp.fits`` for a workspace ``*.fits`` (basename-safe)."""
+    if workspace_fits.endswith(".rawtmp.fits"):
+        return workspace_fits
+    if workspace_fits.endswith(".fits"):
+        return workspace_fits[:-5] + ".rawtmp.fits"
+    return workspace_fits + ".rawtmp.fits"
 
 
 def _is_number(num):
@@ -229,6 +239,111 @@ class AstrometryPrimitive(BasePrimitive):
         newhdu.writeto(reference, output_verify="silentfix", overwrite=True)
         return True
 
+    def _pipeline_reference_filter(self, ref_path: str | None) -> str | None:
+        """
+        Filter name for the pipeline reference, matching :meth:`_build_tweakreg_batches`.
+
+        Drizzled ``*.drc.fits`` products may have empty ``FILTNAM1`` on PRIMARY while
+        ``FILTER`` is set; :meth:`~hst123.primitives.fits.FitsHelper.get_filter`
+        may still recover the band. As a last resort, parse ``inst.<filt>.ref_*.drc.fits``.
+        """
+        if not ref_path or not str(ref_path).strip():
+            return None
+        rp = normalize_fits_path(str(ref_path).strip())
+        if not os.path.isfile(rp):
+            return None
+        try:
+            f = self._p._fits.get_filter(rp)
+            f = (f or "").strip()
+            if f:
+                return f
+        except Exception:
+            pass
+        base = os.path.basename(rp)
+        m = re.match(r"^[^.]+\.([a-z0-9]+)\.ref_\d+\.drc\.fits$", base, re.I)
+        if m:
+            return m.group(1).lower()
+        return None
+
+    def _primary_header_for_alignment_probe(self, file: str):
+        """
+        Primary header to evaluate ALIGN* provenance.
+
+        TweakReg records provenance on working copies (often ``*.rawtmp.fits``).
+        When *file* is workspace ``*.fits`` and has no block, probe the partner
+        rawtmp if present.
+        """
+        fp = normalize_fits_path(file)
+        candidates = [fp]
+        if fp.endswith(".fits") and not fp.endswith(".rawtmp.fits"):
+            rt = _workspace_rawtmp_path(fp)
+            if rt != fp:
+                candidates.append(rt)
+        existing = [p for p in candidates if os.path.isfile(p)]
+        if not existing:
+            with fits.open(fp, mode="readonly") as hdu:
+                return hdu[0].header
+        for path in existing:
+            with fits.open(path, mode="readonly") as hdu:
+                hdr = hdu[0].header
+                if read_alignment_provenance(hdr) is not None:
+                    return hdr
+        with fits.open(existing[0], mode="readonly") as hdu:
+            return hdu[0].header
+
+    def _effective_tweakreg_reference_for_image(
+        self,
+        image: str,
+        all_images: list[str],
+        reference: str | None,
+    ) -> str | None:
+        """
+        Match :meth:`_build_tweakreg_batches` reference choice per filter.
+
+        The pipeline ``handle_reference`` path is often a drizzled ``*.drc.fits``;
+        per-filter batches still use the deepest exposure (as ``*.rawtmp.fits``)
+        when the drizzle filter does not match. Stored ``ALIGNRF`` must be
+        compared against that same path.
+        """
+        fp = normalize_fits_path(image)
+        if not all_images:
+            return reference
+
+        def _filt_of(p: str) -> str:
+            try:
+                return self._p._fits.get_filter(normalize_fits_path(p)).strip()
+            except Exception:
+                return ""
+
+        by_filt: dict[str, list[str]] = {}
+        for p in all_images:
+            p2 = normalize_fits_path(p)
+            if not os.path.isfile(p2):
+                continue
+            by_filt.setdefault(_filt_of(p2), []).append(p2)
+
+        filt = _filt_of(fp)
+        paths = by_filt.get(filt, [])
+        if len(paths) < 2:
+            return reference
+
+        ref_ok = bool(
+            reference
+            and str(reference).strip()
+            and reference != "dummy.fits"
+            and os.path.isfile(normalize_fits_path(reference))
+        )
+        ref_path = normalize_fits_path(reference) if ref_ok else None
+        ref_filt = self._pipeline_reference_filter(reference) if ref_ok else None
+
+        if ref_filt is not None and filt == ref_filt:
+            return reference
+        deepest_fits = sorted(paths, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
+        raw = _workspace_rawtmp_path(deepest_fits)
+        if os.path.isfile(raw):
+            return normalize_fits_path(raw)
+        return normalize_fits_path(deepest_fits)
+
     def check_images_for_tweakreg(
         self,
         run_images,
@@ -236,6 +351,8 @@ class AstrometryPrimitive(BasePrimitive):
         alignment_method: str | None = None,
         alignment_ref_id: str | None = None,
         force_realign: bool = False,
+        tweakreg_reference_images: list[str] | None = None,
+        tweakreg_pipeline_reference: str | None = None,
     ):
         """
         Return images that still need TweakReg-style alignment.
@@ -256,6 +373,15 @@ class AstrometryPrimitive(BasePrimitive):
         force_realign : bool, optional
             If True (``--clobber``, ``--redo``, ``--redo-astrometry``), never skip
             based on provenance.
+        tweakreg_reference_images : list of str, optional
+            Full workspace image list (e.g. obstable ``image`` column). When set
+            with :meth:`_effective_tweakreg_reference_for_image`, the reference
+            id compared to provenance matches :meth:`_build_tweakreg_batches`
+            (pipeline drizzle vs deepest exposure per filter), not only the
+            pipeline reference argument.
+        tweakreg_pipeline_reference : str, optional
+            Pipeline reference path (same as ``handle_reference``). Used with
+            *tweakreg_reference_images* for per-filter batch ref resolution.
 
         Returns
         -------
@@ -285,41 +411,51 @@ class AstrometryPrimitive(BasePrimitive):
             )
 
         method_tok = alignment_method_token(alignment_method)
-        ref_for_compare = (
-            normalize_alignment_ref_id(alignment_ref_id)
-            if alignment_ref_id
-            else None
-        )
+        use_batch_ref = tweakreg_reference_images is not None
 
         for file in list(images):
-            with fits.open(file, mode="readonly") as hdu:
-                hdr = hdu[0].header
-                prov = read_alignment_provenance(hdr)
-                if (
-                    not force_realign
-                    and ref_for_compare
-                    and alignment_is_redundant(
-                        hdr,
-                        method=method_tok,
-                        ref_id=alignment_ref_id,
-                        require_success=True,
-                    )
-                ):
-                    log.info(
-                        "Skipping alignment for %s: already aligned "
-                        "(success=True, method=%s, reference_id=%s)",
-                        os.path.basename(file),
-                        prov["method"] if prov else method_tok,
-                        prov["ref"] if prov else ref_for_compare,
-                    )
-                    images.remove(file)
-                    continue
-                log.debug(
-                    "Alignment needed for %s (provenance=%s, ref_id=%s)",
-                    file,
-                    prov,
-                    ref_for_compare,
+            fp = normalize_fits_path(file)
+            ref_id = alignment_ref_id
+            if use_batch_ref:
+                ref_id = self._effective_tweakreg_reference_for_image(
+                    fp,
+                    tweakreg_reference_images,
+                    tweakreg_pipeline_reference,
                 )
+                if ref_id is None or str(ref_id).strip() == "":
+                    ref_id = alignment_ref_id
+            ref_for_compare = (
+                normalize_alignment_ref_id(ref_id) if ref_id else None
+            )
+            hdr = self._primary_header_for_alignment_probe(fp)
+            prov = read_alignment_provenance(hdr)
+            if (
+                not force_realign
+                and ref_for_compare
+                and ref_id is not None
+                and str(ref_id).strip() != ""
+                and alignment_is_redundant(
+                    hdr,
+                    method=method_tok,
+                    ref_id=ref_id,
+                    require_success=True,
+                )
+            ):
+                log.info(
+                    "Skipping alignment for %s: already aligned "
+                    "(success=True, method=%s, reference_id=%s)",
+                    os.path.basename(file),
+                    prov["method"] if prov else method_tok,
+                    prov["ref"] if prov else ref_for_compare,
+                )
+                images.remove(file)
+                continue
+            log.debug(
+                "Alignment needed for %s (provenance=%s, ref_id=%s)",
+                file,
+                prov,
+                ref_for_compare,
+            )
 
         if len(images) == 0:
             return None
@@ -550,7 +686,10 @@ class AstrometryPrimitive(BasePrimitive):
 
         def _filt_of(tp):
             orig = tp.replace(".rawtmp.fits", ".fits")
-            return self._p._fits.get_filter(orig)
+            try:
+                return self._p._fits.get_filter(orig).strip()
+            except Exception:
+                return ""
 
         by_filt = {}
         for tp in tmp_images:
@@ -561,7 +700,7 @@ class AstrometryPrimitive(BasePrimitive):
             and reference != "dummy.fits"
             and os.path.isfile(reference)
         )
-        ref_filt = self._p._fits.get_filter(reference) if ref_ok else None
+        ref_filt = self._pipeline_reference_filter(reference) if ref_ok else None
 
         batches = []
         for filt in sorted(by_filt.keys(), key=str):
@@ -926,6 +1065,8 @@ class AstrometryPrimitive(BasePrimitive):
             alignment_method="tweakreg",
             alignment_ref_id=initial_ref,
             force_realign=force_realign,
+            tweakreg_reference_images=list(obstable["image"]),
+            tweakreg_pipeline_reference=initial_ref,
         )
         if not run_images:
             log.info(
