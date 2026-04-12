@@ -19,6 +19,7 @@ from astropy.table import Table, Column
 from scipy.interpolate import interp1d
 
 from hst123 import settings
+from hst123.utils.options import want_redo_astrometry
 from hst123.utils.paths import normalize_fits_path
 from hst123.utils.stdio import suppress_stdout
 from hst123.utils.logging import format_hdu_list_summary, log_calls
@@ -60,17 +61,24 @@ def _quiet_headerlet_loggers(fn):
 
 def _resolve_work_dir_chdir(work_dir):
     """
-    Return absolute work directory, create if missing, and chdir into it.
+    Return absolute directory used for alignment (``<work-dir>/workspace``), chdir into it.
+
+    TweakReg, JHAT, and AstroDrizzle scratch/logs use this tree; the main drizzled
+    reference may still live in the base ``--work-dir`` when given as an absolute path.
 
     Relative ``work_dir`` values must not be joined again after ``chdir`` —
     e.g. ``os.chdir("test_data")`` then ``join("test_data", "x.txt")`` would
     resolve to ``test_data/test_data/x.txt`` and raise FileNotFoundError.
     """
+    from hst123.utils.paths import pipeline_workspace_dir
+
     base = work_dir if work_dir else "."
     path = os.path.abspath(os.path.expanduser(base))
-    os.makedirs(path, exist_ok=True)
-    os.chdir(path)
-    return path
+    ws = pipeline_workspace_dir(path)
+    target = ws if ws else path
+    os.makedirs(target, exist_ok=True)
+    os.chdir(target)
+    return target
 
 
 def _is_number(num):
@@ -246,7 +254,8 @@ class AstrometryPrimitive(BasePrimitive):
         alignment_ref_id : str, optional
             Reference path, ``GAIA``, etc. If unset, redundancy is not evaluated.
         force_realign : bool, optional
-            If True (e.g. ``--clobber``), never skip based on provenance.
+            If True (``--clobber``, ``--redo``, ``--redo-astrometry``), never skip
+            based on provenance.
 
         Returns
         -------
@@ -767,7 +776,7 @@ class AstrometryPrimitive(BasePrimitive):
         p = self._p
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
         params = getattr(settings, "jhat_params", None) or {}
-        force_realign = getattr(p.options["args"], "clobber", False)
+        force_realign = want_redo_astrometry(p.options["args"])
         jhat_ref_id = "GAIA"
 
         log.info(
@@ -893,7 +902,7 @@ class AstrometryPrimitive(BasePrimitive):
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
         outshifts = os.path.join(outdir, "drizzle_shifts.txt")
         options = p.options["global_defaults"]
-        force_realign = getattr(p.options["args"], "clobber", False)
+        force_realign = want_redo_astrometry(p.options["args"])
 
         def _tweakreg_cleanup_and_return(result):
             vpaths = [

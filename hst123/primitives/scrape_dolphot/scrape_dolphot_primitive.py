@@ -525,12 +525,12 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         if brightest:
             data = sorted(data, key=lambda obj: obj["counts"], reverse=True)
             log.warning(
-                "WARNING: found more than one source. Picking brightest object"
+                "Found more than one source; picking brightest object."
             )
         else:
             data = sorted(data, key=lambda obj: obj["sep"])
             log.warning(
-                "WARNING: found more than one source. Picking closest to %s %s",
+                "Found more than one source; picking closest to %s %s",
                 ra,
                 dec,
             )

@@ -126,7 +126,7 @@ def show_photometry(
         or "MAGNITUDE_ERROR" not in keys
         or "EXPTIME" not in keys
     ):
-        log.error("ERROR: photometry table has a key error")
+        log.error("Photometry table has a key error.")
         return None
 
     avg_photometry = final_photometry[final_photometry["IS_AVG"] == 1]

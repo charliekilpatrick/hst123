@@ -43,14 +43,21 @@ class TestCompressLoggerName:
     def test_utils_shortened(self):
         assert compress_logger_name("hst123.utils.logging") == "u.logging"
 
+    def test_utils_stwcs_chain_last_segment(self):
+        assert (
+            compress_logger_name("hst123.utils.stwcs.updatewcs.makewcs")
+            == "makewcs"
+        )
+
     def test_primitives_prefix_dropped(self):
         assert compress_logger_name("hst123.primitives.fits") == "fits"
 
     def test_leading_underscore_stripped(self):
         assert compress_logger_name("hst123._pipeline") == "pipeline"
 
-    def test_third_party_last_two_segments(self):
-        assert compress_logger_name("stwcs.wcsutil.altwcs") == "wcsutil.altwcs"
+    def test_third_party_last_segment_only(self):
+        assert compress_logger_name("stwcs.wcsutil.altwcs") == "altwcs"
+        assert compress_logger_name("stwcs.updatewcs.makewcs") == "makewcs"
 
     def test_short_name_unchanged(self):
         assert compress_logger_name("astropy") == "astropy"
@@ -172,6 +179,9 @@ def test_log_pipeline_configuration_logs_version_and_flags(tmp_path, caplog, mon
         cleanup=False,
         keep_drizzle_artifacts=False,
         keep_objfile=False,
+        redo=False,
+        redo_astrometry=False,
+        redo_astrodrizzle=False,
         drizzle_num_cores=4,
     )
     caplog.set_level(logging.INFO)
@@ -188,7 +198,8 @@ def test_log_pipeline_configuration_logs_version_and_flags(tmp_path, caplog, mon
     assert "dl=True" in text
     assert "dp run=True" in text
     assert "after=2020-01-01" in text
-    assert "ad_cores=4" in text
+    assert "max_cores=4" in text
+    assert "redo=False" in text
 
 
 def test_run_external_command_echo(caplog, tmp_path):

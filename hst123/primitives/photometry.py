@@ -173,8 +173,8 @@ class PhotometryHelper(BasePrimitive):
             Limiting magnitude; np.nan if insufficient range or data.
         """
         warning = (
-            "WARNING: cannot sample a wide enough range of magnitudes "
-            "to estimate a limit"
+            "Cannot sample a wide enough range of magnitudes "
+            "to estimate a limit."
         )
         try:
             mags = np.array(mags)

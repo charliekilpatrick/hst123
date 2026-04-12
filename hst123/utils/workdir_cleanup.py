@@ -245,6 +245,7 @@ def cleanup_after_astrodrizzle(
     *,
     log: logging.Logger,
     keep_artifacts: bool = False,
+    base_work_dir: str | os.PathLike[str] | None = None,
 ) -> None:
     """
     After a successful AstroDrizzle run: remove well-known scratch products.
@@ -256,9 +257,11 @@ def cleanup_after_astrodrizzle(
     DrizzlePac often emits **root-prefixed** mask names (e.g. ``*_crmask.fits``)
     rather than bare ``crmask.fits`` in ``work_dir``.
 
-    When ``--drizzle-all`` is used, the drizzle product lives under
-    ``<work_dir>/drizzle/``; the same intermediates (e.g. ``staticMask.fits``,
-    ``drz_med.fits``, ``single_sci.fits``) are removed there as well.
+    When ``--drizzle-all`` is used, drizzle products live under
+    ``<base_work_dir>/drizzle/``. *work_dir* is typically ``<base>/workspace`` (the
+    AstroDrizzle scratch/output tree); DrizzlePac may also drop ``staticMask.fits``
+    and similar files in the **base** work directory, so pass *base_work_dir* to
+    scrub both trees.
     """
     if keep_artifacts or not work_dir:
         return
@@ -268,10 +271,31 @@ def cleanup_after_astrodrizzle(
 
     _archive_file(wd, "astrodrizzle.log", log)
 
+    scan_dirs: list[str] = [wd]
+    d_sub = os.path.join(wd, "drizzle")
+    if os.path.isdir(d_sub):
+        scan_dirs.append(d_sub)
+
+    if base_work_dir:
+        bw = os.path.abspath(os.path.expanduser(os.fspath(base_work_dir)))
+        if bw != wd:
+            scan_dirs.append(bw)
+            bd = os.path.join(bw, "drizzle")
+            if os.path.isdir(bd):
+                scan_dirs.append(bd)
+
+    # De-duplicate (workspace/drizzle should not appear when drizzle/ is only under base)
+    seen_dir: set[str] = set()
+    uniq_dirs: list[str] = []
+    for d in scan_dirs:
+        ad = os.path.abspath(d)
+        if ad not in seen_dir and os.path.isdir(ad):
+            seen_dir.add(ad)
+            uniq_dirs.append(ad)
+
     removed: list[str] = []
-    for d in (wd, os.path.join(wd, "drizzle")):
-        if os.path.isdir(d):
-            removed.extend(_remove_interstitial_drizzle_scratch_files(d, log=log))
+    for d in uniq_dirs:
+        removed.extend(_remove_interstitial_drizzle_scratch_files(d, log=log))
 
     if removed:
         log.info(

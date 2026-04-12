@@ -181,7 +181,9 @@ def ensure_wcsname_tweak_on_image(image_path: str, logger: logging.Logger) -> No
             imhdu.flush()
 
 
-def wfpc2_astrodrizzle_scratch_paths(c0m_path: str, pid: int) -> tuple[str, str | None]:
+def wfpc2_astrodrizzle_scratch_paths(
+    c0m_path: str, disambig: str | int
+) -> tuple[str, str | None]:
     """
     Scratch paths for WFPC2 ``*_c0m.fits`` (and paired ``*_c1m.fits``) passed to AstroDrizzle.
 
@@ -195,8 +197,9 @@ def wfpc2_astrodrizzle_scratch_paths(c0m_path: str, pid: int) -> tuple[str, str 
     ----------
     c0m_path
         Absolute path to the science ``*_c0m.fits`` file.
-    pid
-        Process id (or other disambiguator) so concurrent runs do not collide.
+    disambig
+        Process id, uuid fragment, or other token so concurrent AstroDrizzle runs do not
+        collide on scratch names.
 
     Returns
     -------
@@ -209,9 +212,10 @@ def wfpc2_astrodrizzle_scratch_paths(c0m_path: str, pid: int) -> tuple[str, str 
     if len(base) < 9 or not base.lower().endswith("_c0m.fits"):
         raise ValueError(f"expected WFPC2 *_c0m.fits path, got {c0m_path!r}")
     root = base[:-9]
-    tmp_c0m = os.path.join(d, f"{root}_hst123drz{pid}_c0m.fits")
+    tag = str(disambig)
+    tmp_c0m = os.path.join(d, f"{root}_hst123drz{tag}_c0m.fits")
     c1m_orig = os.path.join(d, f"{root}_c1m.fits")
-    tmp_c1m = os.path.join(d, f"{root}_hst123drz{pid}_c1m.fits")
+    tmp_c1m = os.path.join(d, f"{root}_hst123drz{tag}_c1m.fits")
     if os.path.isfile(c1m_orig):
         return tmp_c0m, tmp_c1m
     return tmp_c0m, None

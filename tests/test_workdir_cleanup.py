@@ -59,6 +59,24 @@ def test_cleanup_after_astrodrizzle_removes_hst123drz_scratch_glob(tmp_path):
     assert not (wd / "u2465107t_hst123drz12345_c1m.fits").exists()
 
 
+def test_cleanup_after_astrodrizzle_base_work_dir_removes_interstitials_in_base(tmp_path):
+    """When AstroDrizzle runs with outdir=workspace/, DrizzlePac may leave staticMask in base."""
+    base = tmp_path / "job"
+    base.mkdir()
+    ws = base / "workspace"
+    ws.mkdir()
+    (base / "staticMask.fits").write_bytes(b"0")
+    (ws / "single_sci.fits").write_bytes(b"0")
+    log = logging.getLogger("test_cleanup_base_ws")
+
+    cleanup_after_astrodrizzle(
+        str(ws), log=log, keep_artifacts=False, base_work_dir=str(base)
+    )
+
+    assert not (base / "staticMask.fits").exists()
+    assert not (ws / "single_sci.fits").exists()
+
+
 def test_cleanup_after_astrodrizzle_removes_static_mask_and_archives_log(tmp_path):
     wd = tmp_path / "w"
     wd.mkdir()

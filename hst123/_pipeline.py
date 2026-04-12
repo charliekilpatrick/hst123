@@ -18,10 +18,12 @@ import filecmp
 import glob
 import logging as py_logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 import random
 import shutil
 import sys
 import time
+import uuid
 import warnings
 
 import numpy as np
@@ -51,6 +53,7 @@ from hst123.utils.logging import (
     ingest_text_file_to_logger,
     log_calls,
     log_pipeline_configuration,
+    log_pipeline_phase_summary,
     make_banner,
 )
 from hst123.utils.stdio import (
@@ -58,7 +61,12 @@ from hst123.utils.stdio import (
     suppress_stdout,
     suppress_stdout_fd,
 )
-from hst123.utils.paths import normalize_fits_path, normalize_work_and_raw_dirs
+from hst123.utils.options import want_redo_astrodrizzle
+from hst123.utils.paths import (
+    normalize_fits_path,
+    normalize_work_and_raw_dirs,
+    pipeline_workspace_dir,
+)
 from hst123.utils.astrodrizzle_paths import (
     astrodrizzle_output_exists,
     logical_driz_to_internal_astrodrizzle,
@@ -257,13 +265,9 @@ class hst123(object):
                 with suppress_stdout():
                     clear_download_cache()
     except RuntimeError:
-        warning = 'WARNING: Runtime Error in clear_download_cache().\n'
-        warning += 'Passing...'
-        pass
+        log.warning("Runtime error in clear_download_cache(); continuing.")
     except FileNotFoundError:
-        warning = 'WARNING: Cannot run full clear_download_cache().\n'
-        warning += 'Passing...'
-        pass
+        log.warning("Cannot run full clear_download_cache(); continuing.")
 
   @log_calls
   def try_to_get_image(self, image):
@@ -458,14 +462,19 @@ class hst123(object):
             drizname = drizname.format(inst=inst.split('_')[0],
                 filt=filt, n=n, date=date_str)
 
-        if self.options['args'].work_dir:
-            # Keep drizzle-all products in a dedicated subdirectory.
+        if self.options["args"].work_dir:
+            wd_base = os.path.abspath(
+                os.path.expanduser(self.options["args"].work_dir)
+            )
+            driz_root = pipeline_workspace_dir(wd_base) or wd_base
+            # Per-epoch drizzle products live under workspace/; --drizzle-all
+            # consolidated outputs use <work-dir>/drizzle/ (base, not workspace/).
             if self.options["args"].drizzle_all:
-                drizzle_dir = os.path.join(self.options["args"].work_dir, "drizzle")
+                drizzle_dir = os.path.join(wd_base, "drizzle")
                 os.makedirs(drizzle_dir, exist_ok=True)
                 drizname = os.path.join(drizzle_dir, drizname)
             else:
-                drizname = os.path.join(self.options['args'].work_dir, drizname)
+                drizname = os.path.join(driz_root, drizname)
 
         obstable[i]['drizname'] = drizname
 
@@ -570,6 +579,9 @@ class hst123(object):
         os.makedirs(dest_abs, exist_ok=True)
         raw_sub = os.path.join(dest_abs, "raw")
         os.makedirs(raw_sub, exist_ok=True)
+        ws_dir = pipeline_workspace_dir(dest_abs)
+        if ws_dir:
+            os.makedirs(ws_dir, exist_ok=True)
         for file in glob.glob(os.path.join(rawdir, "*.fits")):
             if check_for_coord:
                 warning, check = self.needs_to_be_reduced(file, save_c1m=True)
@@ -578,7 +590,11 @@ class hst123(object):
                     continue
             base = os.path.basename(file)
             real_tgt = os.path.join(raw_sub, base)
-            dest = os.path.join(dest_abs, base)
+            dest = (
+                os.path.join(ws_dir, base)
+                if ws_dir
+                else os.path.join(dest_abs, base)
+            )
             if not os.path.isfile(real_tgt):
                 log.info("%s -> %s (under raw/)", file, real_tgt)
                 shutil.copyfile(file, real_tgt)
@@ -598,7 +614,7 @@ class hst123(object):
                 except OSError:
                     pass
             try:
-                rel = os.path.relpath(real_tgt, dest_abs)
+                rel = os.path.relpath(real_tgt, os.path.dirname(dest))
                 os.symlink(rel, dest)
                 log.info("Symlink %s -> %s", dest, rel)
             except OSError:
@@ -644,9 +660,11 @@ class hst123(object):
         try:
             os.makedirs(archivedir)
         except OSError:
-            error = 'ERROR: could not make archive dir {dir}\n'
-            error += 'Enable write permissions to this location\n'
-            error += 'Exiting...'
+            error = (
+                'Could not make archive dir {dir}\n'
+                'Enable write permissions to this location\n'
+                'Exiting...'
+            )
             log.error(error.format(dir=archivedir))
             return False, None
 
@@ -656,9 +674,11 @@ class hst123(object):
         try:
             os.makedirs(path)
         except OSError:
-            error = 'ERROR: could not make archive dir {0}\n'
-            error += 'Enable write permissions to this location\n'
-            error += 'Exiting...'
+            error = (
+                'Could not make archive dir {0}\n'
+                'Enable write permissions to this location\n'
+                'Exiting...'
+            )
             log.error(error.format(path))
             return False, None
 
@@ -693,16 +713,14 @@ class hst123(object):
     if not archivedir:
         archivedir = self.options['args'].archive
     if not os.path.exists(archivedir):
-        warning = 'WARNING: could find archive dir {0}'
-        log.warning(warning.format(archivedir))
+        log.warning("Archive directory does not exist: %s", archivedir)
         return None
 
     fullfile = self._archive_path_for_product(product, archivedir)
     path, basefile = os.path.split(fullfile)
 
     if not os.path.exists(fullfile):
-        warning = 'WARNING: could not find file {0}'
-        log.warning(warning.format(fullfile))
+        log.warning("Archive file not found: %s", fullfile)
         return None
     else:
         if check_for_coord:
@@ -749,7 +767,7 @@ class hst123(object):
         Returns None if the file is missing.
     """
     if not os.path.exists(reference):
-        error = 'ERROR: reference {ref} does not exist!'
+        error = 'Reference {ref} does not exist!'
         log.error(error.format(ref=reference))
         return None
 
@@ -829,7 +847,7 @@ class hst123(object):
         Returns None if *reference* does not exist.
     """
     if not os.path.exists(reference):
-        error = "ERROR: reference {ref} does not exist!"
+        error = "Reference {ref} does not exist!"
         log.error(error.format(ref=reference))
         return None
 
@@ -951,8 +969,7 @@ class hst123(object):
     if not os.path.exists(image):
         success = self.try_to_get_image(image)
         if not success:
-            warning = 'WARNING: {image} does not exist'
-            return warning.format(img=image), False
+            return '{image} does not exist'.format(image=image), False
 
     try:
         hdu = fits.open(image, mode='readonly')
@@ -961,19 +978,16 @@ class hst123(object):
             if h.data is not None and h.name.upper()=='SCI':
                 check = True
     except (OSError, TypeError, AttributeError):
-        warning = 'WARNING: {img} is empty or corrupted.  '
-        warning += 'Trying to download again...'
-        log.warning(warning.format(img=image))
+        msg = '{img} is empty or corrupted. Trying to download again...'
+        log.warning(msg.format(img=image))
 
         success = False
         if not self.productlist:
-            warning = 'WARNING: could not find or download {img}'
-            return warning.format(img=image), False
+            return 'could not find or download {img}'.format(img=image), False
 
         mask = self.productlist['productFilename']==image
         if self.productlist[mask]==0:
-            warning = 'WARNING: could not find or download {img}'
-            return warning.format(img=image), False
+            return 'could not find or download {img}'.format(img=image), False
 
         self.download_files(
             self.productlist,
@@ -996,8 +1010,7 @@ class hst123(object):
                     if h.data is not None and h.name.upper()=='SCI':
                         check = True
             except (OSError, TypeError, AttributeError):
-                warning = 'WARNING: could not find or download {img}'
-                return warning.format(img=image), False
+                return 'could not find or download {img}'.format(img=image), False
 
     is_not_hst_image = False
     warning = ''
@@ -1006,15 +1019,13 @@ class hst123(object):
     # Check for header keys that we need
     for key in ['INSTRUME','EXPTIME','DATE-OBS','TIME-OBS']:
         if key not in hdu[0].header.keys():
-            warning = 'WARNINGS: {key} not in {img} header'
-            warning = warning.format(key=key, img=image)
-            return warning, False
+            msg = '{key} not in {img} header'
+            return msg.format(key=key, img=image), False
 
     instrument = hdu[0].header['INSTRUME'].lower()
     if 'c1m.fits' in image and not save_c1m:
         # We need the c1m.fits files, but they aren't reduced as science data
-        warning = 'WARNING: do not need to reduce c1m.fits files.'
-        return warning, False
+        return 'do not need to reduce c1m.fits files.', False
 
     if ('DETECTOR' in hdu[0].header.keys()):
         detector = hdu[0].header['DETECTOR'].lower()
@@ -1024,22 +1035,18 @@ class hst123(object):
         flag = hdu[0].header['EXPFLAG']
         if flag=='INDETERMINATE':
             if not keep_indt:
-                warning = f'WARNING: {image} has EXPFLAG==INDETERMINATE'
-                return warning, False
+                return f'{image} has EXPFLAG==INDETERMINATE', False
         elif 'TDF-DOWN' in flag:
             if not keep_tdf_down:
-                warning = f'WARNING: {image} has EXPFLAG==TDF-DOWN AT EXPSTART'
-                return warning, False
+                return f'{image} has EXPFLAG==TDF-DOWN AT EXPSTART', False
         elif flag!='NORMAL':
-            warning = f'WARNING: {image} has EXPFLAG=={flag}.'
-            return warning, False
+            return f'{image} has EXPFLAG=={flag}.', False
 
     # Get rid of exposures with exptime < 20s
     if not keep_short:
         exptime = hdu[0].header['EXPTIME']
         if (exptime < 15):
-            warning = f'WARNING: {image} EXPTIME is {exptime} < 20.'
-            return warning, False
+            return f'{image} EXPTIME is {exptime} < 20.', False
 
     # Now check date and compare to self.before
     mjd_obs = Time(hdu[0].header['DATE-OBS']+'T'+hdu[0].header['TIME-OBS']).mjd
@@ -1047,16 +1054,14 @@ class hst123(object):
         mjd_before = Time(self.before).mjd
         dbefore = self.before.strftime('%Y-%m-%d')
         if mjd_obs > mjd_before:
-            warning = f'WARNING: {image} after the input before date {dbefore}.'
-            return warning, False
+            return f'{image} after the input before date {dbefore}.', False
 
     # Same with self.after
     if self.after is not None:
         mjd_after = Time(self.after).mjd
         dafter = self.after.strftime('%Y-%m-%d')
         if mjd_obs < mjd_after:
-            warning = f'WARNING: {image} before the input after date {dafter}.'
-            return warning, False
+            return f'{image} before the input after date {dafter}.', False
 
     # Get rid of data where input coordinate not in any extension
     if self.coord:
@@ -1084,22 +1089,24 @@ class hst123(object):
         if not is_not_hst_image:
             ra = self.coord.ra.degree
             dec = self.coord.dec.degree
-            warning = f'WARNING: {image} does not contain: {ra} {dec}'
-            return warning, False
+            return f'{image} does not contain: {ra} {dec}', False
 
     filt = self._fits.get_filter(image).upper()
     if not (filt in self.options['acceptable_filters']):
-        warning = f'WARNING: {image} with FILTER={filt} '
-        warning += 'does not have an acceptable filter.'
-        return warning, False
+        msg = (
+            f'{image} with FILTER={filt} does not have an acceptable filter.'
+        )
+        return msg, False
 
     # Get rid of images that don't match one of the allowed instrument/detector
     # types and images whose extensions don't match the allowed type for those
     # instrument/detector types
     is_not_hst_image = False
     nextend = hdu[0].header['NEXTEND']
-    warning = f'WARNING: {image} with INSTRUME={instrument}, '
-    warning += f'DETECTOR={detector}, NEXTEND={nextend} is bad.'
+    warning = (
+        f'{image} with INSTRUME={instrument}, '
+        f'DETECTOR={detector}, NEXTEND={nextend} is bad.'
+    )
     if (instrument.upper() == 'WFPC2' and 'c0m.fits' in image and nextend==4):
         is_not_hst_image = True
     if (instrument.upper() == 'ACS' and
@@ -1316,7 +1323,7 @@ class hst123(object):
         refinst=self.options['args'].reference_instrument)
 
     if len(reference_images)==0:
-        error = 'ERROR: could not pick a reference image'
+        error = 'Could not pick a reference image'
         log.error(error)
         return None
 
@@ -1341,7 +1348,9 @@ class hst123(object):
 
     reference_images = sorted(reference_images)
 
-    if os.path.isfile(drizname):
+    if os.path.isfile(drizname) and not want_redo_astrodrizzle(
+        self.options["args"]
+    ):
         hdu = fits.open(drizname)
         try:
             hdr = drizzle_product_catalog_header(hdu)
@@ -1351,9 +1360,10 @@ class hst123(object):
                 str_input = ",".join([s.split(".")[0] for s in reference_images])
 
                 if hdr["INPUT"].startswith(str_input) and hdr["NINPUT"] == ninput:
-                    warning = "WARNING: drizzled image {drz} exists.\n"
-                    warning += "Skipping astrodrizzle..."
-                    log.warning(warning.format(drz=drizname))
+                    log.warning(
+                        "Drizzled image %s exists; skipping astrodrizzle.",
+                        drizname,
+                    )
                     return drizname
         finally:
             hdu.close()
@@ -1372,10 +1382,11 @@ class hst123(object):
                 reference_images.append(ip)
 
     if "wfpc2" in best_inst and len(obstable) < 3:
-        wd_glob = self.options["args"].work_dir or "."
+        wd = self.options["args"].work_dir or "."
+        ws = pipeline_workspace_dir(wd) or wd
         reference_images = [
             normalize_fits_path(p)
-            for p in glob.glob(os.path.join(wd_glob, "u*c0m.fits"))
+            for p in glob.glob(os.path.join(ws, "u*c0m.fits"))
             if os.path.isfile(p)
         ]
 
@@ -1396,7 +1407,10 @@ class hst123(object):
 
         outimage = "{inst}.ref.drc.fits".format(inst=inst)
         if self.options["args"].work_dir:
-            outimage = os.path.join(self.options["args"].work_dir, outimage)
+            ws = pipeline_workspace_dir(self.options["args"].work_dir)
+            outimage = os.path.join(
+                ws or self.options["args"].work_dir, outimage
+            )
 
         instrument_mask_ref_path = outimage
 
@@ -1684,7 +1698,7 @@ class hst123(object):
         self.fix_idcscale(image)
         return True
     except Exception:
-        error = 'ERROR: failed to update WCS for image {file}'
+        error = 'Failed to update WCS for image {file}'
         log.error(error.format(file=image))
         return None
 
@@ -1721,8 +1735,14 @@ class hst123(object):
         True if the drizzle product exists on disk; False otherwise.
     """
     n = len(obstable)
+    # Unique scratch names so concurrent AstroDrizzle calls never share dup/temp FITS.
+    scratch_tag = uuid.uuid4().hex[:16]
 
-    outdir = self.options['args'].work_dir or os.path.abspath(".")
+    wd_arg = self.options["args"].work_dir
+    if wd_arg:
+        outdir = pipeline_workspace_dir(wd_arg) or os.path.abspath(wd_arg)
+    else:
+        outdir = os.path.abspath(".")
     os.makedirs(outdir, exist_ok=True)
 
     if output_name is None:
@@ -1749,7 +1769,7 @@ class hst123(object):
         inst_l = self._fits.get_instrument(image).lower()
         base_l = os.path.basename(image).lower()
         if "wfpc2" in inst_l and base_l.endswith("_c0m.fits"):
-            tmp_c0m, tmp_c1m = wfpc2_astrodrizzle_scratch_paths(image, os.getpid())
+            tmp_c0m, tmp_c1m = wfpc2_astrodrizzle_scratch_paths(image, scratch_tag)
             shutil.copyfile(image, tmp_c0m)
             if tmp_c1m is not None:
                 c1m_src = os.path.join(
@@ -1813,7 +1833,9 @@ class hst123(object):
         if "wfpc2" in inst_l and base_l.endswith("_c0m.fits"):
             # DrizzlePac WFPC2 derives *_c1m.fits from the science name via _c0m→_c1m;
             # a generic dup_input.fits name breaks that and sky/DQ steps fail.
-            dup_c0m = os.path.join(outdir, "hst123_astrodrizzle_dup_c0m.fits")
+            dup_c0m = os.path.join(
+                outdir, f"hst123_astrodrizzle_dup_{scratch_tag}_c0m.fits"
+            )
             shutil.copyfile(first, dup_c0m)
             tmp_input.append(dup_c0m)
             c1m_src = os.path.join(
@@ -1821,7 +1843,9 @@ class hst123(object):
                 os.path.basename(first)[:-9] + "_c1m.fits",
             )
             if os.path.isfile(c1m_src):
-                dup_c1m = os.path.join(outdir, "hst123_astrodrizzle_dup_c1m.fits")
+                dup_c1m = os.path.join(
+                    outdir, f"hst123_astrodrizzle_dup_{scratch_tag}_c1m.fits"
+                )
                 shutil.copyfile(c1m_src, dup_c1m)
                 wfpc2_c1m_scratch.append(dup_c1m)
             else:
@@ -1831,7 +1855,9 @@ class hst123(object):
                     os.path.basename(first),
                 )
         else:
-            dup_path = os.path.join(outdir, "hst123_astrodrizzle_dup_input.fits")
+            dup_path = os.path.join(
+                outdir, f"hst123_astrodrizzle_dup_{scratch_tag}_input.fits"
+            )
             shutil.copyfile(first, dup_path)
             tmp_input.append(dup_path)
 
@@ -2008,12 +2034,10 @@ class hst123(object):
             if os.path.isfile(c1m_tmp):
                 os.remove(c1m_tmp)
 
-    for dup_name in (
-        "hst123_astrodrizzle_dup_input.fits",
-        "hst123_astrodrizzle_dup_c0m.fits",
-        "hst123_astrodrizzle_dup_c1m.fits",
-    ):
-        dup_p = os.path.join(outdir, dup_name)
+    for dup_suffix in ("input", "c0m", "c1m"):
+        dup_p = os.path.join(
+            outdir, f"hst123_astrodrizzle_dup_{scratch_tag}_{dup_suffix}.fits"
+        )
         if os.path.exists(dup_p):
             os.remove(dup_p)
 
@@ -2034,6 +2058,7 @@ class hst123(object):
             keep_artifacts=getattr(
                 self.options["args"], "keep_drizzle_artifacts", False
             ),
+            base_work_dir=self.options["args"].work_dir,
         )
         return False
 
@@ -2133,6 +2158,7 @@ class hst123(object):
         keep_artifacts=getattr(
             self.options["args"], "keep_drizzle_artifacts", False
         ),
+        base_work_dir=self.options["args"].work_dir,
     )
 
     return True
@@ -2219,7 +2245,7 @@ class hst123(object):
 
     # Check for coordinate and exit if it does not exist
     if not coord:
-        error = 'ERROR: coordinate was not provided.'
+        error = 'Coordinate was not provided.'
         return productlist
 
     make_banner("MAST catalog query")
@@ -2235,8 +2261,7 @@ class hst123(object):
             log.info("MAST Observations.login(token=...)")
             Observations.login(token=self.options['args'].token)
     except Exception:
-        warning = 'WARNING: could not log in with input username/password'
-        log.warning(warning)
+        log.warning("Could not log in with input username/password")
 
     try:
         obsTable = Observations.query_region(coord, radius=search_radius)
@@ -2244,8 +2269,7 @@ class hst123(object):
         requests.exceptions.ConnectionError,
         astroquery.exceptions.TimeoutError,
         requests.exceptions.ChunkedEncodingError):
-        error = 'ERROR: MAST is not currently working.\nTry again later...'
-        log.error(error)
+        log.error("MAST is not currently working. Try again later.")
         return productlist
 
     # Get rid of all masked rows (they aren't HST data anyway)
@@ -2309,7 +2333,7 @@ class hst123(object):
             mask = productList['type']=='S'
             productList = productList[mask]
         except Exception:
-            log.error('ERROR: MAST is not currently working. Try again later.')
+            log.error("MAST is not currently working. Try again later.")
             return productlist
 
         instrument = obs['instrument_name']
@@ -2371,6 +2395,35 @@ class hst123(object):
 
     return productlist
 
+  def _mast_download_one_product_row(self, item):
+    """
+    Download one MAST product row (used by :meth:`download_files` thread pool).
+
+    Parameters
+    ----------
+    item : tuple
+        ``(i, prod, filename, n, mast_staging_parent)`` where *i* is the 0-based
+        index in the full product list, *n* is ``len(productlist)``, and
+        *filename* is the destination path after archive / dest resolution.
+    """
+    i, prod, filename, n, mast_staging_parent = item
+    message = f"({i+1}/{n}) {filename}"
+    log.debug("MAST download try %s", message)
+    try:
+        with suppress_stdout():
+            download = Observations.download_products(
+                Table(prod),
+                download_dir=mast_staging_parent,
+                cache=False,
+            )
+        shutil.move(download['Local Path'][0], filename)
+
+        log.info("MAST ok %s", message)
+
+    except Exception as e:
+        log.warning("MAST fail %s: %s", message, e)
+        log.debug("Download exception detail", exc_info=True)
+
   @log_calls
   def download_files(
       self,
@@ -2405,10 +2458,12 @@ class hst123(object):
     -----
     Staging always lives under *work_dir* so ``mastDownload`` is not created in an
     unrelated shell current directory.
+
+    When multiple files need downloading, fetches run in parallel (thread pool)
+    with worker count ``min(--max-cores, number of files)``.
     """
     if not productlist:
-        error = 'ERROR: product list is empty.  Cannot download files.'
-        log.error(error)
+        log.error('Product list is empty. Cannot download files.')
         return False
 
     work_abs = os.path.abspath(os.path.expanduser(work_dir or os.getcwd()))
@@ -2429,19 +2484,16 @@ class hst123(object):
     if not dest and not archivedir:
         log.info("Download target: current directory (%s)", os.getcwd())
 
-    for i,prod in enumerate(productlist):
+    pending = []
+    for i, prod in enumerate(productlist):
         filename = prod['downloadFilename']
 
-        outdir = ''
         if dest:
-            outdir = dest
             filename = dest + '/' + filename
 
-        # Check if we enabled the archive option
         if archivedir:
             check, fullfile = self.check_archive(prod, archivedir=archivedir)
             filename = fullfile
-            outdir, basefile = os.path.split(fullfile)
             if check and not clobber:
                 message = '{file} exists. Skipping...'
                 log.info(message.format(file=filename))
@@ -2451,25 +2503,29 @@ class hst123(object):
             log.info(message.format(file=filename))
             continue
 
-        obsid = prod['obsID']
+        pending.append((i, prod, filename))
 
-        message = f"({i+1}/{n}) {filename}"
-        log.debug("MAST download try %s", message)
+    n_pending = len(pending)
+    opt = getattr(self, "options", None)
+    args = opt.get("args") if opt else None
+    mc = getattr(args, "drizzle_num_cores", None) if args else None
+    if mc is None:
+        mc = settings.default_astrodrizzle_cores()
+    max_workers = max(1, min(int(mc), n_pending) if n_pending else 1)
 
-        try:
-            with suppress_stdout():
-                download = Observations.download_products(
-                    Table(prod),
-                    download_dir=mast_staging_parent,
-                    cache=False,
-                )
-                shutil.move(download['Local Path'][0], filename)
-
-            log.info("MAST ok %s", message)
-
-        except Exception as e:
-            log.warning("MAST fail %s: %s", message, e)
-            log.debug("Download exception detail", exc_info=True)
+    if n_pending:
+        log.info(
+            "MAST download: fetching %i file(s) with up to %i thread(s) "
+            "(--max-cores).",
+            n_pending,
+            max_workers,
+        )
+        items = [
+            (i, prod, filename, n, mast_staging_parent)
+            for i, prod, filename in pending
+        ]
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            pool.map(self._mast_download_one_product_row, items)
 
     # Remove astroquery staging under work-dir (not the shell cwd when --work-dir is set)
     if os.path.isdir(mast_download_tree):
@@ -2590,7 +2646,9 @@ class hst123(object):
         If True, after per-epoch drizzles, run a second TweakReg pass and apply
         shifts tied to the deepest stacked image.
     clobber : bool, optional
-        If False, skip drizzle when the output file already exists.
+        If False, skip drizzle when the output file already exists. Set True when
+        using ``--redo-astrodrizzle``, ``--redo``, or ``--clobber`` (see
+        :func:`~hst123.utils.options.want_redo_astrodrizzle`).
     do_tweakreg : bool, optional
         Run TweakReg on each group before AstroDrizzle when alignment is enabled.
 
@@ -2598,6 +2656,11 @@ class hst123(object):
     -----
     Optional per-drizzle ``calcsky`` for non-reference products is controlled by
     ``HST123_DOLPHOT_SKY_FOR_DRIZZLE_ALL``.
+
+    Groups are processed **sequentially**: each step calls :meth:`run_tweakreg`, which
+    sets the process working directory to ``workspace/``; parallelizing groups in
+    threads would race on ``chdir``. DOLPHOT prep thread count is set by
+    ``--max-cores`` (same as AstroDrizzle workers).
     """
     opt = self.options['args']
 
@@ -2761,9 +2824,15 @@ class hst123(object):
         Parsed options (also stored as ``self.options['args']``).
     """
     opt = parser.parse_args()
+    if getattr(opt, "redo", False):
+        opt.redo_astrometry = True
+        opt.redo_astrodrizzle = True
     opt.work_dir, opt.raw_dir = normalize_work_and_raw_dirs(
         opt.work_dir, opt.raw_dir
     )
+    ws = pipeline_workspace_dir(opt.work_dir)
+    if ws:
+        os.makedirs(ws, exist_ok=True)
     self.options['args'] = opt
 
     # Handle other options
@@ -2794,8 +2863,7 @@ class hst123(object):
         if opt.fit_sky in [1,2,3,4]:
             self.options['global_defaults']['dolphot']['FitSky']=opt.fit_sky
         else:
-            warning = f'WARNING: --fit-sky {opt.fit_sky} not allowed.'
-            log.warning(warning)
+            log.warning('--fit-sky %s not allowed.', opt.fit_sky)
 
     if opt.tweak_search:
         self.options['global_defaults']['search_rad']=opt.tweak_search
@@ -2824,10 +2892,10 @@ class hst123(object):
     # Check for dolphot scripts and set run-dolphot to False if any of them is
     # not available.  This will prevent errors due to scripts not being in path
     if not self._dolphot.check_for_dolphot():
-        warning = 'WARNING: dolphot scripts not in path!  Setting --run-dolphot'
-        warning += ' to False.  If you want to run dolphot, download and '
-        warning += 'compile scripts!'
-        log.warning(warning)
+        log.warning(
+            "Dolphot scripts not in path; setting --run-dolphot to False. "
+            "If you want to run dolphot, download and compile scripts."
+        )
         opt.run_dolphot = False
 
     return opt
@@ -2857,7 +2925,15 @@ def main():
     hst123.hst123 : Programmatic use of the same pipeline steps.
     """
     ensure_cli_logging_configured()
-    start = time.time()
+    wall_start = time.perf_counter()
+    phase_rows: list[tuple[str, float]] = []
+    _phase_t = [time.perf_counter()]
+
+    def _phase(name: str) -> None:
+        now = time.perf_counter()
+        phase_rows.append((name, now - _phase_t[0]))
+        _phase_t[0] = now
+
     hst = hst123()
 
     # Handle the --help option
@@ -2899,9 +2975,11 @@ def main():
         version=__version__,
         coord_hmsdms=coord_str,
     )
+    _phase("config")
 
     # Handle file downloads - first check what products are available
     hst.productlist = hst.get_productlist(hst.coord, default['radius'])
+    _phase("mast_catalog_query")
     if opt.download:
         banner = f'Downloading HST data from MAST for: {ra} {dec} ({coord_str})'
         make_banner(banner)
@@ -2921,6 +2999,9 @@ def main():
             clobber=opt.clobber,
             work_dir=opt.work_dir,
         )
+        _phase("mast_download")
+    else:
+        _phase("mast_download_skipped")
 
     if opt.archive and not opt.skip_copy:
         log.info("Ingest: archive → work_dir (%s)", opt.work_dir)
@@ -2933,6 +3014,7 @@ def main():
     else:
         log.info("Ingest: raw_dir (%s) → work_dir", opt.raw_dir)
         hst.copy_raw_data(opt.raw_dir, reverse=True, check_for_coord=True)
+    _phase("ingest")
 
     # Get input images
     hst.input_images = hst._fits.get_input_images(workdir=opt.work_dir)
@@ -2944,6 +3026,7 @@ def main():
         if not needs_reduce:
             log.warning(warning)
             hst.input_images.remove(file)
+    _phase("input_filter")
 
     # Check there are still images that need to be reduced
     if len(hst.input_images)>0:
@@ -2958,6 +3041,7 @@ def main():
             )
             sys.exit(1)
         tables = hst.organize_reduction_tables(table, byvisit=opt.by_visit)
+        _phase("organize_visits")
 
         for i,obstable in enumerate(tables):
 
@@ -2979,14 +3063,19 @@ def main():
             if not opt.skip_tweakreg:
                 make_banner('Running main alignment ({})'.format(opt.align_with))
                 error, _ = hst._astrom.run_alignment(obstable, hst.reference)
+            _phase(f"visit_{i}_alignment")
 
             # Drizzle all visit/filter pairs if drizzleall
             # Handle this first, especially if doing hierarchical alignment
             if ((opt.drizzle_all or opt.hierarchical) and
                 'drizname' in obstable.keys()):
                 do_tweakreg = not opt.skip_tweakreg
-                hst.drizzle_all(obstable, hierarchical=opt.hierarchical,
-                    do_tweakreg=do_tweakreg, clobber=opt.clobber)
+                hst.drizzle_all(
+                    obstable,
+                    hierarchical=opt.hierarchical,
+                    do_tweakreg=do_tweakreg,
+                    clobber=want_redo_astrodrizzle(opt),
+                )
 
             if opt.redrizzle:
                 make_banner('Performing redrizzle of all epochs/filters')
@@ -2994,6 +3083,7 @@ def main():
                 do_tweakreg = not opt.skip_tweakreg
                 hst.drizzle_all(obstable, clobber=True,
                     do_tweakreg=do_tweakreg)
+            _phase(f"visit_{i}_drizzle_astrodrizzle")
 
             # dolphot image preparation: mask_image, split_groups, calc_sky
             split_images = []
@@ -3001,9 +3091,24 @@ def main():
                 message = 'Preparing dolphot data for files={files}.'
                 log.info(message.format(files=','.join(map(str,
                     obstable['image']))))
-                for image in obstable['image']:
-                    outimg = hst._dolphot.prepare_dolphot(image)
-                    split_images.extend(outimg)
+                prep_list = list(obstable['image'])
+                cores = max(1, int(getattr(opt, "drizzle_num_cores", 1) or 1))
+                if cores > 1 and len(prep_list) > 1:
+                    n = min(cores, len(prep_list))
+                    log.info(
+                        "DOLPHOT prepare using %d thread(s) for %d image(s) "
+                        "(--max-cores)",
+                        n,
+                        len(prep_list),
+                    )
+                    with ThreadPoolExecutor(max_workers=n) as pool:
+                        split_lists = list(pool.map(hst._dolphot.prepare_dolphot, prep_list))
+                    for outimg in split_lists:
+                        split_images.extend(outimg)
+                else:
+                    for image in prep_list:
+                        split_images.extend(hst._dolphot.prepare_dolphot(image))
+            _phase(f"visit_{i}_dolphot_prepare")
 
             if os.path.exists(hst.reference):
                 hst.compress_reference(hst.reference)
@@ -3016,6 +3121,7 @@ def main():
                             hst.reference,
                             hst.options["detector_defaults"],
                         )
+            _phase(f"visit_{i}_ref_calcsky")
 
             # Construct dolphot param file from split images and reference
             if opt.run_dolphot:
@@ -3023,10 +3129,9 @@ def main():
                 make_banner(banner.format(file=hst.dolphot['param']))
                 hst._dolphot.make_dolphot_file(split_images, hst.reference)
 
-                # Preparing to start dolphot...
-                log.info('Preparing to start dolphot run...')
-                time.sleep(10)
+                log.info('Starting dolphot run...')
                 hst._dolphot.run_dolphot()
+            _phase(f"visit_{i}_dolphot_execute")
 
             # Scrape data from the dolphot catalog for the input coordinates
             if opt.scrape_dolphot: hst._dolphot.get_dolphot_photometry(split_images,
@@ -3034,6 +3139,8 @@ def main():
 
             # Do fake star injection if --do-fake is passed
             if opt.do_fake: hst._dolphot.do_fake(obstable, hst.reference)
+
+        _phase("post_visit")
 
     # Write out a list of the input images with metadata for easy reference
     make_banner('Complete list of input images')
@@ -3055,10 +3162,13 @@ def main():
                 "Removed %d DOLPHOT noise sidecar(s) (*.drc.noise.fits) under work dir",
                 n_extra,
             )
+    _phase("finalize_list_cleanup")
 
+    wall_s = time.perf_counter() - wall_start
+    log_pipeline_phase_summary(log, phase_rows, wall_seconds=wall_s)
     message = 'Finished with: {cmd}\n'
     message += 'It took {time} seconds to complete this script.'
-    make_banner(message.format(cmd=hst.command, time=time.time()-start))
+    make_banner(message.format(cmd=hst.command, time=wall_s))
 
 
 if __name__ == '__main__':

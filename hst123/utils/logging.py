@@ -88,8 +88,9 @@ def compress_logger_name(name: str) -> str:
       ``*_primitive`` leafs (e.g. ``run_dolphot.run_dolphot_primitive`` →
       ``run_dolphot``), shorten ``utils.`` → ``u.``, strip a leading underscore
       from the first segment (``_pipeline`` → ``pipeline``).
-    - Other packages: keep the last two dotted segments (e.g.
-      ``stwcs.wcsutil.altwcs`` → ``wcsutil.altwcs``).
+    - Other packages: keep only the last dotted segment (e.g.
+      ``stwcs.updatewcs.makewcs`` → ``makewcs``, ``stwcs.wcsutil.altwcs`` → ``altwcs``)
+      to save space in session logs.
 
     Set ``HST123_LOG_FULL_NAMES=1`` to return *name* unchanged.
     """
@@ -128,11 +129,18 @@ def compress_logger_name(name: str) -> str:
                 i += 1
         if compact and compact[0].startswith("_"):
             compact[0] = compact[0].lstrip("_")
+        # Deep stwcs delegation chains (hst123.utils.stwcs.*) stay long; use last leaf only.
+        if (
+            len(compact) >= 3
+            and compact[0] == "u"
+            and compact[1] == "stwcs"
+        ):
+            return compact[-1]
         return ".".join(compact) if compact else ROOT_LOGGER
     parts = name.split(".")
     if len(parts) <= 2:
         return name
-    return ".".join(parts[-2:])
+    return parts[-1]
 
 
 class Hst123CompactFormatter(logging.Formatter):
@@ -1017,6 +1025,31 @@ def format_hdu_list_summary(hdulist, *, max_show=10):
     return f"{n} ext [{', '.join(parts)}]"
 
 
+def log_pipeline_phase_summary(
+    logger,
+    phases: list[tuple[str, float]],
+    *,
+    wall_seconds: float,
+) -> None:
+    """
+    Log one INFO line with per-phase durations (seconds) and wall time.
+
+    *phases* is a list of (label, elapsed_seconds) from consecutive perf_counter
+    segments (see :func:`main` in ``hst123._pipeline``).
+    """
+    if not phases:
+        logger.info("Pipeline timing: (no phases recorded) | wall=%.1fs", wall_seconds)
+        return
+    parts = [f"{name}={dt:.1f}s" for name, dt in phases]
+    summed = sum(dt for _, dt in phases)
+    logger.info(
+        "Pipeline timing: %s | segments_sum=%.1fs wall=%.1fs",
+        " | ".join(parts),
+        summed,
+        wall_seconds,
+    )
+
+
 def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
     """
     Log resolved paths, coordinate, and effective CLI options (grouped).
@@ -1068,13 +1101,13 @@ def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
         raw_abs,
         sys.executable,
     )
-    ad_cores = getattr(opt, "drizzle_num_cores", None)
-    if ad_cores is None:
-        ad_cores = 1
+    max_cores = getattr(opt, "drizzle_num_cores", None)
+    if max_cores is None:
+        max_cores = 1
     logger.info(
         "MAST dl=%s clob=%s arch=%s [%s] | align=%s skip_tr=%s hier=%s | "
-        "drizzle=%s redriz=%s dim=%s by_vis=%s ad_cores=%s | dp run=%s scrape=%s %s lim=%s "
-        "clean=%s fake=%s | keep_driz_art=%s keep_obj=%s",
+        "drizzle=%s redriz=%s dim=%s by_vis=%s max_cores=%s | dp run=%s scrape=%s %s lim=%s "
+        "clean=%s fake=%s | keep_driz_art=%s keep_obj=%s | redo=%s redo_a=%s redo_d=%s",
         opt.download,
         opt.clobber,
         getattr(opt, "archive", None) or "—",
@@ -1086,7 +1119,7 @@ def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
         opt.redrizzle,
         opt.drizzle_dim,
         opt.by_visit,
-        ad_cores,
+        max_cores,
         opt.run_dolphot,
         opt.scrape_dolphot,
         opt.dolphot,
@@ -1095,6 +1128,9 @@ def log_pipeline_configuration(logger, opt, *, version, coord_hmsdms, cwd=None):
         opt.do_fake,
         getattr(opt, "keep_drizzle_artifacts", False),
         getattr(opt, "keep_objfile", False),
+        getattr(opt, "redo", False),
+        getattr(opt, "redo_astrometry", False),
+        getattr(opt, "redo_astrodrizzle", False),
     )
 
 

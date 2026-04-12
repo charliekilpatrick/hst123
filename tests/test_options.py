@@ -1,4 +1,7 @@
 """Unit tests for utils.options."""
+import sys
+from types import SimpleNamespace
+
 import pytest
 
 from hst123.utils import options
@@ -53,3 +56,36 @@ class TestAddOptions:
         args = out.parse_args(["1", "2"])
         assert args.ra == "1"
         assert args.dec == "2"
+
+    def test_redo_flags_parse(self):
+        parser = options.add_options()
+        args = parser.parse_args(["0", "0", "--redo-astrometry", "--redo-astrodrizzle"])
+        assert args.redo_astrometry is True
+        assert args.redo_astrodrizzle is True
+        assert args.redo is False
+
+
+def test_want_redo_astrometry():
+    assert options.want_redo_astrometry(SimpleNamespace()) is False
+    assert options.want_redo_astrometry(SimpleNamespace(clobber=True)) is True
+    assert options.want_redo_astrometry(SimpleNamespace(redo=True)) is True
+    assert options.want_redo_astrometry(SimpleNamespace(redo_astrometry=True)) is True
+
+
+def test_want_redo_astrodrizzle():
+    assert options.want_redo_astrodrizzle(SimpleNamespace()) is False
+    assert options.want_redo_astrodrizzle(SimpleNamespace(clobber=True)) is True
+    assert options.want_redo_astrodrizzle(SimpleNamespace(redo=True)) is True
+    assert options.want_redo_astrodrizzle(SimpleNamespace(redo_astrodrizzle=True)) is True
+
+
+def test_handle_args_redo_sets_both_redo_flags(monkeypatch):
+    """--redo implies redo_astrometry and redo_astrodrizzle (handle_args)."""
+    import hst123 as _hst
+
+    monkeypatch.setattr(sys, "argv", ["hst123", "0", "0", "--redo"])
+    hst = _hst.hst123()
+    opt = hst.handle_args(hst.add_options())
+    assert opt.redo is True
+    assert opt.redo_astrometry is True
+    assert opt.redo_astrodrizzle is True

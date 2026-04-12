@@ -113,6 +113,11 @@ WFC3_MASK_MAP_FILENAMES = (
     "UVIS2wfc3_map.fits",
     "ir_wfc3_map.fits",
 )
+# Distortion / pixel-area maps (FITS) ship in PSF/PAM archives, not in dolphot3.1.WFC3.tar.gz
+WFC3_MASK_MAP_ARCHIVES = (
+    "WFC3_UVIS_PAM.tar.gz",
+    "WFC3_IR_PAM.tar.gz",
+)
 _MIN_PAM_FILE_BYTES = 512
 _MIN_PSF_FILE_BYTES = 512
 
@@ -191,7 +196,8 @@ def verify_wfc3_mask_support_files() -> tuple[bool, list[str]]:
 
     Python :func:`~hst123.utils.dolphot_mask.apply_wfc3mask` and the C ``wfc3mask``
     binary both read ``UVIS1wfc3_map.fits``, ``UVIS2wfc3_map.fits``, and
-    ``ir_wfc3_map.fits`` from ``.../wfc3/data`` (from ``dolphot3.1.WFC3.tar.gz``).
+    ``ir_wfc3_map.fits`` from ``.../wfc3/data`` (from ``WFC3_UVIS_PAM.tar.gz`` and
+    ``WFC3_IR_PAM.tar.gz``, same as :func:`install_psfs`).
     """
     d = resolve_dolphot_wfc3_data_dir()
     msgs: list[str] = []
@@ -219,6 +225,164 @@ def verify_wfc3_mask_support_files() -> tuple[bool, list[str]]:
         if not msgs:
             msgs.append(f"WFC3 mask maps invalid under {d}")
     return (len(msgs) == 0, msgs)
+
+
+def _dolphot_install_root_for_module_overlays(make_root: Path) -> Path:
+    """
+    Directory where instrument module ``.tar.gz`` files are extracted (same as
+    :func:`install_sources` *dest_dir*): parent of ``dolphot3.1/`` when the
+    Makefile lives in that subdirectory.
+    """
+    mr = Path(make_root).resolve()
+    if mr.name == f"dolphot{DOLPHOT_VERSION}":
+        return mr.parent
+    return mr
+
+
+def _find_dolphot_make_root_for_overlay() -> tuple[Path, Path] | None:
+    """
+    Return (install_root, make_root) for an existing DOLPHOT tree, or None.
+
+    *install_root* is where module tarballs are merged (``strip_top_level`` extract);
+    *make_root* contains the ``Makefile``.
+    """
+    seen: set[Path] = set()
+    roots_to_try: list[Path] = []
+    env = os.environ.get("HST123_DOLPHOT_ROOT", "").strip()
+    if env:
+        roots_to_try.append(Path(env).expanduser().resolve())
+    roots_to_try.extend(_candidate_dolphot_source_roots())
+    for r in roots_to_try:
+        try:
+            mr = dolphot_make_root(r)
+        except OSError:
+            continue
+        try:
+            mr = mr.resolve()
+        except OSError:
+            continue
+        if mr in seen:
+            continue
+        seen.add(mr)
+        if (mr / "Makefile").is_file():
+            inst = _dolphot_install_root_for_module_overlays(mr)
+            return inst, mr
+    return None
+
+
+def relocate_wfc3_mask_maps_into_canonical_layout(make_root: Path) -> bool:
+    """
+    Ensure ``UVIS1/2`` and ``ir`` ``*wfc3_map.fits`` live under *make_root*/wfc3/data.
+
+    Upstream ``WFC3_*_PAM.tar.gz`` archives extract to ``dolphot2.0/wfc3/data/``.
+    Copy into the canonical ``<make_root>/wfc3/data`` when missing (same idea
+    as :func:`relocate_acs_wfc_pam_into_canonical_layout`).
+    """
+    make_root = Path(make_root).resolve()
+    target = make_root / "wfc3" / "data"
+    if _wfc3_mask_maps_ok_in_data_dir(target):
+        return True
+    target.mkdir(parents=True, exist_ok=True)
+    for leg_root in _legacy_dolphot20_roots(make_root):
+        legacy = leg_root / "wfc3" / "data"
+        if not legacy.is_dir():
+            continue
+        for name in WFC3_MASK_MAP_FILENAMES:
+            src = legacy / name
+            dst = target / name
+            if not src.is_file():
+                continue
+            try:
+                if src.stat().st_size < _MIN_PAM_FILE_BYTES:
+                    continue
+            except OSError:
+                continue
+            if dst.is_file():
+                try:
+                    if dst.stat().st_size >= _MIN_PAM_FILE_BYTES:
+                        continue
+                except OSError:
+                    pass
+            shutil.copy2(src, dst)
+            log.info("WFC3 map: copied %s -> %s", src.name, dst)
+    if _wfc3_mask_maps_ok_in_data_dir(target):
+        _progress(f"  WFC3 distortion maps placed under {target} (from dolphot2.0 layout).")
+        return True
+    return False
+
+
+def ensure_wfc3_mask_support_files(*, timeout: int = 120) -> tuple[bool, list[str]]:
+    """
+    Ensure WFC3 ``wfc3mask`` distortion maps exist under ``.../wfc3/data``.
+
+    If :func:`verify_wfc3_mask_support_files` fails, downloads
+    ``WFC3_UVIS_PAM.tar.gz`` and ``WFC3_IR_PAM.tar.gz`` (same archives as
+    :func:`install_psfs`) and extracts them into the DOLPHOT Makefile root.
+
+    Note: ``dolphot3.1.WFC3.tar.gz`` is the WFC3 *source* module only; it does not
+    contain the ``*wfc3_map.fits`` files.
+
+    Set ``HST123_NO_AUTO_WFC3_MAPS=1`` to skip the download (fail with the same
+    messages as :func:`verify_wfc3_mask_support_files`).
+    """
+    ok, msgs = verify_wfc3_mask_support_files()
+    if ok:
+        return True, []
+    if os.environ.get("HST123_NO_AUTO_WFC3_MAPS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return False, msgs
+
+    found = _find_dolphot_make_root_for_overlay()
+    if found is None:
+        return False, msgs + [
+            "No DOLPHOT Makefile found to merge WFC3 maps into — run "
+            "hst123-install-dolphot first (or set HST123_DOLPHOT_ROOT)."
+        ]
+
+    install_root, make_root = found
+    try:
+        for archive in WFC3_MASK_MAP_ARCHIVES:
+            tar_url = _url_for(archive)
+            local_tar = install_root / archive
+            log.info(
+                "WFC3 distortion maps missing; downloading %s into %s",
+                archive,
+                install_root,
+            )
+            download_file(
+                tar_url,
+                local_tar,
+                timeout=timeout,
+                step_label=f"Download {archive} (wfc3mask distortion maps)",
+            )
+            extract_tar(
+                local_tar,
+                make_root,
+                strip_top_level=True,
+                step_label=f"Unpack {archive}",
+            )
+            try:
+                local_tar.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if not relocate_wfc3_mask_maps_into_canonical_layout(make_root):
+            log.warning(
+                "WFC3 PAM archives extracted but %s not all present under %s",
+                ", ".join(WFC3_MASK_MAP_FILENAMES),
+                make_root / "wfc3" / "data",
+            )
+    except (OSError, URLError, HTTPError) as exc:
+        return False, msgs + [f"Auto-install of WFC3 maps failed: {exc}"]
+
+    ok2, msgs2 = verify_wfc3_mask_support_files()
+    if ok2:
+        log.info("WFC3 mask distortion maps are ready under wfc3/data.")
+        return True, []
+    return False, msgs2
 
 
 def relocate_acs_wfc_pam_into_canonical_layout(make_root: Path) -> bool:
@@ -1537,6 +1701,7 @@ def install_psfs(
     # Makefile root or sibling next to ``dolphot3.1``, common conda layout).
     # Always merge ACS / WFC3 / WFPC2 ``*.psf`` into the canonical tree for runtime.
     relocate_all_legacy_psf_into_canonical_layout(make_root)
+    relocate_wfc3_mask_maps_into_canonical_layout(make_root)
     _progress("PSF / PAM step finished.")
 
 
@@ -1751,6 +1916,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--wfc3-maps-only",
+        action="store_true",
+        help=(
+            "Download and extract WFC3_UVIS_PAM.tar.gz and WFC3_IR_PAM.tar.gz so "
+            "wfc3/data contains UVIS1/2 and IR distortion maps (needed for wfc3mask). "
+            "Requires a DOLPHOT tree with a Makefile (same as --dolphot-dir / "
+            "$CONDA_PREFIX/opt/hst123-dolphot)."
+        ),
+    )
+    parser.add_argument(
         "--instruments",
         nargs="+",
         choices=["ACS", "WFC3", "WFPC2"],
@@ -1885,6 +2060,50 @@ def main():
 
     if args.calcsky_only and args.psf_only:
         parser.error("--calcsky-only cannot be used with --psf-only")
+    if args.wfc3_maps_only and (args.calcsky_only or args.psf_only):
+        parser.error(
+            "--wfc3-maps-only cannot be used with --calcsky-only or --psf-only"
+        )
+
+    if args.wfc3_maps_only:
+        if not dest.is_dir():
+            parser.error(
+                f"--wfc3-maps-only requires an existing DOLPHOT directory: {dest}"
+            )
+        make_root_cli = dolphot_make_root(dest)
+        if not (make_root_cli / "Makefile").is_file():
+            parser.error(
+                f"--wfc3-maps-only: no Makefile under {make_root_cli}; "
+                "run a full hst123-install-dolphot first."
+            )
+        print(
+            "hst123-install-dolphot: fetching WFC3 distortion maps (wfc3/data) …",
+            file=sys.stderr,
+            flush=True,
+        )
+        _progress("")
+        _progress("— wfc3-maps-only (dolphot3.1.WFC3.tar.gz) —")
+        old_root = os.environ.get("HST123_DOLPHOT_ROOT")
+        try:
+            os.environ["HST123_DOLPHOT_ROOT"] = str(make_root_cli)
+            ok, msgs = ensure_wfc3_mask_support_files(timeout=120)
+        finally:
+            if old_root is None:
+                os.environ.pop("HST123_DOLPHOT_ROOT", None)
+            else:
+                os.environ["HST123_DOLPHOT_ROOT"] = old_root
+        if not ok:
+            for m in msgs:
+                log.error("%s", m)
+            sys.exit(1)
+        _progress("WFC3 distortion maps OK under wfc3/data.")
+        log.info("WFC3 maps ready (see wfc3/data under your DOLPHOT tree).")
+        print(
+            "hst123-install-dolphot: WFC3 maps installed.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
 
     if args.calcsky_only:
         if not dest.is_dir():
