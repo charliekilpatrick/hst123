@@ -1,6 +1,6 @@
 """Unit tests for pipeline MAST download and archive path helpers."""
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from astropy.table import Table
@@ -38,11 +38,9 @@ def test_download_files_skips_existing_files_no_mast_call(hst123_instance, tmp_p
         }
     )
     with patch("hst123._pipeline.Observations.download_products") as mock_dl:
-        with patch("hst123._pipeline.ThreadPoolExecutor") as mock_tpe:
-            ok = hst.download_files(t, dest=str(dest), work_dir=str(tmp_path))
+        ok = hst.download_files(t, dest=str(dest), work_dir=str(tmp_path))
     assert ok is True
     mock_dl.assert_not_called()
-    mock_tpe.assert_not_called()
 
 
 def test_mast_download_one_product_row_moves_staged_file(hst123_instance, tmp_path):
@@ -85,12 +83,12 @@ def test_mast_download_one_product_row_logs_warning_on_failure(hst123_instance, 
     assert "MAST fail" in caplog.text
 
 
-def test_download_files_uses_thread_pool_max_workers_from_max_cores(
+def test_download_files_runs_one_worker_call_per_pending_file(
     hst123_instance, tmp_path
 ):
     _require_hst123()
     hst = hst123_instance
-    setattr(hst.options["args"], "drizzle_num_cores", 2)
+    setattr(hst.options["args"], "drizzle_num_cores", 6)
 
     t = Table(
         {
@@ -101,21 +99,11 @@ def test_download_files_uses_thread_pool_max_workers_from_max_cores(
     dest = tmp_path / "out"
     dest.mkdir()
 
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
-    mock_ctx.__exit__ = MagicMock(return_value=None)
-    mock_ctx.map = MagicMock()
-
-    with patch("hst123._pipeline.ThreadPoolExecutor", return_value=mock_ctx) as mock_tpe:
+    with patch.object(hst, "_mast_download_one_product_row") as mock_one:
         with patch("hst123._pipeline.Observations.download_products"):
             hst.download_files(t, dest=str(dest), work_dir=str(tmp_path))
 
-    mock_tpe.assert_called_once_with(max_workers=2)
-    mock_ctx.map.assert_called_once()
-    map_args = mock_ctx.map.call_args[0]
-    assert map_args[0] == hst._mast_download_one_product_row
-    items = map_args[1]
-    assert len(items) == 3
+    assert mock_one.call_count == 3
 
 
 def test_archive_path_for_product_acs_wfc(hst123_instance, tmp_path):

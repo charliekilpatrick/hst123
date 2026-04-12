@@ -1791,9 +1791,9 @@ class hst123(object):
         self.fix_hdu_wcs_keys(image, change_keys, ref_url)
         self.fix_idcscale(image)
         return True
-    except Exception:
+    except Exception as exc:
         error = 'Failed to update WCS for image {file}'
-        log.error(error.format(file=image))
+        log.error("%s: %s", error.format(file=image), exc)
         return None
 
   # ---------------------------------------------------------------------------
@@ -2567,8 +2567,10 @@ class hst123(object):
     Staging always lives under *work_dir* so ``mastDownload`` is not created in an
     unrelated shell current directory.
 
-    When multiple files need downloading, fetches run in parallel (thread pool)
-    with worker count ``min(--max-cores, number of files)``.
+    Downloads run **sequentially**. ``Observations.download_products`` (astroquery)
+    is not thread-safe; parallel calls caused intermittent ``I/O operation on closed
+    file`` errors and staging-directory races (``[Errno 17] File exists``).
+    ``--max-cores`` still applies to drizzle/DOLPHOT parallelism elsewhere.
     """
     if not productlist:
         log.error('Product list is empty. Cannot download files.')
@@ -2614,26 +2616,19 @@ class hst123(object):
         pending.append((i, prod, filename))
 
     n_pending = len(pending)
-    opt = getattr(self, "options", None)
-    args = opt.get("args") if opt else None
-    mc = getattr(args, "drizzle_num_cores", None) if args else None
-    if mc is None:
-        mc = settings.default_astrodrizzle_cores()
-    max_workers = max(1, min(int(mc), n_pending) if n_pending else 1)
 
     if n_pending:
         log.info(
-            "MAST download: fetching %i file(s) with up to %i thread(s) "
-            "(--max-cores).",
+            "MAST download: fetching %i file(s) sequentially (astroquery is not "
+            "safe for parallel downloads).",
             n_pending,
-            max_workers,
         )
         items = [
             (i, prod, filename, n, mast_staging_parent)
             for i, prod, filename in pending
         ]
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            pool.map(self._mast_download_one_product_row, items)
+        for it in items:
+            self._mast_download_one_product_row(it)
 
     # Remove astroquery staging under work-dir (not the shell cwd when --work-dir is set)
     if os.path.isdir(mast_download_tree):
