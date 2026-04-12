@@ -1,4 +1,4 @@
-"""WCS header helpers: meta headers, SIP/CTYPE consistency for stwcs/updatewcs."""
+"""WCS header helpers: meta headers, SIP/CTYPE consistency for updatewcs."""
 
 from __future__ import annotations
 
@@ -119,9 +119,10 @@ def wcs_from_fits_hdu(hdul: fits.HDUList, hdu_index: int = 0, *, relax: bool = T
 
 
 def _delete_alt_wcs_key_silent(hdul: fits.HDUList, ext_index: int, wkey: str) -> bool:
-    """Remove alternate WCS *wkey* from one extension (no prints; mirrors stwcs deleteWCS)."""
-    from stwcs.wcsutil import altwcs
+    """Remove alternate WCS *wkey* from one extension (no prints; mirrors STScI ``deleteWCS``)."""
+    from hst123.utils.stsci_wcs import altwcs_module
 
+    altwcs = altwcs_module()
     if wkey == "O":
         return False
     hdr = hdul[ext_index].header
@@ -145,7 +146,7 @@ def remove_conflicting_alt_wcs_duplicate_names(
     Drop **stale** alternate WCS solutions that reuse the primary ``WCSNAME`` but
     differ from the primary WCS.
 
-    ``stwcs.updatehdr.update_wcs`` (used by ``updatewcs`` / AstrometryDB) calls
+    ``updatehdr.update_wcs`` (used by ``updatewcs`` / AstrometryDB) calls
     ``altwcs.archive_wcs(..., wcsname=<primary name>, mode=QUIET_ABORT)``. If an
     alternate WCS already exists under that same name with **different** FITS
     keywords, ``archive_wcs`` cannot archive the primary and logs::
@@ -157,8 +158,9 @@ def remove_conflicting_alt_wcs_duplicate_names(
     key ``O``, the pipeline OPUS archive) restores a state ``updatewcs`` can
     handle without warnings.
     """
-    from stwcs.wcsutil import altwcs
+    from hst123.utils.stsci_wcs import altwcs_module
 
+    altwcs = altwcs_module()
     log = logger or _LOG
     path = os.fspath(image_path)
     n_removed = 0

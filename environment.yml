@@ -1,22 +1,22 @@
 # Conda environment for hst123 (Conda + pip install).
 # Create env:  conda env create -f environment.yml
 # Activate:    conda activate hst123
-# Then:        pip install .[test]  (or: pip install drizzlepac stwcs && pip install -e .)
+# Then:        pip install .[test]  (or: pip install drizzlepac && pip install -e .)
 name: hst123
 channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.10
+  - python=3.12
   - pip
-  - setuptools>=64,<82   # stwcs needs pkg_resources (removed in setuptools 82+)
+  - setuptools>=64,<82   # stsci stack / pkg_resources (removed in setuptools 82+)
   - astropy>=5.3,<6
   - astroquery>=0.4.6
   - astroscrappy>=1.1.0
-  - numpy>=1.24,<2      # match pyproject; numpy 2 has ABI/API changes
-  - scipy>=1.10,<2      # pin to avoid ABI mismatch with numpy (wrong-signature errors)
+  - numpy>=1.26,<2      # match pyproject; numpy 2 has ABI/API changes
+  - scipy>=1.11,<2      # pin to avoid ABI mismatch with numpy (wrong-signature errors)
   # Parallel Python calcsky fallback for large mosaics (optional via pip: .[perf])
-  - numba>=0.57
+  - numba>=0.59
   - requests>=2.32
   - python-dateutil>=2.8.2
-  # progressbar33, drizzlepac, stwcs, jhat: install via pip (pip install .[test])
+  # progressbar33, drizzlepac, jhat: install via pip (pip install .[test]); STScI WCS is bundled in hst123.utils.stwcs

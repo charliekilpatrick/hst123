@@ -8,6 +8,8 @@ import pytest
 import hst123.dolphot_install as dolphot_install
 from hst123.dolphot_install import (
     ACS_WFC_PAM_FILENAMES,
+    _calcsky_make_target,
+    apply_calcsky_source_patches,
     apply_dolphot_source_patches,
     CONDA_DOLPHOT_RELATIVE,
     DOLPHOT_BASE_URL,
@@ -40,9 +42,120 @@ from hst123.dolphot_install import (
     psf_install_recorded,
     sources_install_is_complete,
     verify_acs_wfc_pam_files,
+    verify_wfc3_mask_support_files,
+    ensure_wfc3_mask_support_files,
+    relocate_wfc3_mask_maps_into_canonical_layout,
+    WFC3_MASK_MAP_ARCHIVES,
+    WFC3_MASK_MAP_FILENAMES,
     write_psf_stamp,
     write_sources_stamp,
 )
+
+
+def test_verify_wfc3_mask_support_files_ok(tmp_path, monkeypatch):
+    base = tmp_path / "opt" / "hst123-dolphot"
+    base.mkdir(parents=True)
+    (base / "Makefile").write_text("all:\n", encoding="utf-8")
+    wfc3d = base / "wfc3" / "data"
+    wfc3d.mkdir(parents=True)
+    for name in WFC3_MASK_MAP_FILENAMES:
+        (wfc3d / name).write_bytes(b"x" * 600)
+    monkeypatch.setattr(
+        dolphot_install,
+        "_candidate_dolphot_source_roots",
+        lambda: [base.resolve()],
+    )
+    ok, msgs = verify_wfc3_mask_support_files()
+    assert ok
+    assert msgs == []
+
+
+def test_verify_wfc3_mask_support_files_missing_map(tmp_path, monkeypatch):
+    base = tmp_path / "opt" / "hst123-dolphot"
+    base.mkdir(parents=True)
+    (base / "Makefile").write_text("all:\n", encoding="utf-8")
+    wfc3d = base / "wfc3" / "data"
+    wfc3d.mkdir(parents=True)
+    (wfc3d / "UVIS1wfc3_map.fits").write_bytes(b"x" * 600)
+    monkeypatch.setattr(
+        dolphot_install,
+        "_candidate_dolphot_source_roots",
+        lambda: [base.resolve()],
+    )
+    ok, msgs = verify_wfc3_mask_support_files()
+    assert not ok
+    assert any("UVIS2wfc3_map" in m or "ir_wfc3_map" in m for m in msgs)
+
+
+def test_ensure_wfc3_mask_support_files_downloads_when_missing(
+    tmp_path, monkeypatch
+):
+    """Missing maps trigger WFC3_*_PAM download+extract hooks; then verify passes."""
+    base = tmp_path / "opt" / "hst123-dolphot"
+    base.mkdir(parents=True)
+    (base / "Makefile").write_text("all:\n", encoding="utf-8")
+    wfc3d = base / "wfc3" / "data"
+    wfc3d.mkdir(parents=True)
+    monkeypatch.setattr(
+        dolphot_install,
+        "_candidate_dolphot_source_roots",
+        lambda: [base.resolve()],
+    )
+
+    def fake_download(url, dest, **kw):
+        Path(dest).write_bytes(b"fake-tar")
+
+    def fake_extract(tar_path, dest_dir, **kw):
+        for name in WFC3_MASK_MAP_FILENAMES:
+            (wfc3d / name).write_bytes(b"x" * 600)
+
+    monkeypatch.setattr(dolphot_install, "download_file", fake_download)
+    monkeypatch.setattr(dolphot_install, "extract_tar", fake_extract)
+    ok, msgs = ensure_wfc3_mask_support_files()
+    assert ok
+    assert msgs == []
+
+
+def test_wfc3_mask_map_archives_match_psf_list():
+    assert WFC3_MASK_MAP_ARCHIVES[0] in PSF_FILES["WFC3"]
+    assert WFC3_MASK_MAP_ARCHIVES[1] in PSF_FILES["WFC3"]
+
+
+def test_relocate_wfc3_mask_maps_from_legacy(tmp_path):
+    """Copy *wfc3_map.fits from dolphot2.0/wfc3/data into canonical wfc3/data."""
+    mr = tmp_path / "dolphot3.1"
+    mr.mkdir()
+    (mr / "Makefile").write_text("all:\n")
+    leg = mr / "dolphot2.0" / "wfc3" / "data"
+    leg.mkdir(parents=True)
+    for name in WFC3_MASK_MAP_FILENAMES:
+        (leg / name).write_bytes(b"x" * 600)
+    assert relocate_wfc3_mask_maps_into_canonical_layout(mr)
+    for name in WFC3_MASK_MAP_FILENAMES:
+        p = mr / "wfc3" / "data" / name
+        assert p.is_file() and p.stat().st_size >= 512
+
+
+def test_ensure_wfc3_respects_no_auto_env(tmp_path, monkeypatch):
+    base = tmp_path / "opt" / "hst123-dolphot"
+    base.mkdir(parents=True)
+    (base / "Makefile").write_text("all:\n", encoding="utf-8")
+    (base / "wfc3" / "data").mkdir(parents=True)
+    monkeypatch.setattr(
+        dolphot_install,
+        "_candidate_dolphot_source_roots",
+        lambda: [base.resolve()],
+    )
+    monkeypatch.setenv("HST123_NO_AUTO_WFC3_MAPS", "1")
+    called = []
+
+    def fake_download(*a, **k):
+        called.append(True)
+
+    monkeypatch.setattr(dolphot_install, "download_file", fake_download)
+    ok, msgs = ensure_wfc3_mask_support_files()
+    assert not ok
+    assert not called
 
 
 def test_url_for():
@@ -116,6 +229,33 @@ def test_apply_dolphot_source_patches_idempotent_when_already_4096(tmp_path):
         encoding="utf-8",
     )
     assert apply_dolphot_source_patches(tmp_path) is False
+
+
+def test_calcsky_make_target_prefers_bin_prefix(tmp_path):
+    mf = tmp_path / "Makefile"
+    mf.write_text("all:\n\nbin/calcsky: calcsky.c\n\tgcc\n", encoding="utf-8")
+    assert _calcsky_make_target(tmp_path) == "bin/calcsky"
+
+
+def test_calcsky_make_target_fallback(tmp_path):
+    mf = tmp_path / "Makefile"
+    mf.write_text("calcsky:\n\tgcc\n", encoding="utf-8")
+    assert _calcsky_make_target(tmp_path) == "calcsky"
+
+
+def test_apply_calcsky_source_patches_main_buffer(tmp_path):
+    """calcsky.c uses a tiny sprintf buffer; long argv[1] overflows → SIGTRAP on macOS."""
+    cc = tmp_path / "calcsky.c"
+    cc.write_text(
+        "int main(int argc,char**argv) {\n   char str[81];\n   return 0;\n}\n",
+        encoding="utf-8",
+    )
+    assert apply_calcsky_source_patches(tmp_path) is True
+    t = cc.read_text(encoding="utf-8")
+    assert "char str[4096]" in t
+    assert "hst123_calcsky_main_str_buf" in t
+    assert "char str[81]" not in t
+    assert apply_calcsky_source_patches(tmp_path) is False
 
 
 def test_configure_dolphot_makefile_hst_only_skips_extended(tmp_path):

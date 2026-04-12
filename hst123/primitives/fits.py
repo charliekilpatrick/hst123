@@ -6,7 +6,7 @@ import numpy as np
 from astropy.io import fits
 
 from hst123.primitives.base import BasePrimitive
-from hst123.utils.paths import normalize_fits_path
+from hst123.utils.paths import normalize_fits_path, pipeline_workspace_dir
 from hst123.utils.logging import log_calls
 
 
@@ -195,12 +195,23 @@ class FitsHelper(BasePrimitive):
         """
         workdir = workdir or "."
         pattern = pattern or ["*c1m.fits", "*c0m.fits", "*flc.fits", "*flt.fits"]
-        out = [
-            normalize_fits_path(s)
-            for p in pattern
-            for s in glob.glob(os.path.join(workdir, p))
-            if os.path.isfile(s)
-        ]
+        base = os.path.abspath(os.path.expanduser(workdir))
+        ws = pipeline_workspace_dir(base)
+        search_roots = []
+        if ws and os.path.isdir(ws):
+            search_roots.append(ws)
+        search_roots.append(base)
+        seen: set[str] = set()
+        out: list[str] = []
+        for root in search_roots:
+            for p in pattern:
+                for s in glob.glob(os.path.join(root, p)):
+                    if not os.path.isfile(s):
+                        continue
+                    n = normalize_fits_path(s)
+                    if n not in seen:
+                        seen.add(n)
+                        out.append(n)
         self._primitive_cleanup(
             "get_input_images",
             work_dir=workdir,
@@ -226,10 +237,11 @@ class FitsHelper(BasePrimitive):
         """
         workdir = workdir or "."
         pattern = pattern or ["*c0m.chip?.fits", "*flc.chip?.fits", "*flt.chip?.fits"]
+        base = os.path.abspath(os.path.expanduser(workdir))
         out = [
             normalize_fits_path(s)
             for p in pattern
-            for s in glob.glob(os.path.join(workdir, p))
+            for s in glob.glob(os.path.join(base, p))
             if os.path.isfile(s)
         ]
         self._primitive_cleanup(

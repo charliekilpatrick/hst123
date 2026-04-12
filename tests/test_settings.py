@@ -1,4 +1,6 @@
 """Unit tests for hst123.settings (structure and expected keys)."""
+from unittest import mock
+
 import pytest
 
 from hst123 import settings
@@ -21,7 +23,6 @@ class TestGlobalDefaults:
     def test_pipeline_defaults_in_global_defaults(self):
         g = settings.global_defaults
         assert g["rawdir"] == "raw"
-        assert g["summary"] == "exposure_summary.out"
         assert g["magsystem"] == "abmag"
         assert g["default_threshold"] == 10.0
         assert g["snr_limit"] == 3.0
@@ -39,7 +40,8 @@ class TestGlobalDefaults:
 class TestDrizzleDefaults:
     def test_has_required_keys(self):
         d = settings.drizzle_defaults
-        assert d["num_cores"] == 8
+        assert d["num_cores"] == settings.default_astrodrizzle_cores()
+        assert 1 <= d["num_cores"] <= 8
         assert d["driz_sep_pixfrac"] == 0.8
         assert d["final_pixfrac"] == 0.8
         assert d["combine_maskpt"] == 0.2
@@ -48,6 +50,20 @@ class TestDrizzleDefaults:
         assert d["driz_cr_grow"] == 1
         assert d["driz_cr_scale"] == "1.2 0.7"
         assert d["driz_cr_ctegrow"] == 0
+
+
+class TestDefaultAstrodrizzleCores:
+    def test_caps_at_eight(self):
+        with mock.patch("hst123.settings.os.cpu_count", return_value=32):
+            assert settings.default_astrodrizzle_cores() == 8
+
+    def test_follows_low_cpu_count(self):
+        with mock.patch("hst123.settings.os.cpu_count", return_value=2):
+            assert settings.default_astrodrizzle_cores() == 2
+
+    def test_unknown_cpu_falls_back_to_one(self):
+        with mock.patch("hst123.settings.os.cpu_count", return_value=None):
+            assert settings.default_astrodrizzle_cores() == 1
 
 
 class TestTweakregDefaults:

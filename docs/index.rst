@@ -9,7 +9,7 @@ DOLPHOT catalogs. See the :doc:`user_guide` for an overview.
 Installing hst123
 =================
 
-**Requirements:** Python 3.8+, Astropy, DrizzlePac, ``stwcs``, and related
+**Requirements:** Python 3.12 (see ``requires-python`` in ``pyproject.toml``), Astropy, DrizzlePac, and related (STScI WCS code is bundled in ``hst123.utils.stwcs``; see ``STWCS_VENDOR.txt`` there)
 dependencies (see ``pyproject.toml``). DOLPHOT is optional; use
 ``hst123-install-dolphot`` after activating your environment.
 

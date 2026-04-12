@@ -138,6 +138,7 @@ def _write_chip_file(
 def apply_splitgroups(
     image: str | Path,
     *,
+    chip_out_dir: str | Path | None = None,
     log_: logging.Logger | None = None,
 ) -> list[str]:
     """
@@ -148,6 +149,9 @@ def apply_splitgroups(
     ----------
     image
         Path to input FITS.
+    chip_out_dir
+        If set, write ``<stem>.chipN.fits`` under this directory (base ``work_dir``
+        when science exposures live under ``workspace/``).
     log_
         Optional logger (defaults to module logger).
 
@@ -167,7 +171,11 @@ def apply_splitgroups(
         raise SplitgroupsError(f"Not a file: {p}")
 
     out_paths: list[tuple[int, Path]] = []
-    stem = p.with_suffix("")  # strip .fits
+    stem_name = p.with_suffix("").name
+
+    out_parent = Path(chip_out_dir).resolve() if chip_out_dir else p.parent
+    if chip_out_dir:
+        out_parent.mkdir(parents=True, exist_ok=True)
 
     with fits.open(p, mode="readonly", memmap=True) as hdul:
         primary_hdr = hdul[0].header
@@ -177,7 +185,7 @@ def apply_splitgroups(
             for j, (_i, sh) in enumerate(sci_hdus, start=1):
                 if sh.data is None:
                     raise SplitgroupsError(f"SCI HDU {_i} has no data")
-                outp = stem.parent / f"{stem.name}.chip{j}.fits"
+                outp = out_parent / f"{stem_name}.chip{j}.fits"
                 _write_chip_file(outp, sh.data, primary_hdr, sh.header, log_=lg)
                 out_paths.append((j, outp))
         else:
@@ -187,7 +195,7 @@ def apply_splitgroups(
                     f"No SCI extensions and no 4-plane 3-D primary in {p.name}"
                 )
             for k, plane in enumerate(planes, start=1):
-                outp = stem.parent / f"{stem.name}.chip{k}.fits"
+                outp = out_parent / f"{stem_name}.chip{k}.fits"
                 _write_chip_file(outp, plane, primary_hdr, None, log_=lg)
                 out_paths.append((k, outp))
 

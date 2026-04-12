@@ -1,10 +1,42 @@
 """
 Path helpers for FITS files (stable across :func:`os.chdir`).
 
-The pipeline changes the working directory to ``--work-dir``; relative paths
-must be normalized to absolute before that.
+The pipeline changes the working directory to ``<work-dir>/workspace`` for
+alignment; relative paths must be normalized to absolute before that.
 """
 import os
+
+
+def pipeline_workspace_dir(work_dir: str | os.PathLike[str] | None) -> str | None:
+    """
+    Return ``<work_dir>/workspace`` — calibrated inputs, TweakReg/AstroDrizzle products.
+
+    The main drizzled **reference** image (``*.ref_*.drc.fits``) stays in
+    ``work_dir``; per-epoch drizzle outputs and science FITS for alignment live
+    under this directory. Consolidated ``--drizzle-all`` products use
+    ``<work_dir>/drizzle/`` (not under ``workspace/``).
+
+    Returns
+    -------
+    str or None
+        Absolute path, or None if *work_dir* is missing/empty.
+    """
+    if not work_dir:
+        return None
+    base = os.path.abspath(os.path.expanduser(os.fspath(work_dir)))
+    return os.path.join(base, "workspace")
+
+
+def pipeline_chip_output_dir(work_dir: str | os.PathLike[str] | None) -> str | None:
+    """
+    Directory for DOLPHOT ``*.chipN.fits`` and ``*.chipN.sky.fits`` (base ``work_dir``).
+
+    Chip sidecars are written here even when the parent exposure lives under
+    :func:`pipeline_workspace_dir`.
+    """
+    if not work_dir:
+        return None
+    return os.path.abspath(os.path.expanduser(os.fspath(work_dir)))
 
 
 def normalize_work_and_raw_dirs(work_dir, raw_dir):
@@ -53,8 +85,9 @@ def normalize_fits_path(path: str) -> str:
 
     Notes
     -----
-    After alignment, the process cwd is ``--work-dir``; unresolved relative
-    paths would double-resolve (e.g. ``test_data/foo.fits`` under ``work_dir``).
+    After alignment, the process cwd is ``<work-dir>/workspace`` when
+    ``--work-dir`` is set; unresolved relative paths would double-resolve
+    (e.g. ``test_data/foo.fits`` under ``work_dir``).
     """
     if not path:
         return path

@@ -39,6 +39,28 @@ def add_options(parser=None, usage=None, version=None):
         action='store_true', help='Suppress the clear_downloads method.')
     parser.add_argument('--clobber', default=False, action='store_true',
         help='Overwrite files when using download mode.')
+    parser.add_argument(
+        '--redo',
+        default=False,
+        action='store_true',
+        help='Redo astrometric alignment and AstroDrizzle products (implies '
+        '--redo-astrometry and --redo-astrodrizzle).',
+    )
+    parser.add_argument(
+        '--redo-astrometry',
+        dest='redo_astrometry',
+        default=False,
+        action='store_true',
+        help='Re-run alignment on all images (ignore prior TweakReg/JHAT success '
+        'in headers).',
+    )
+    parser.add_argument(
+        '--redo-astrodrizzle',
+        dest='redo_astrodrizzle',
+        default=False,
+        action='store_true',
+        help='Re-create drizzled products even when the output file already exists.',
+    )
     parser.add_argument('--cleanup', default=False, action='store_true',
         help='Clean up interstitial image files (flt/flc/c0m/c1m symlinks) and '
         'DOLPHOT sky sidecars (*.drc.noise.fits) under --work-dir.')
@@ -141,6 +163,16 @@ def add_options(parser=None, usage=None, version=None):
         'the original position angle.')
     parser.add_argument('--no-mask', default=False, action='store_true',
         help='Do not add extra masking based on other input files.')
+    parser.add_argument(
+        '--max-cores',
+        default=None,
+        type=int,
+        metavar='N',
+        help='Parallel worker count for AstroDrizzle (DrizzlePac num_cores) and for '
+        'DOLPHOT image prep (mask, splitgroups, calcsky) thread pool size, capped by '
+        'the number of exposures. Default: min(8, CPU count) when omitted. Use 1 for '
+        'fully serial prep and single-worker drizzle.',
+    )
 
     # dolphot options
     parser.add_argument('--run-dolphot', default=False, action='store_true',
@@ -181,3 +213,29 @@ def add_options(parser=None, usage=None, version=None):
 
 
     return(parser)
+
+
+def want_redo_astrometry(args) -> bool:
+    """
+    Return True if alignment should not be skipped based on prior success headers.
+
+    True when ``--clobber``, ``--redo``, or ``--redo-astrometry`` is set.
+    """
+    return bool(
+        getattr(args, "clobber", False)
+        or getattr(args, "redo", False)
+        or getattr(args, "redo_astrometry", False)
+    )
+
+
+def want_redo_astrodrizzle(args) -> bool:
+    """
+    Return True if AstroDrizzle should overwrite existing drizzle outputs.
+
+    True when ``--clobber``, ``--redo``, or ``--redo-astrodrizzle`` is set.
+    """
+    return bool(
+        getattr(args, "clobber", False)
+        or getattr(args, "redo", False)
+        or getattr(args, "redo_astrodrizzle", False)
+    )

@@ -4,6 +4,12 @@ Relocate or remove drizzlepac / TweakReg scratch files in the work directory.
 Default pipeline behavior keeps the work tree tidy: logs go under ``logs/`` and
 common intermediate FITS/text files from AstroDrizzle are deleted after a
 successful step. Use ``--keep-drizzle-artifacts`` to skip this.
+
+Intermediate names such as ``single_sci.fits``, ``single_wht.fits``,
+``staticMask.fits``, and ``drz_med.fits`` are produced by DrizzlePac during
+``run_astrodrizzle``. WFPC2 pipeline scratch files matching
+``*hst123drz*_c0m.fits`` / ``*hst123drz*_c1m.fits`` come from
+``wfpc2_astrodrizzle_scratch_paths`` in ``hst123.utils.astrodrizzle_helpers``.
 """
 from __future__ import annotations
 
@@ -69,7 +75,10 @@ def remove_files_matching_globs(
     return removed
 
 
-# Exact basenames often left in the work directory (cwd during drizzle).
+# Exact basenames often left in the work directory (cwd during drizzle) or next
+# to the drizzle output (e.g. ``work_dir/drizzle/`` when ``--drizzle-all``).
+# ``single_sci.fits`` / ``single_wht.fits``: separation-step intermediates from
+# DrizzlePac during :func:`drizzlepac.astrodrizzle.AstroDrizzle`.
 _INTERSTITIAL_EXACT = frozenset(
     {
         "staticMask.fits",
@@ -79,8 +88,11 @@ _INTERSTITIAL_EXACT = frozenset(
         "catalog.coo",
         "crclean.fits",
         "crmask.fits",
+        "dqmask.fits",
         "final_mask.fits",
         "single_mask.fits",
+        "single_sci.fits",
+        "single_wht.fits",
         "blt.fits",
         "sci1.fits",
         "sci2.fits",
@@ -90,6 +102,8 @@ _INTERSTITIAL_EXACT = frozenset(
 )
 
 # Glob patterns relative to work_dir (headerlets; drizzlepac temp FITS).
+# DrizzlePac often writes root-prefixed names (e.g. ``wfpc2..._1_staticMask.fits``),
+# not only the legacy bare basenames in ``_INTERSTITIAL_EXACT``.
 _INTERSTITIAL_GLOBS = (
     "*_hlet.fits",
     "*drztmp*.fits",
@@ -99,6 +113,18 @@ _INTERSTITIAL_GLOBS = (
     "*drz_med.fits",
     "*.drz.mask.fits",
     "*.drz.weight.fits",
+    "*crmask.fits",
+    "*dqmask.fits",
+    "*final_mask.fits",
+    "*single_mask.fits",
+    "*single_sci.fits",
+    "*single_wht.fits",
+    "*blt.fits",
+    "*crclean.fits",
+    # WFPC2 scratch copies beside inputs: ``wfpc2_astrodrizzle_scratch_paths``
+    # in ``hst123.utils.astrodrizzle_helpers``.
+    "*hst123drz*_c0m.fits",
+    "*hst123drz*_c1m.fits",
 )
 
 
@@ -180,17 +206,62 @@ def remove_superseded_instrument_mask_reference_drizzle(
         )
 
 
+def _remove_interstitial_drizzle_scratch_files(
+    directory: str,
+    *,
+    log: logging.Logger,
+) -> list[str]:
+    """
+    Delete DrizzlePac / pipeline scratch FITS and sidecar text under *directory*.
+
+    *directory* must exist; callers pass ``work_dir`` and optionally
+    ``work_dir/drizzle`` (``--drizzle-all`` output root) because AstroDrizzle
+    writes intermediates relative to CWD and beside the output path.
+    """
+    removed: list[str] = []
+    for name in _INTERSTITIAL_EXACT:
+        path = os.path.join(directory, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                removed.append(name)
+            except OSError as e:
+                log.debug("Could not remove %s: %s", path, e)
+
+    for pattern in _INTERSTITIAL_GLOBS:
+        for path in glob.glob(os.path.join(directory, pattern)):
+            if not os.path.isfile(path):
+                continue
+            try:
+                os.remove(path)
+                removed.append(os.path.basename(path))
+            except OSError as e:
+                log.debug("Could not remove %s: %s", path, e)
+    return removed
+
+
 def cleanup_after_astrodrizzle(
     work_dir: str,
     *,
     log: logging.Logger,
     keep_artifacts: bool = False,
+    base_work_dir: str | os.PathLike[str] | None = None,
 ) -> None:
     """
     After a successful AstroDrizzle run: remove well-known scratch products.
 
     ``astrodrizzle.log`` is normally written under ``.hst123_runfiles/`` and
     ingested into the session log (nothing to archive in the work root).
+
+    Matching uses both fixed basenames (legacy drizzle cwd) and globs because
+    DrizzlePac often emits **root-prefixed** mask names (e.g. ``*_crmask.fits``)
+    rather than bare ``crmask.fits`` in ``work_dir``.
+
+    When ``--drizzle-all`` is used, drizzle products live under
+    ``<base_work_dir>/drizzle/``. *work_dir* is typically ``<base>/workspace`` (the
+    AstroDrizzle scratch/output tree); DrizzlePac may also drop ``staticMask.fits``
+    and similar files in the **base** work directory, so pass *base_work_dir* to
+    scrub both trees.
     """
     if keep_artifacts or not work_dir:
         return
@@ -200,25 +271,31 @@ def cleanup_after_astrodrizzle(
 
     _archive_file(wd, "astrodrizzle.log", log)
 
-    removed = []
-    for name in _INTERSTITIAL_EXACT:
-        path = os.path.join(wd, name)
-        if os.path.isfile(path):
-            try:
-                os.remove(path)
-                removed.append(name)
-            except OSError as e:
-                log.debug("Could not remove %s: %s", path, e)
+    scan_dirs: list[str] = [wd]
+    d_sub = os.path.join(wd, "drizzle")
+    if os.path.isdir(d_sub):
+        scan_dirs.append(d_sub)
 
-    for pattern in _INTERSTITIAL_GLOBS:
-        for path in glob.glob(os.path.join(wd, pattern)):
-            if not os.path.isfile(path):
-                continue
-            try:
-                os.remove(path)
-                removed.append(os.path.basename(path))
-            except OSError as e:
-                log.debug("Could not remove %s: %s", path, e)
+    if base_work_dir:
+        bw = os.path.abspath(os.path.expanduser(os.fspath(base_work_dir)))
+        if bw != wd:
+            scan_dirs.append(bw)
+            bd = os.path.join(bw, "drizzle")
+            if os.path.isdir(bd):
+                scan_dirs.append(bd)
+
+    # De-duplicate (workspace/drizzle should not appear when drizzle/ is only under base)
+    seen_dir: set[str] = set()
+    uniq_dirs: list[str] = []
+    for d in scan_dirs:
+        ad = os.path.abspath(d)
+        if ad not in seen_dir and os.path.isdir(ad):
+            seen_dir.add(ad)
+            uniq_dirs.append(ad)
+
+    removed: list[str] = []
+    for d in uniq_dirs:
+        removed.extend(_remove_interstitial_drizzle_scratch_files(d, log=log))
 
     if removed:
         log.info(

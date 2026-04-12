@@ -831,6 +831,53 @@ def _wfpc2_ysize(c: int, x: float, y: float) -> float:
     return float(dist / np.hypot(CC[2, c], DD[2, c]))
 
 
+def _wfpc2_fwddistort_vec(
+    c: int, x: np.ndarray, y: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Vectorized chip pixel (x,y) -> undistorted frame (broadcasting)."""
+    x0 = x - 399.5
+    y0 = y - 399.5
+    xv = (
+        CC[0, c]
+        + CC[1, c] * x0
+        + CC[2, c] * y0
+        + CC[3, c] * x0 * x0
+        + CC[4, c] * x0 * y0
+        + CC[5, c] * y0 * y0
+        + CC[6, c] * x0**3
+        + CC[7, c] * x0 * x0 * y0
+        + CC[8, c] * x0 * y0 * y0
+        + CC[9, c] * y0**3
+    )
+    yv = (
+        DD[0, c]
+        + DD[1, c] * x0
+        + DD[2, c] * y0
+        + DD[3, c] * x0 * x0
+        + DD[4, c] * x0 * y0
+        + DD[5, c] * y0 * y0
+        + DD[6, c] * x0**3
+        + DD[7, c] * x0 * x0 * y0
+        + DD[8, c] * x0 * y0 * y0
+        + DD[9, c] * y0**3
+    )
+    return xv, yv
+
+
+def _wfpc2_xsize_vec(c: int, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    x1, y1 = _wfpc2_fwddistort_vec(c, x - 0.5, y)
+    x2, y2 = _wfpc2_fwddistort_vec(c, x + 0.5, y)
+    dist = np.hypot(x1 - x2, y1 - y2)
+    return dist / np.hypot(CC[1, c], DD[1, c])
+
+
+def _wfpc2_ysize_vec(c: int, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    x1, y1 = _wfpc2_fwddistort_vec(c, x, y - 0.5)
+    x2, y2 = _wfpc2_fwddistort_vec(c, x, y + 0.5)
+    dist = np.hypot(x1 - x2, y1 - y2)
+    return dist / np.hypot(CC[2, c], DD[2, c])
+
+
 def _wfpc2_pixcorr_mult(hdul: fits.HDUList, dmin: float, dmax: float, mask_sat: bool) -> None:
     dmax1 = 1.5 * dmax if dmax > 0 else 0.0
     dmin1 = 1.5 * dmin if dmin < 0 else 0.0
@@ -842,27 +889,33 @@ def _wfpc2_pixcorr_mult(hdul: fits.HDUList, dmin: float, dmax: float, mask_sat: 
         c = ext_i - 1
         ny, nx = d.shape[-2], d.shape[-1]
         if d.ndim == 2:
-            for y in range(ny):
-                for x in range(nx):
-                    v = float(d[y, x])
-                    if v > dmin and (v < dmax or not mask_sat):
-                        d[y, x] = v * _wfpc2_xsize(c, x, y) * _wfpc2_ysize(c, x, y)
-                    elif v >= dmax:
-                        d[y, x] = safe_up(dmax1)
-                    else:
-                        d[y, x] = safe_down(dmin1)
-            h.data = d
+            yy, xx = np.indices((ny, nx), dtype=np.float64)
+            xsz = _wfpc2_xsize_vec(c, xx, yy)
+            ysz = _wfpc2_ysize_vec(c, xx, yy)
+            mult = xsz * ysz
+            v = d.astype(np.float64, copy=False)
+            sat = v >= dmax
+            corr = (v > dmin) & ((v < dmax) | (not mask_sat))
+            out = np.where(
+                corr,
+                v * mult,
+                np.where(sat, safe_up(dmax1), safe_down(dmin1)),
+            ).astype(np.float32)
+            h.data = out
         else:
             for z in range(d.shape[0]):
-                for y in range(ny):
-                    for x in range(nx):
-                        v = float(d[z, y, x])
-                        if v > dmin and (v < dmax or not mask_sat):
-                            d[z, y, x] = v * _wfpc2_xsize(z, x, y) * _wfpc2_ysize(z, x, y)
-                        elif v >= dmax:
-                            d[z, y, x] = safe_up(dmax1)
-                        else:
-                            d[z, y, x] = safe_down(dmin1)
+                yy, xx = np.indices((ny, nx), dtype=np.float64)
+                xsz = _wfpc2_xsize_vec(z, xx, yy)
+                ysz = _wfpc2_ysize_vec(z, xx, yy)
+                mult = xsz * ysz
+                sl = np.asarray(d[z], dtype=np.float64, copy=True)
+                sat = sl >= dmax
+                corr = (sl > dmin) & ((sl < dmax) | (not mask_sat))
+                d[z] = np.where(
+                    corr,
+                    sl * mult,
+                    np.where(sat, safe_up(dmax1), safe_down(dmin1)),
+                ).astype(np.float32)
             h.data = d
 
 
@@ -938,19 +991,19 @@ def apply_wfpc2mask(
         for z in range(4):
             sci = np.asarray(hdul_w[z + 1].data, dtype=np.float32)
             dq = np.asarray(dq_w[z + 1].data, dtype=np.float64)
-            out = np.empty_like(sci)
             ny, nx = sci.shape
             dq_i = np.rint(dq).astype(np.int32)
-            for y in range(ny):
-                for x in range(nx):
-                    idq = int(dq_i[y, x])
-                    v = float(sci[y, x])
-                    if idq & 8 or v > 3500:
-                        out[y, x] = safe_up(dmax)
-                    elif idq & 5047 or y == ny - 1 or x == nx - 1:
-                        out[y, x] = safe_down(dmin)
-                    else:
-                        out[y, x] = v
+            v = sci.astype(np.float64, copy=False)
+            border = np.zeros((ny, nx), dtype=bool)
+            border[-1, :] = True
+            border[:, -1] = True
+            bad = ((dq_i & 8) != 0) | (v > 3500.0)
+            edge = ((dq_i & 5047) != 0) | border
+            out = np.where(
+                bad,
+                safe_up(dmax),
+                np.where(edge, safe_down(dmin), v),
+            ).astype(np.float32)
             hdul_w[z + 1].data = out
         _wfpc2_pixcorr_mult(hdul_w, dmin, dmax, mask_sat=True)
         for i in range(4):
@@ -994,11 +1047,10 @@ def apply_dolphot_mask_instrument(
     """Run Python mask for ``acs`` | ``wfc3`` | ``wfpc2``."""
     lg = log_ or log
     inst = instrument.lower().strip()
-    tree = _resolve_dolphot_tree(lg)
     if inst == "acs":
-        apply_acsmask(image, tree)
+        apply_acsmask(image, _resolve_dolphot_tree(lg))
     elif inst == "wfc3":
-        apply_wfc3mask(image, tree)
+        apply_wfc3mask(image, _resolve_dolphot_tree(lg))
     elif inst == "wfpc2":
         apply_wfpc2mask(image, dq_image)
     else:

@@ -13,7 +13,10 @@ from hst123.primitives.run_dolphot import (
     DOLPHOT_REQUIRED_SCRIPTS,
     DolphotPrimitive,
 )
-from hst123.primitives.run_dolphot.run_dolphot_primitive import dolphot_subprocess_env
+from hst123.primitives.run_dolphot.run_dolphot_primitive import (
+    calcsky_subprocess_env,
+    dolphot_subprocess_env,
+)
 
 
 class TestDolphotPrimitiveInstantiation:
@@ -55,6 +58,31 @@ class TestDolphotSubprocessEnv:
         monkeypatch.delenv("HST123_DOLPHOT_OMP_THREADS", raising=False)
         monkeypatch.setattr(sys, "platform", "linux")
         e = dolphot_subprocess_env()
+        assert "OMP_NUM_THREADS" not in e
+
+
+class TestCalcskySubprocessEnv:
+    """calcsky ignores inherited OMP on Darwin (avoids SIGTRAP); see calcsky_subprocess_env."""
+
+    def test_darwin_forces_omp_one_even_if_parent_set_omp(self, monkeypatch):
+        monkeypatch.setenv("OMP_NUM_THREADS", "8")
+        monkeypatch.delenv("HST123_CALCSKY_OMP_THREADS", raising=False)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        e = calcsky_subprocess_env()
+        assert e["OMP_NUM_THREADS"] == "1"
+
+    def test_darwin_respects_hst123_calcsky_omp_threads(self, monkeypatch):
+        monkeypatch.setenv("OMP_NUM_THREADS", "8")
+        monkeypatch.setenv("HST123_CALCSKY_OMP_THREADS", "2")
+        monkeypatch.setattr(sys, "platform", "darwin")
+        e = calcsky_subprocess_env()
+        assert e["OMP_NUM_THREADS"] == "2"
+
+    def test_linux_delegates_to_dolphot_env(self, monkeypatch):
+        monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+        monkeypatch.delenv("HST123_DOLPHOT_OMP_THREADS", raising=False)
+        monkeypatch.setattr(sys, "platform", "linux")
+        e = calcsky_subprocess_env()
         assert "OMP_NUM_THREADS" not in e
 
 

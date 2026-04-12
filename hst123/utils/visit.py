@@ -33,7 +33,7 @@ def add_visit_info(obstable, visit_tol, log=None):
                 row["visit"] = int(np.max(obstable["visit"]) + 1)
             else:
                 if len(list(set(obstable[mask]["visit"]))) != 1:
-                    log.error("ERROR: visit numbers are incorrectly assigned.")
+                    log.error("Visit numbers are incorrectly assigned.")
                     return None
                 row["visit"] = list(set(obstable[mask]["visit"]))[0]
 

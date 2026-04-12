@@ -7,7 +7,8 @@ name = "hst123"
 dynamic = ["version"]
 description = "An all-in-one script for downloading, registering, and drizzling HST images, running dolphot, and scraping data from dolphot catalogs."
 readme = "README.md"
-requires-python = ">=3.8"
+# 3.12 only: NumPy 1.x / Astropy 5.x and DrizzlePac are validated on 3.12; 3.13+ needs a newer stack.
+requires-python = ">=3.12,<3.13"
 license = { text = "BSD-3-Clause" }
 keywords = ["astronomy", "HST", "Hubble", "dolphot", "drizzle", "photometry"]
 classifiers = [
@@ -16,32 +17,27 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 dependencies = [
-    "setuptools>=64.0,<82",  # stwcs uses pkg_resources; setuptools 82+ removed it
+    "setuptools>=64.0,<82",  # stsci stack / pkg_resources consumers; setuptools 82+ removed it
     "astropy>=5.3,<6",
     "astroquery>=0.4.6",
     "astroscrappy>=1.1.0",
     "drizzlepac>=3.5.1",
-    "numpy>=1.24,<2",
+    "numpy>=1.26,<2",  # 1.26+ wheels on Python 3.12; numpy 2 needs separate migration
     "progressbar33>=2.4",
     "python-dateutil>=2.8.2",
     "requests>=2.32.0",
-    "scipy>=1.10,<2",
-    "stwcs>=1.7.2",
+    "scipy>=1.11,<2",  # 1.11+ has reliable wheels on Python 3.12 with NumPy 1.x
     "jhat",
 ]
 
 [project.optional-dependencies]
 # Parallel JIT for Python calcsky fallback (large mosaics); `pip install .[perf]`
 perf = [
-    "numba>=0.57",
+    "numba>=0.59",  # 0.59+ supports Python 3.12
 ]
 test = [
     "pytest>=7.0",
@@ -64,6 +60,9 @@ hst123-install-dolphot = "hst123.dolphot_install:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hst123*"]
+
+[tool.setuptools.package-data]
+"hst123.utils.stwcs" = ["STWCS_VENDOR.txt"]
 
 [tool.setuptools_scm]
 # Version from git tag (e.g. 1.1.0); fallback when not in a git repo or no tags

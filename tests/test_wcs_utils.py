@@ -10,12 +10,6 @@ from hst123.utils.wcs_utils import (
     wcs_from_fits_hdu,
 )
 
-try:
-    import stwcs  # noqa: F401
-except ImportError:
-    stwcs = None
-
-
 class TestMakeMetaWcsHeader:
     def test_returns_dict_with_required_keys(self):
         class Header:
@@ -180,7 +174,6 @@ class TestWcsFromFitsHdu:
             assert abs(px[1] - 15.0) < 0.1
 
 
-@pytest.mark.skipif(stwcs is None, reason="stwcs not installed")
 class TestRemoveConflictingAltWcs:
     def test_noop_when_no_duplicate_alternates(self, tmp_path):
         p = tmp_path / "plain.fits"

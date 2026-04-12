@@ -162,7 +162,7 @@ def ensure_wcsname_tweak_on_image(image_path: str, logger: logging.Logger) -> No
     Set ``WCSNAME=TWEAK`` on **SCI** extensions only (in place).
 
     Setting ``WCSNAME`` on every HDU (PRIMARY, ERR, DQ, …) duplicates the same
-    name across alternates and triggers ``stwcs.wcsutil.altwcs`` warnings during
+    name across alternates and triggers ``altwcs`` warnings during
     ``updatewcs`` / headerlet steps.
     """
     from astropy.io import fits
@@ -179,6 +179,46 @@ def ensure_wcsname_tweak_on_image(image_path: str, logger: logging.Logger) -> No
             modified = True
         if modified:
             imhdu.flush()
+
+
+def wfpc2_astrodrizzle_scratch_paths(
+    c0m_path: str, disambig: str | int
+) -> tuple[str, str | None]:
+    """
+    Scratch paths for WFPC2 ``*_c0m.fits`` (and paired ``*_c1m.fits``) passed to AstroDrizzle.
+
+    DrizzlePac :meth:`drizzlepac.wfpc2Data.WFPC2InputImage.find_DQ_extension` infers the
+    DQ filename from the four characters immediately before ``.fits``. Those must be
+    ``_c0m`` so that string replacement yields the matching ``*_c1m.fits``. Names such
+    as ``*_c0m.drztmp.fits`` break this logic and produce invalid paths like
+    ``*_c0m.dr_c1p.fits`` (see drizzlepac ``wfpc2Data.py``).
+
+    Parameters
+    ----------
+    c0m_path
+        Absolute path to the science ``*_c0m.fits`` file.
+    disambig
+        Process id, uuid fragment, or other token so concurrent AstroDrizzle runs do not
+        collide on scratch names.
+
+    Returns
+    -------
+    tuple
+        ``(temp_c0m, temp_c1m)`` where ``temp_c1m`` is ``None`` if no ``*_c1m.fits`` exists
+        beside the original exposure root.
+    """
+    d = os.path.dirname(os.path.abspath(os.path.expanduser(c0m_path)))
+    base = os.path.basename(c0m_path)
+    if len(base) < 9 or not base.lower().endswith("_c0m.fits"):
+        raise ValueError(f"expected WFPC2 *_c0m.fits path, got {c0m_path!r}")
+    root = base[:-9]
+    tag = str(disambig)
+    tmp_c0m = os.path.join(d, f"{root}_hst123drz{tag}_c0m.fits")
+    c1m_orig = os.path.join(d, f"{root}_c1m.fits")
+    tmp_c1m = os.path.join(d, f"{root}_hst123drz{tag}_c1m.fits")
+    if os.path.isfile(c1m_orig):
+        return tmp_c0m, tmp_c1m
+    return tmp_c0m, None
 
 
 def build_astrodrizzle_keyword_args(
@@ -262,7 +302,8 @@ def build_wfpc2_skymask_catalog(
     logger: logging.Logger,
 ) -> str | None:
     """
-    Build ``skymask_cat`` for WFPC2 c0m inputs; return catalog basename or None.
+    Build ``skymask_cat`` for WFPC2 c0m inputs; return absolute path to the
+    catalog file, or None if not applicable.
     """
     from astropy.io import fits
 
@@ -290,11 +331,13 @@ def build_wfpc2_skymask_catalog(
 
     if not skymask_lines:
         return None
-    skymask_path = os.path.join(outdir, "skymask_cat")
+    skymask_path = os.path.abspath(os.path.join(outdir, "skymask_cat"))
     with open(skymask_path, "w", encoding="utf-8") as fh:
         fh.writelines(skymask_lines)
     logger.debug("Wrote skymask_cat with %d line(s) for WFPC2 c0m inputs", len(skymask_lines))
-    return "skymask_cat"
+    # Absolute path: AstroDrizzle is invoked before run_alignment's chdir(work_dir),
+    # so a basename-only skymask_cat would be resolved from the process CWD and missed.
+    return skymask_path
 
 
 def write_drc_multis_extension_if_requested(

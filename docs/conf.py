@@ -83,8 +83,6 @@ autodoc_mock_imports = [
     "drizzlepac.catalogs",
     "drizzlepac.photeq",
     "jhat",
-    "stwcs",
-    "stwcs.updatewcs",
 ]
 
 # -- HTML ------------------------------------------------------------------

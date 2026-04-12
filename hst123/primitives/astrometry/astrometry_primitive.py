@@ -19,10 +19,12 @@ from astropy.table import Table, Column
 from scipy.interpolate import interp1d
 
 from hst123 import settings
+from hst123.utils.options import want_redo_astrometry
 from hst123.utils.paths import normalize_fits_path
 from hst123.utils.stdio import suppress_stdout
 from hst123.utils.logging import format_hdu_list_summary, log_calls
 from hst123.utils.workdir_cleanup import cleanup_after_tweakreg
+from hst123.utils.alignment_validation import log_tweakreg_shift_metrics
 from hst123.primitives.base import BasePrimitive
 from hst123.primitives.astrometry.alignment_meta import (
     alignment_is_redundant,
@@ -32,21 +34,22 @@ from hst123.primitives.astrometry.alignment_meta import (
     write_alignment_provenance,
 )
 
-_STWCS_LOGGER_NAMES = (
+# Logger names emitted by STScI ``stwcs`` (PyPI) when TweakReg/headerlet runs.
+_STSCI_WCS_LOGGERS = (
     "stwcs",
     "stwcs.wcsutil",
     "stwcs.wcsutil.headerlet",
 )
 
 
-def _quiet_stwcs_for_headerlet(fn):
-    """Raise stwcs/headerlet loggers to WARNING for the duration of *fn* (less noise)."""
+def _quiet_headerlet_loggers(fn):
+    """Raise headerlet-related loggers to WARNING for the duration of *fn* (less noise)."""
 
     @functools.wraps(fn)
     def wrapped(*args, **kwargs):
-        prev = {n: logging.getLogger(n).level for n in _STWCS_LOGGER_NAMES}
+        prev = {n: logging.getLogger(n).level for n in _STSCI_WCS_LOGGERS}
         try:
-            for n in _STWCS_LOGGER_NAMES:
+            for n in _STSCI_WCS_LOGGERS:
                 logging.getLogger(n).setLevel(logging.WARNING)
             return fn(*args, **kwargs)
         finally:
@@ -58,17 +61,24 @@ def _quiet_stwcs_for_headerlet(fn):
 
 def _resolve_work_dir_chdir(work_dir):
     """
-    Return absolute work directory, create if missing, and chdir into it.
+    Return absolute directory used for alignment (``<work-dir>/workspace``), chdir into it.
+
+    TweakReg, JHAT, and AstroDrizzle scratch/logs use this tree; the main drizzled
+    reference may still live in the base ``--work-dir`` when given as an absolute path.
 
     Relative ``work_dir`` values must not be joined again after ``chdir`` —
     e.g. ``os.chdir("test_data")`` then ``join("test_data", "x.txt")`` would
     resolve to ``test_data/test_data/x.txt`` and raise FileNotFoundError.
     """
+    from hst123.utils.paths import pipeline_workspace_dir
+
     base = work_dir if work_dir else "."
     path = os.path.abspath(os.path.expanduser(base))
-    os.makedirs(path, exist_ok=True)
-    os.chdir(path)
-    return path
+    ws = pipeline_workspace_dir(path)
+    target = ws if ws else path
+    os.makedirs(target, exist_ok=True)
+    os.chdir(target)
+    return target
 
 
 def _is_number(num):
@@ -126,11 +136,14 @@ def parse_coord(ra, dec):
 
 try:
     from drizzlepac import tweakreg, catalogs
-    import stwcs
+
+    from hst123.utils.stsci_wcs import hstwcs_class
+
+    HSTWCS = hstwcs_class()
 except ImportError:
     tweakreg = None
     catalogs = None
-    stwcs = None
+    HSTWCS = None  # type: ignore[misc,assignment]
 
 
 class AstrometryPrimitive(BasePrimitive):
@@ -241,7 +254,8 @@ class AstrometryPrimitive(BasePrimitive):
         alignment_ref_id : str, optional
             Reference path, ``GAIA``, etc. If unset, redundancy is not evaluated.
         force_realign : bool, optional
-            If True (e.g. ``--clobber``), never skip based on provenance.
+            If True (``--clobber``, ``--redo``, ``--redo-astrometry``), never skip
+            based on provenance.
 
         Returns
         -------
@@ -327,8 +341,8 @@ class AstrometryPrimitive(BasePrimitive):
         int
             Total number of sources from catalog.
         """
-        if catalogs is None or stwcs is None:
-            log.warning("drizzlepac/stwcs unavailable; cannot count sources")
+        if catalogs is None or HSTWCS is None:
+            log.warning("drizzlepac or stsci_wcs (bundled STScI WCS) unavailable; cannot count sources")
             return 0
         nsources = 0
         log.debug(
@@ -340,7 +354,7 @@ class AstrometryPrimitive(BasePrimitive):
             for i, h in enumerate(imghdu):
                 if h.name == "SCI" or (len(imghdu) == 1 and h.name == "PRIMARY"):
                     filename = "{:s}[{:d}]".format(image, i)
-                    wcs = stwcs.wcsutil.HSTWCS(filename)
+                    wcs = HSTWCS(filename)
                     catalog_mode = "automatic"
                     catalog = catalogs.generateCatalog(
                         wcs,
@@ -762,7 +776,7 @@ class AstrometryPrimitive(BasePrimitive):
         p = self._p
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
         params = getattr(settings, "jhat_params", None) or {}
-        force_realign = getattr(p.options["args"], "clobber", False)
+        force_realign = want_redo_astrometry(p.options["args"])
         jhat_ref_id = "GAIA"
 
         log.info(
@@ -851,7 +865,7 @@ class AstrometryPrimitive(BasePrimitive):
         return ("jhat success", None)
 
     @log_calls
-    @_quiet_stwcs_for_headerlet
+    @_quiet_headerlet_loggers
     def run_tweakreg(
         self,
         obstable,
@@ -888,7 +902,7 @@ class AstrometryPrimitive(BasePrimitive):
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
         outshifts = os.path.join(outdir, "drizzle_shifts.txt")
         options = p.options["global_defaults"]
-        force_realign = getattr(p.options["args"], "clobber", False)
+        force_realign = want_redo_astrometry(p.options["args"])
 
         def _tweakreg_cleanup_and_return(result):
             vpaths = [
@@ -940,7 +954,7 @@ class AstrometryPrimitive(BasePrimitive):
                 det = "_".join(p._fits.get_instrument(image).split("_")[:2])
                 wcsoptions = p.options["detector_defaults"][det]
                 # Match run_astrodrizzle: skip MAST AstrometryDB here. DB updates call
-                # stwcs.archive_wcs(..., QUIET_ABORT) and emit duplicate-WCSNAME warnings
+                # archive_wcs(..., QUIET_ABORT) and emit duplicate-WCSNAME warnings
                 # on FLCs that already carry IDC/TWEAK alternates; makecorr still runs.
                 p.update_image_wcs(image, wcsoptions, use_db=False)
 
@@ -1223,6 +1237,17 @@ class AstrometryPrimitive(BasePrimitive):
                     ),
                 )
 
+                _ref_metrics = ref_use if os.path.isfile(ref_use) else deepest
+                if not os.path.isfile(_ref_metrics):
+                    _ref_metrics = deepest
+                log_tweakreg_shift_metrics(
+                    shifts,
+                    ref_path=os.path.abspath(_ref_metrics),
+                    log=log,
+                    tolerance_arcsec=tol,
+                    batch_index=bi if len(batches) > 1 else None,
+                )
+
                 self.apply_tweakreg_success(
                     shifts, ref_id=ref_use, method="tweakreg"
                 )
@@ -1261,6 +1286,26 @@ class AstrometryPrimitive(BasePrimitive):
                 tweakreg_success = False
 
         log.info("Tweakreg finished in %.2fs", time.time() - start_tweak)
+        try:
+            _agg = Table(
+                [shift_table["xoffset"], shift_table["yoffset"]],
+                names=("xoffset", "yoffset"),
+            )
+            _agg_ref = (
+                os.path.abspath(reference)
+                if reference and os.path.isfile(reference)
+                else os.path.abspath(deepest)
+            )
+            log_tweakreg_shift_metrics(
+                _agg,
+                ref_path=_agg_ref,
+                log=log,
+                tolerance_arcsec=settings.tweakreg_defaults["tolerance"],
+                summary_prefix="TweakReg aggregate",
+            )
+        except Exception as exc:
+            log.debug("TweakReg aggregate shift validation: %s", exc)
+
         log.info(
             "TweakReg alignment summary: success=%s batches=%d method=tweakreg",
             tweakreg_success,

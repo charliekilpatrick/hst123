@@ -21,6 +21,7 @@ from hst123.utils.dolphot_sky import (
     write_sky_fits_fallback,
 )
 from hst123.utils.logging import get_logger, log_calls, make_banner, run_external_command
+from hst123.utils.paths import pipeline_chip_output_dir
 from hst123.utils.wcs_utils import wcs_from_fits_hdu
 
 log = get_logger(__name__)
@@ -52,6 +53,10 @@ def dolphot_subprocess_env() -> dict[str, str]:
     For a permanent multi-threaded run after fixing **Homebrew** ``libomp`` and
     rebuilding DOLPHOT (see README), export ``OMP_NUM_THREADS`` or
     ``HST123_DOLPHOT_OMP_THREADS`` before running the pipeline.
+
+    Note: ``calcsky`` uses :func:`calcsky_subprocess_env` instead, because an inherited
+    shell ``OMP_NUM_THREADS`` (e.g. from conda) commonly breaks **calcsky** on macOS
+    even when ``dolphot`` would be fine.
     """
     env = os.environ.copy()
     if "OMP_NUM_THREADS" in os.environ:
@@ -61,6 +66,30 @@ def dolphot_subprocess_env() -> dict[str, str]:
         env["OMP_NUM_THREADS"] = str(explicit).strip()
         return env
     if sys.platform == "darwin":
+        env["OMP_NUM_THREADS"] = "1"
+    return env
+
+
+def calcsky_subprocess_env() -> dict[str, str]:
+    """
+    Environment for the ``calcsky`` binary only.
+
+    On **macOS**, ``calcsky`` frequently aborts with **SIGTRAP** if ``OMP_NUM_THREADS>1``
+    and OpenMP libraries are mismatched. Unlike :func:`dolphot_subprocess_env`, this
+    **does not** inherit a global ``OMP_NUM_THREADS`` from the parent process: conda
+    and other stacks often set it to the CPU count, which triggers the crash. We
+    default to a single thread on Darwin.
+
+    Override with ``HST123_CALCSKY_OMP_THREADS`` (e.g. ``4``) after verifying
+    ``calcsky`` is linked against the correct Homebrew ``libomp``.
+    """
+    env = os.environ.copy()
+    if sys.platform != "darwin":
+        return dolphot_subprocess_env()
+    explicit = os.environ.get("HST123_CALCSKY_OMP_THREADS")
+    if explicit is not None and str(explicit).strip() != "":
+        env["OMP_NUM_THREADS"] = str(explicit).strip()
+    else:
         env["OMP_NUM_THREADS"] = "1"
     return env
 
@@ -164,6 +193,27 @@ class DolphotPrimitive(BasePrimitive):
             return True
         return False
 
+    def _chip_stem(self, image):
+        return os.path.splitext(os.path.basename(image))[0]
+
+    def _chip_out_dir(self):
+        opt = getattr(self._p, "options", None)
+        if not opt:
+            return None
+        args = opt.get("args") if isinstance(opt, dict) else getattr(opt, "args", None)
+        if args is None:
+            return None
+        wd = getattr(args, "work_dir", None)
+        return pipeline_chip_output_dir(wd)
+
+    def _chip_glob_pattern(self, image):
+        """Glob for per-chip FITS (under base work_dir when set)."""
+        stem = self._chip_stem(image)
+        cod = self._chip_out_dir()
+        if cod:
+            return os.path.join(cod, f"{stem}.chip?.fits")
+        return image.replace(".fits", ".chip?.fits")
+
     def needs_to_split_groups(self, image):
         """Return True if per-chip files are missing (SCI extensions or 3-D WFPC2-style primary)."""
         from hst123.utils.dolphot_splitgroups import count_expected_split_outputs
@@ -171,7 +221,7 @@ class DolphotPrimitive(BasePrimitive):
         expected = count_expected_split_outputs(image)
         if expected == 0:
             return False
-        return len(glob.glob(image.replace(".fits", ".chip?.fits"))) != expected
+        return len(glob.glob(self._chip_glob_pattern(image))) != expected
 
     def needs_to_be_masked(self, image):
         """
@@ -214,6 +264,8 @@ class DolphotPrimitive(BasePrimitive):
             If True, remove split files that are not science extensions. Default True.
         """
         log.info("Running split groups for %s", image)
+        cod = self._chip_out_dir()
+        chip_out_dir = cod if cod else None
         use_ext = os.environ.get(
             "HST123_DOLPHOT_SPLITGROUPS_EXTERNAL", ""
         ).strip().lower() in ("1", "true", "yes")
@@ -221,7 +273,7 @@ class DolphotPrimitive(BasePrimitive):
             try:
                 from hst123.utils.dolphot_splitgroups import apply_splitgroups
 
-                apply_splitgroups(image, log_=log)
+                apply_splitgroups(image, chip_out_dir=chip_out_dir, log_=log)
             except Exception as exc:
                 log.warning(
                     "Python splitgroups failed (%s); falling back to splitgroups",
@@ -230,16 +282,25 @@ class DolphotPrimitive(BasePrimitive):
                 use_ext = True
         if use_ext:
             run_external_command(["splitgroups", image], log=log)
+            if cod:
+                img_dir = os.path.dirname(os.path.abspath(image))
+                stem = self._chip_stem(image)
+                for f in sorted(
+                    glob.glob(os.path.join(img_dir, f"{stem}.chip*.fits"))
+                ):
+                    dest = os.path.join(cod, os.path.basename(f))
+                    if os.path.abspath(f) != os.path.abspath(dest):
+                        shutil.move(f, dest)
         if delete_non_science:
-            split_images = glob.glob(
-                image.replace(".fits", ".chip*.fits")
-            )
+            stem = self._chip_stem(image)
+            gdir = cod if cod else os.path.dirname(os.path.abspath(image))
+            split_images = glob.glob(os.path.join(gdir, f"{stem}.chip*.fits"))
             for split in split_images:
                 hdu = fits.open(split)
                 info = hdu[0]._summary()
                 if info[0].upper() != "SCI":
                     log.warning(
-                        "WARNING: deleting %s, not a science extension.",
+                        "Deleting %s; not a science extension.",
                         split,
                     )
                     os.remove(split)
@@ -273,6 +334,23 @@ class DolphotPrimitive(BasePrimitive):
                     "If the install lives on cloud storage, ensure files are fully local "
                     "(not zero-byte placeholders)."
                 )
+        if inst_l == "wfc3":
+            from hst123.dolphot_install import ensure_wfc3_mask_support_files
+
+            ok, msgs = ensure_wfc3_mask_support_files()
+            if not ok:
+                raise RuntimeError(
+                    "DOLPHOT WFC3 wfc3mask needs distortion map FITS (UVIS1wfc3_map.fits, "
+                    "UVIS2wfc3_map.fits, ir_wfc3_map.fits) under .../dolphot3.1/wfc3/data/. "
+                    "Problems: "
+                    + "; ".join(msgs)
+                    + ". Fix: install WFC3 PAM archives (WFC3_UVIS_PAM.tar.gz and "
+                    "WFC3_IR_PAM.tar.gz supply these maps) — run "
+                    "hst123-install-dolphot --wfc3-maps-only or a full install with "
+                    "PSFs, or run hst123-install-dolphot without --no-psfs. "
+                    "If the tree is on cloud storage, ensure maps are fully synced "
+                    "(not zero-byte placeholders)."
+                )
         maskimage = p._fits.get_dq_image(image)
         use_ext = os.environ.get("HST123_DOLPHOT_MASK_EXTERNAL", "").strip().lower() in (
             "1",
@@ -284,13 +362,13 @@ class DolphotPrimitive(BasePrimitive):
             try:
                 from hst123.utils.dolphot_mask import apply_dolphot_mask_instrument
 
+                log.info("DOLPHOT mask (Python): %s %s", inst_l, os.path.basename(image))
                 apply_dolphot_mask_instrument(
                     inst_l,
                     image,
                     dq_arg,
                     log_=log,
                 )
-                log.info("DOLPHOT mask (Python): %s %s", inst_l, os.path.basename(image))
             except Exception as exc:
                 log.warning(
                     "Python DOLPHOT mask failed (%s); falling back to %s",
@@ -372,8 +450,12 @@ class DolphotPrimitive(BasePrimitive):
                 log.info("Wrote sky map (Python, large-image path): %s", final_sky)
                 return
 
+            # Short temp path: upstream calcsky.c uses char str[81] with
+            # sprintf("%s.sky.fits", argv[1]); a long work_dir overflows → SIGTRAP
+            # (__chk_fail_overflow) on macOS. System temp + prefix "cs" stays safe
+            # even before hst123's calcsky.c source patch (see dolphot_install).
             fd, tmp_img = tempfile.mkstemp(
-                suffix=".fits", prefix=".hst123_calcsky_", dir=work_dir
+                suffix=".fits", prefix="cs", dir=tempfile.gettempdir()
             )
             os.close(fd)
             tmp_root = tmp_img[:-5] if tmp_img.lower().endswith(".fits") else tmp_img
@@ -408,7 +490,7 @@ class DolphotPrimitive(BasePrimitive):
                             calc_argv,
                             log=log,
                             check=False,
-                            env=dolphot_subprocess_env(),
+                            env=calcsky_subprocess_env(),
                         )
                     except OSError as exc:
                         log.warning(
@@ -457,6 +539,14 @@ class DolphotPrimitive(BasePrimitive):
                     sig,
                     sig_name,
                 )
+                if sig == 5 and tmp_root and len(tmp_root) > 72:
+                    log.warning(
+                        "calcsky: SIGTRAP with long base path (%d chars) often means an "
+                        "**unpatched** calcsky.c stack buffer (81 B) overflow, not OpenMP — "
+                        "re-run hst123-install-dolphot (applies calcsky.c patch) or rely "
+                        "on this Python sky map.",
+                        len(tmp_root),
+                    )
             elif cp is not None:
                 log.warning(
                     "calcsky: exit %s; Python sky fallback",
@@ -739,7 +829,7 @@ class DolphotPrimitive(BasePrimitive):
         if self.needs_to_split_groups(image):
             self.split_groups(image)
         outimg = []
-        split_images = glob.glob(image.replace(".fits", ".chip?.fits"))
+        split_images = glob.glob(self._chip_glob_pattern(image))
         for im in split_images:
             if not p.split_image_contains(
                 im, p.coord
@@ -815,7 +905,7 @@ class DolphotPrimitive(BasePrimitive):
                     )
                 else:
                     make_banner(
-                        f"WARNING: did not find a source for: {ra} {dec}"
+                        f"Did not find a source for: {ra} {dec}"
                     )
             else:
                 log.warning(
@@ -871,7 +961,7 @@ class DolphotPrimitive(BasePrimitive):
         try:
             if not os.path.exists(dp["base"]) or os.path.getsize(dp["base"]) == 0:
                 log.warning(
-                    "WARNING: option --do-fake used but dolphot has not been run."
+                    "Option --do-fake used but dolphot has not been run."
                 )
                 return None
             flines = 0

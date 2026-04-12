@@ -19,7 +19,7 @@ jobs:
         submodules: true
         fetch-depth: 0
         persist-credentials: false
-    - name: Set up Conda with Python 3.10
+    - name: Set up Conda with Python 3.12
       uses: conda-incubator/setup-miniconda@v3
       with:
         environment-file: environment.yml
