@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -204,3 +205,108 @@ def log_tweakreg_shift_metrics(
         "plate_scale_arcsec_per_pix": px_scale,
         "subpixel_pass": subpixel_pass,
     }
+
+
+def aggregate_jhat_gaia_stats(
+    stats_list: Sequence[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """
+    Combine per-exposure JHAT-vs-Gaia RMS metrics (weighted by match count).
+
+    Returns
+    -------
+    dict or None
+        ``n_gaia``, ``rms_ra_deg``, ``rms_dec_deg``, ``rms_sky_as`` for header use.
+    """
+    if not stats_list:
+        return None
+    valid = [
+        s
+        for s in stats_list
+        if isinstance(s, dict) and int(s.get("n_match") or 0) > 0
+    ]
+    if not valid:
+        return None
+    w = sum(int(s["n_match"]) for s in valid)
+    if w < 1:
+        return None
+
+    def _w_rms(key: str) -> float:
+        num = sum(int(s["n_match"]) * float(s[key]) ** 2 for s in valid)
+        return float(np.sqrt(num / w))
+
+    rms_ra_as = _w_rms("rms_ra_as")
+    rms_dec_as = _w_rms("rms_dec_as")
+    rms_sky_as = _w_rms("rms_sky_as")
+    return {
+        "n_gaia": w,
+        "rms_ra_deg": rms_ra_as / 3600.0,
+        "rms_dec_deg": rms_dec_as / 3600.0,
+        "rms_sky_as": rms_sky_as,
+    }
+
+
+def write_gaia_alignment_crderr_to_reference_driz(
+    driz_path: str | os.PathLike[str],
+    stats_list: Sequence[dict[str, Any]] | None,
+    *,
+    log: logging.Logger | None = None,
+) -> bool:
+    """
+    Record Gaia–JHAT residual dispersion on a reference drizzle using FITS WCS keywords.
+
+    Writes ``CRDER1`` / ``CRDER2`` (Greisen & Calabretta 2002, Paper II): random
+    errors in degrees on the RA and Dec axes from the RMS of post-fit residuals
+    vs Gaia, aggregated across exposures in *stats_list*. Also sets
+    ``HIERARCH HST123 NJHATGAIA`` to the total number of matched sources used.
+
+    Parameters
+    ----------
+    driz_path
+        Path to the reference ``*.drc.fits`` product.
+    stats_list
+        Per-exposure dicts from :func:`hst123.primitives.astrometry.jhat.read_jhat_gaia_residual_stats`.
+
+    Returns
+    -------
+    bool
+        True if the header was updated.
+    """
+    from hst123.utils.astrodrizzle_helpers import drizzle_product_catalog_header
+
+    lg = log or _LOG
+    agg = aggregate_jhat_gaia_stats(stats_list)
+    if agg is None:
+        lg.debug("No JHAT Gaia stats to write for %s", driz_path)
+        return False
+    p = os.path.abspath(os.path.expanduser(os.fspath(driz_path)))
+    if not os.path.isfile(p):
+        lg.warning("Reference drizzle missing for Gaia CRDER update: %s", p)
+        return False
+    try:
+        with fits.open(p, mode="update") as hdul:
+            hdr = drizzle_product_catalog_header(hdul)
+            hdr["CRDER1"] = (agg["rms_ra_deg"], "RMS vs Gaia RA (deg), JHAT stack")
+            hdr["CRDER2"] = (agg["rms_dec_deg"], "RMS vs Gaia Dec (deg), JHAT stack")
+            hdr["HIERARCH HST123 NJHATGAIA"] = (
+                agg["n_gaia"],
+                "sources in JHAT Gaia residual RMS",
+            )
+            hdr["HIERARCH HST123 JRMSKY"] = (
+                round(agg["rms_sky_as"], 6),
+                "JHAT vs Gaia RMS sep (arcsec), stack",
+            )
+            hdul.flush()
+    except Exception as exc:
+        lg.warning("Could not write Gaia alignment CRDER* to %s: %s", p, exc)
+        return False
+    lg.info(
+        "Reference %s: Gaia alignment dispersion CRDER1=%.4e CRDER2=%.4e deg "
+        "(%.3f mas RMS sky), N_Gaia=%d",
+        os.path.basename(p),
+        agg["rms_ra_deg"],
+        agg["rms_dec_deg"],
+        agg["rms_sky_as"] * 1000.0,
+        agg["n_gaia"],
+    )
+    return True

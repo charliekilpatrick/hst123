@@ -5,7 +5,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from astropy.table import Table
+
 from hst123.utils.dolphot_catalog_hdf5 import (
+    append_scraped_final_phot_hdf5,
     find_column_index_0based,
     load_dolphot_catalog_array,
     merge_image_metadata,
@@ -102,8 +105,6 @@ def test_write_dolphot_catalog_hdf5_roundtrip(tmp_path):
     out = tmp_path / "out.h5"
     write_dolphot_catalog_hdf5(out, base, compression=False)
 
-    from astropy.table import Table
-
     t = Table.read(str(out), format="hdf5", path="photometry")
     assert len(t) == 2
     assert len(t.colnames) == 4
@@ -115,6 +116,79 @@ def test_write_dolphot_catalog_hdf5_roundtrip(tmp_path):
         assert len(meta) == 4
         merged = json.loads(hf["photometry"].attrs["dolphot_merged_metadata_json"])
         assert "images" in merged
+
+
+def test_write_dolphot_catalog_hdf5_accepts_in_memory_catalog_array(tmp_path):
+    """``catalog_array`` must match on-disk catalog (pipeline passes scrape buffer)."""
+    h5py = pytest.importorskip("h5py")
+
+    base = tmp_path / "dp0000"
+    col = tmp_path / "dp0000.columns"
+    col.write_text(
+        "1. Extension (zero for base image)\n"
+        "2. Chip (for three-dimensional FITS image)\n"
+        "3. Object X position\n"
+        "4. Measured counts, /tmp/foo.chip2 (ACS_F555W, 100.0 sec)\n",
+        encoding="utf-8",
+    )
+    cat = np.array([[0, 1, 100.0, 50.0], [0, 1, 200.0, 60.0]])
+    np.savetxt(base, cat)
+    (tmp_path / "dp0000.param").write_text("Nimg = 1\n", encoding="utf-8")
+    (tmp_path / "dp0000.info").write_text("1 sets of output data\n", encoding="utf-8")
+    (tmp_path / "dp0000.data").write_text("WCS image 1: 1\n", encoding="utf-8")
+    (tmp_path / "dp0000.warnings").write_text("", encoding="utf-8")
+
+    out = tmp_path / "mem.h5"
+    write_dolphot_catalog_hdf5(
+        out, base, compression=False, catalog_array=cat, include_directory_manifest=False
+    )
+
+    t_disk = Table.read(str(out), format="hdf5", path="photometry")
+    out2 = tmp_path / "disk.h5"
+    write_dolphot_catalog_hdf5(out2, base, compression=False, include_directory_manifest=False)
+    t_arr = Table.read(str(out2), format="hdf5", path="photometry")
+    assert len(t_disk) == len(t_arr) == 2
+    assert t_disk.colnames == t_arr.colnames
+
+    with h5py.File(out, "r") as hf:
+        assert "dolphot_directory" not in hf.get("metadata", {})
+
+
+def test_append_scraped_final_phot_stacks_sources(tmp_path):
+    """All scrape sources in one HDF5 group with scrape_source_index."""
+    h5py = pytest.importorskip("h5py")
+
+    base = tmp_path / "dp0000"
+    col = tmp_path / "dp0000.columns"
+    col.write_text(
+        "1. Extension (zero for base image)\n"
+        "2. Chip (for three-dimensional FITS image)\n"
+        "3. Object X position\n"
+        "4. Measured counts, /tmp/foo.chip2 (ACS_F555W, 100.0 sec)\n",
+        encoding="utf-8",
+    )
+    cat = np.array([[0, 1, 100.0, 50.0], [0, 1, 200.0, 60.0]])
+    np.savetxt(base, cat)
+    (tmp_path / "dp0000.param").write_text("Nimg = 1\n", encoding="utf-8")
+    (tmp_path / "dp0000.info").write_text("1 sets of output data\n", encoding="utf-8")
+    (tmp_path / "dp0000.data").write_text("WCS image 1: 1\n", encoding="utf-8")
+    (tmp_path / "dp0000.warnings").write_text("", encoding="utf-8")
+
+    out = tmp_path / "bundle.h5"
+    write_dolphot_catalog_hdf5(
+        out, base, compression=False, include_directory_manifest=False, serialize_meta=True
+    )
+    t1 = Table({"MJD": [50000.0, 50001.0], "FILTER": ["F555W", "F814W"]})
+    t2 = Table({"MJD": [50002.0], "FILTER": ["F555W"]})
+    append_scraped_final_phot_hdf5(out, [t1, t2], compression=False, serialize_meta=False)
+
+    stacked = Table.read(str(out), format="hdf5", path="scraped_photometry")
+    assert len(stacked) == 3
+    assert list(stacked["scrape_source_index"]) == [0, 0, 1]
+
+    with h5py.File(out, "r") as hf:
+        g = hf["scraped_photometry"]
+        assert g.attrs["n_scrape_sources"] == 2
 
 
 def test_write_dolphot_catalog_hdf5_embeds_dolphot_directory_manifest(tmp_path):

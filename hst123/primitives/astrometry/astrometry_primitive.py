@@ -412,6 +412,7 @@ class AstrometryPrimitive(BasePrimitive):
 
         method_tok = alignment_method_token(alignment_method)
         use_batch_ref = tweakreg_reference_images is not None
+        skipped_already: list[str] = []
 
         for file in list(images):
             fp = normalize_fits_path(file)
@@ -441,13 +442,7 @@ class AstrometryPrimitive(BasePrimitive):
                     require_success=True,
                 )
             ):
-                log.info(
-                    "Skipping alignment for %s: already aligned "
-                    "(success=True, method=%s, reference_id=%s)",
-                    os.path.basename(file),
-                    prov["method"] if prov else method_tok,
-                    prov["ref"] if prov else ref_for_compare,
-                )
+                skipped_already.append(os.path.basename(file))
                 images.remove(file)
                 continue
             log.debug(
@@ -455,6 +450,17 @@ class AstrometryPrimitive(BasePrimitive):
                 file,
                 prov,
                 ref_for_compare,
+            )
+
+        if skipped_already:
+            sample = ", ".join(skipped_already[:12])
+            tail = "" if len(skipped_already) <= 12 else f" (+{len(skipped_already) - 12} more)"
+            log.info(
+                "Skipping alignment for %d image(s) already aligned (method=%s): %s%s",
+                len(skipped_already),
+                method_tok,
+                sample,
+                tail,
             )
 
         if len(images) == 0:
@@ -862,7 +868,12 @@ class AstrometryPrimitive(BasePrimitive):
         align_with = getattr(
             self._p.options["args"], "align_with", "tweakreg"
         ).lower()
-        log.info(
+        if align_with != "jhat":
+            self._p._jhat_gaia_ref_stats = []
+        # JHAT: avoid repeating the same lines when main() already logged a banner and
+        # run_jhat_align emits its own summary; TweakReg stays verbose at INFO.
+        _align_log = log.debug if align_with == "jhat" else log.info
+        _align_log(
             "Alignment requested: method=%s pipeline_reference_argument=%r",
             align_with,
             reference,
@@ -879,7 +890,7 @@ class AstrometryPrimitive(BasePrimitive):
                 update_hdr=update_hdr,
             )
         msg = result[0] if result else None
-        log.info(
+        _align_log(
             "Alignment step complete: outcome=%r method=%s pipeline_reference_argument=%r",
             msg,
             align_with,
@@ -910,7 +921,7 @@ class AstrometryPrimitive(BasePrimitive):
         tuple
             (message_str, None) for compatibility with run_tweakreg.
         """
-        from hst123.primitives.astrometry.jhat import run_jhat
+        from hst123.primitives.astrometry.jhat import read_jhat_gaia_residual_stats, run_jhat
 
         p = self._p
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
@@ -918,15 +929,20 @@ class AstrometryPrimitive(BasePrimitive):
         force_realign = want_redo_astrometry(p.options["args"])
         jhat_ref_id = "GAIA"
 
-        log.info(
-            "JHAT setup: method=jhat reference_catalog=%s (unused pipeline ref=%r)",
-            jhat_ref_id,
+        log.debug(
+            "JHAT Gaia: workspace=%s pipeline_ref=%r (unused for Gaia catalog)",
+            outdir,
             reference,
         )
 
         ran_any = False
+        skipped_names: list[str] = []
+        aligned_names: list[str] = []
+        missing: list[str] = []
+        stats_run: list[dict] = []
         for image in obstable["image"]:
             if not os.path.exists(image):
+                missing.append(os.path.basename(str(image)))
                 log.warning("Skipping missing image for JHAT: %s", image)
                 continue
             if not force_realign:
@@ -937,32 +953,28 @@ class AstrometryPrimitive(BasePrimitive):
                         ref_id=jhat_ref_id,
                         require_success=True,
                     ):
-                        prov = read_alignment_provenance(hdu[0].header)
-                        log.info(
-                            "Skipping alignment for %s: already aligned "
-                            "(success=True, method=jhat, reference_id=%s)",
-                            os.path.basename(image),
-                            prov["ref"] if prov else jhat_ref_id,
-                        )
+                        skipped_names.append(os.path.basename(str(image)))
+                        st = read_jhat_gaia_residual_stats(image, outdir)
+                        if st:
+                            st["image"] = os.path.basename(str(image))
+                            stats_run.append(st)
                         continue
-            log.info(
-                "Running JHAT on %s (method=jhat, reference=%s)",
-                os.path.basename(image),
-                jhat_ref_id,
-            )
+            log.debug("JHAT run_all: %s", os.path.basename(str(image)))
             try:
-                run_jhat(
+                stats = run_jhat(
                     image,
                     outdir=outdir,
                     params=params,
                     gaia=True,
                     verbose=False,
                 )
+                if stats:
+                    stats["image"] = os.path.basename(str(image))
+                    stats_run.append(stats)
             except Exception as e:
                 log.error(
-                    "JHAT alignment failed for %s (method=jhat, reference=%s): %s",
-                    os.path.basename(image),
-                    jhat_ref_id,
+                    "JHAT Gaia failed for %s: %s",
+                    os.path.basename(str(image)),
                     e,
                 )
                 self._primitive_cleanup(
@@ -970,8 +982,10 @@ class AstrometryPrimitive(BasePrimitive):
                     work_dir=outdir,
                     validation_notes={"status": "failed", "image": str(image)},
                 )
+                p._jhat_gaia_ref_stats = stats_run
                 return ("jhat failure", None)
             ran_any = True
+            aligned_names.append(os.path.basename(str(image)))
             with fits.open(image, mode="update") as hdu:
                 hdu[0].header["TWEAKSUC"] = 1
                 write_alignment_provenance(
@@ -981,16 +995,31 @@ class AstrometryPrimitive(BasePrimitive):
                     success=True,
                 )
                 hdu.flush()
+        if skipped_names:
+            tail = ", ".join(sorted(skipped_names)[:10])
+            if len(skipped_names) > 10:
+                tail += ", …"
             log.info(
-                "JHAT alignment succeeded for %s (method=jhat, reference=%s)",
-                os.path.basename(image),
-                jhat_ref_id,
+                "JHAT Gaia: skipped %d already-aligned (%s)",
+                len(skipped_names),
+                tail,
             )
-        if not ran_any:
+        if aligned_names:
+            tail = ", ".join(sorted(aligned_names)[:10])
+            if len(aligned_names) > 10:
+                tail += ", …"
             log.info(
-                "JHAT: no images required alignment (missing files or already aligned to %s).",
-                jhat_ref_id,
+                "JHAT Gaia: aligned %d exposure(s) — %s",
+                len(aligned_names),
+                tail,
             )
+        if not ran_any and not skipped_names and missing:
+            log.warning(
+                "JHAT Gaia: no exposures processed (%d missing on disk).",
+                len(missing),
+            )
+        elif not ran_any and not skipped_names and not missing:
+            log.info("JHAT Gaia: no input exposures in obstable.")
         vpaths = [
             normalize_fits_path(str(im))
             for im in obstable["image"]
@@ -1001,6 +1030,7 @@ class AstrometryPrimitive(BasePrimitive):
             work_dir=outdir,
             validate_fits_paths=vpaths,
         )
+        p._jhat_gaia_ref_stats = stats_run
         return ("jhat success", None)
 
     @log_calls
@@ -1086,8 +1116,12 @@ class AstrometryPrimitive(BasePrimitive):
             log.warning("All images have been run through tweakreg.")
             return _tweakreg_cleanup_and_return((True, shift_table))
 
-        log.info("Need to run tweakreg for images:")
-        p.input_list(obstable["image"], show=True, save=False)
+        n_align = len(run_images)
+        log.info("TweakReg: aligning %d image(s).", n_align)
+        log.debug(
+            "TweakReg input basenames: %s",
+            " ".join(os.path.basename(str(x)) for x in obstable["image"]),
+        )
 
         tmp_images = []
         for image in run_images:
@@ -1294,69 +1328,81 @@ class AstrometryPrimitive(BasePrimitive):
                     minobj,
                 )
 
+                _quiet_loggers = (
+                    logging.getLogger("drizzlepac"),
+                    logging.getLogger("drizzlepac.tweakreg"),
+                    logging.getLogger("stwcs"),
+                )
+                _prev_levels = [(lg, lg.level) for lg in _quiet_loggers]
+                for lg in _quiet_loggers:
+                    lg.setLevel(max(int(lg.level), logging.WARNING))
                 try:
-                    with suppress_stdout():
-                        tweakreg.TweakReg(
-                            files=tweak_img,
-                            refimage=ref_use,
-                            verbose=False,
-                            interactive=False,
-                            clean=True,
-                            writecat=True,
-                            updatehdr=update_hdr,
-                            reusename=True,
-                            rfluxunits="counts",
-                            minobj=minobj,
-                            wcsname="TWEAK",
-                            searchrad=search_rad,
-                            searchunits="arcseconds",
-                            runfile="",
-                            tolerance=tol,
-                            refnbright=nbright,
-                            nbright=nbright,
-                            separation=trd["separation"],
-                            residplot="No plot",
-                            see2dplot=False,
-                            fitgeometry="shift",
-                            imagefindcfg={
-                                "threshold": ithresh,
-                                "conv_width": iconv,
-                                "use_sharp_round": True,
-                            },
-                            refimagefindcfg={
-                                "threshold": rthresh,
-                                "conv_width": rconv,
-                                "use_sharp_round": True,
-                            },
-                            shiftfile=True,
-                            outshifts=out_this,
+                    try:
+                        with suppress_stdout():
+                            tweakreg.TweakReg(
+                                files=tweak_img,
+                                refimage=ref_use,
+                                verbose=False,
+                                interactive=False,
+                                clean=True,
+                                writecat=True,
+                                updatehdr=update_hdr,
+                                reusename=True,
+                                rfluxunits="counts",
+                                minobj=minobj,
+                                wcsname="TWEAK",
+                                searchrad=search_rad,
+                                searchunits="arcseconds",
+                                runfile="",
+                                tolerance=tol,
+                                refnbright=nbright,
+                                nbright=nbright,
+                                separation=trd["separation"],
+                                residplot="No plot",
+                                see2dplot=False,
+                                fitgeometry="shift",
+                                imagefindcfg={
+                                    "threshold": ithresh,
+                                    "conv_width": iconv,
+                                    "use_sharp_round": True,
+                                },
+                                refimagefindcfg={
+                                    "threshold": rthresh,
+                                    "conv_width": rconv,
+                                    "use_sharp_round": True,
+                                },
+                                shiftfile=True,
+                                outshifts=out_this,
+                            )
+                        shallow_img = []
+
+                    except AssertionError as e:
+                        self.tweakreg_error(e)
+                        max_et = max(
+                            fits.getval(im, "EXPTIME") for im in tweak_img
                         )
-                    shallow_img = []
-
-                except AssertionError as e:
-                    self.tweakreg_error(e)
-                    max_et = max(
-                        fits.getval(im, "EXPTIME") for im in tweak_img
-                    )
-                    shallow_img = [
-                        im
-                        for im in tweak_img
-                        if fits.getval(im, "EXPTIME") < 0.5 * max_et
-                    ]
-                    if not shallow_img:
                         shallow_img = [
-                            sorted(
-                                tweak_img,
-                                key=lambda im: fits.getval(im, "EXPTIME"),
-                            )[0]
+                            im
+                            for im in tweak_img
+                            if fits.getval(im, "EXPTIME") < 0.5 * max_et
                         ]
-                    log.debug(
-                        "Removing %d shallow exposure(s) from batch (EXPTIME heuristic)",
-                        len(shallow_img),
-                    )
+                        if not shallow_img:
+                            shallow_img = [
+                                sorted(
+                                    tweak_img,
+                                    key=lambda im: fits.getval(im, "EXPTIME"),
+                                )[0]
+                            ]
+                        log.debug(
+                            "Removing %d shallow exposure(s) from batch (EXPTIME heuristic)",
+                            len(shallow_img),
+                        )
 
-                except TypeError as e:
-                    self.tweakreg_error(e)
+                    except TypeError as e:
+                        self.tweakreg_error(e)
+                finally:
+                    for lg, prev in _prev_levels:
+                        lg.setLevel(prev)
 
                 log.debug("Reading shift file: %s", out_this)
                 if not os.path.isfile(out_this):
@@ -1427,25 +1473,26 @@ class AstrometryPrimitive(BasePrimitive):
                 tweakreg_success = False
 
         log.info("Tweakreg finished in %.2fs", time.time() - start_tweak)
-        try:
-            _agg = Table(
-                [shift_table["xoffset"], shift_table["yoffset"]],
-                names=("xoffset", "yoffset"),
-            )
-            _agg_ref = (
-                os.path.abspath(reference)
-                if reference and os.path.isfile(reference)
-                else os.path.abspath(deepest)
-            )
-            log_tweakreg_shift_metrics(
-                _agg,
-                ref_path=_agg_ref,
-                log=log,
-                tolerance_arcsec=settings.tweakreg_defaults["tolerance"],
-                summary_prefix="TweakReg aggregate",
-            )
-        except Exception as exc:
-            log.debug("TweakReg aggregate shift validation: %s", exc)
+        if len(batches) > 1:
+            try:
+                _agg = Table(
+                    [shift_table["xoffset"], shift_table["yoffset"]],
+                    names=("xoffset", "yoffset"),
+                )
+                _agg_ref = (
+                    os.path.abspath(reference)
+                    if reference and os.path.isfile(reference)
+                    else os.path.abspath(deepest)
+                )
+                log_tweakreg_shift_metrics(
+                    _agg,
+                    ref_path=_agg_ref,
+                    log=log,
+                    tolerance_arcsec=settings.tweakreg_defaults["tolerance"],
+                    summary_prefix="TweakReg aggregate",
+                )
+            except Exception as exc:
+                log.debug("TweakReg aggregate shift validation: %s", exc)
 
         log.info(
             "TweakReg alignment summary: success=%s batches=%d method=tweakreg",
@@ -1460,9 +1507,13 @@ class AstrometryPrimitive(BasePrimitive):
                 parts.append(
                     "%s dx=%s dy=%s" % (bn, row["xoffset"], row["yoffset"])
                 )
-            log.info("Tweakreg offsets (%d): %s", len(parts), "; ".join(parts[:8]) + (" …" if len(parts) > 8 else ""))
+            log.debug(
+                "Tweakreg offsets (%d): %s",
+                len(parts),
+                "; ".join(parts[:8]) + (" …" if len(parts) > 8 else ""),
+            )
         except Exception:
-            log.info("Tweakreg: %d shift row(s)", len(shift_table))
+            log.debug("Tweakreg: %d shift row(s)", len(shift_table))
 
         cleanup_after_tweakreg(
             outdir,
@@ -1498,7 +1549,7 @@ class AstrometryPrimitive(BasePrimitive):
                 rawtmp = image.replace(".fits", ".rawtmp.fits")
                 rawhdu = fits.open(rawtmp, mode="readonly")
                 hdu = fits.open(image, mode="readonly")
-                log.info(
+                log.debug(
                     "Merge WCS/data %s | %s",
                     os.path.basename(image),
                     format_hdu_list_summary(hdu),

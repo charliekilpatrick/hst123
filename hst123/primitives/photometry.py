@@ -3,6 +3,7 @@ import logging
 
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.stats import binned_statistic
 
 from hst123.primitives.base import BasePrimitive
 
@@ -63,13 +64,15 @@ def estimate_limit_from_snr_bins(mags, errs, snr_target=3.0, n_bins=100):
             return np.nan
         bin_edges = np.linspace(lo, hi, n_bins + 1)
         inv_err = 1.0 / errs
-        dig = np.searchsorted(bin_edges, mags, side="right") - 1
-        dig = np.clip(dig, 0, n_bins - 1)
-        snr = np.empty(n_bins)
-        for i in range(n_bins - 1):
-            sel = dig == i
-            snr[i] = np.nanmedian(inv_err[sel]) if np.any(sel) else np.nan
-        snr[n_bins - 1] = snr[n_bins - 2] if n_bins > 1 else np.nan
+        snr, _, _ = binned_statistic(
+            mags,
+            inv_err,
+            bins=bin_edges,
+            statistic=np.nanmedian,
+        )
+        snr = np.asarray(snr, dtype=np.float64)
+        if n_bins > 1:
+            snr[-1] = snr[-2]
     except (ValueError, TypeError):
         return np.nan
     mask = ~np.isnan(snr)
@@ -119,24 +122,28 @@ class PhotometryHelper(BasePrimitive):
         tuple of float
             (mag, magerr). (NaN, NaN) if no valid measurements (e.g. magerr < 0.5, counts > 0).
         """
-        idx = []
-        for i in np.arange(len(magerrs)):
-            try:
-                if (
-                    float(magerrs[i]) < 0.5
-                    and float(counts[i]) > 0.0
-                    and float(exptimes[i]) > 0.0
-                    and float(zpt[i]) > 0.0
-                ):
-                    idx.append(i)
-            except Exception:
-                pass
-        if not idx:
+        magerrs = np.asarray(magerrs, dtype=np.float64)
+        counts = np.asarray(counts, dtype=np.float64)
+        exptimes = np.asarray(exptimes, dtype=np.float64)
+        zpt = np.asarray(zpt, dtype=np.float64)
+        if magerrs.size == 0:
             return (float("NaN"), float("NaN"))
-        magerrs = np.array([float(m) for m in magerrs])[idx]
-        counts = np.array([float(c) for c in counts])[idx]
-        exptimes = np.array([float(e) for e in exptimes])[idx]
-        zpt = np.array([float(z) for z in zpt])[idx]
+        ok = (
+            np.isfinite(magerrs)
+            & np.isfinite(counts)
+            & np.isfinite(exptimes)
+            & np.isfinite(zpt)
+            & (magerrs < 0.5)
+            & (counts > 0.0)
+            & (exptimes > 0.0)
+            & (zpt > 0.0)
+        )
+        if not np.any(ok):
+            return (float("NaN"), float("NaN"))
+        magerrs = magerrs[ok]
+        counts = counts[ok]
+        exptimes = exptimes[ok]
+        zpt = zpt[ok]
         flux = counts / exptimes * 10 ** (0.4 * (27.5 - zpt))
         fluxerr = 1.0 / 1.086 * magerrs * flux
         mag, magerr = weighted_avg_flux_to_mag(flux, fluxerr)

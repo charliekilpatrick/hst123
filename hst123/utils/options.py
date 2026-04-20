@@ -208,17 +208,16 @@ def add_options(parser=None, usage=None, version=None):
         action='store_true', help='Scrape photometry from the dolphot '+\
         'catalog from the input RA/Dec.')
     parser.add_argument('--scrape-all', default=False, action='store_true',
-        help='Scrape all candidate counterparts within the scrape radius '+\
-        '(default=2 pixels) and output to files dpXXX.phot where XXX is '+\
-        'zero-padded integer for labeling sources in order of proximity to '+\
-        'input coordinate.')
+        help='Scrape all candidate counterparts within the scrape radius (default '+\
+        '=2 pixels). By default photometry is stacked into <dolphot-base>.h5 '+\
+        'under scraped_photometry/ (--scrape-write-per-source-phot for dpXXX.phot files).')
     parser.add_argument('--scrape-radius', default=None, type=float,
         help='Override the dolphot scrape radius (units are arcsec).')
     parser.add_argument('--no-cuts', default=False, action='store_true',
         help='Skip cuts to dolphot output file.')
     parser.add_argument('--brightest', default=False, action='store_true',
         help='Sort output source files by signal-to-noise in reference image.')
-    parser.set_defaults(write_dolphot_hdf5=True)
+    parser.set_defaults(write_dolphot_hdf5=True, dolphot_hdf5_fast=True)
     parser.add_argument(
         '--no-write-dolphot-hdf5',
         dest='write_dolphot_hdf5',
@@ -230,6 +229,20 @@ def add_options(parser=None, usage=None, version=None):
         dest='write_dolphot_hdf5',
         action='store_true',
         help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--dolphot-hdf5-full',
+        dest='dolphot_hdf5_fast',
+        action='store_false',
+        help='Write larger/slower HDF5: gzip the DOLPHOT table, embed raw sidecar text, '
+        'and full directory manifest (default: compact fast HDF5, minimal disk use).',
+    )
+    parser.add_argument(
+        '--scrape-write-per-source-phot',
+        default=False,
+        action='store_true',
+        help='With --scrape-all, also write dp_NNN.phot and .snana per source (default: one '
+        'HDF5 file with catalog + stacked scraped photometry only, to save time and disk).',
     )
 
     return(parser)

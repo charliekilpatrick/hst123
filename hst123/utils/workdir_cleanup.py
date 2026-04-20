@@ -313,9 +313,10 @@ def cleanup_after_tweakreg(
     keep_artifacts: bool = False,
 ) -> None:
     """
-    After TweakReg: replay shift / headerlet text into the session log, then
-    remove those files (no separate log copies under ``logs/`` unless
-    *keep_artifacts*). Also remove shifts WCS helper and extracted headerlet FITS.
+    After TweakReg: record shift / headerlet text into the detail log (compact
+    summaries by default), then remove those files (no separate log copies under
+    ``logs/`` unless *keep_artifacts*). Also remove shifts WCS helper and
+    extracted headerlet FITS.
     """
     if keep_artifacts or not work_dir:
         return
@@ -327,23 +328,41 @@ def cleanup_after_tweakreg(
 
     tr_detail = get_logger("hst123.tweakreg")
 
-    def _ingest_and_remove(path: str, tag: str) -> None:
+    def _ingest_and_remove(
+        path: str,
+        tag: str,
+        *,
+        replay_full: bool = False,
+        level: int = logging.INFO,
+    ) -> None:
         if not os.path.isfile(path):
             return
         ingest_text_file_to_logger(
             path,
             tr_detail,
             log_tag=tag,
-            replay_full=True,
+            level=level,
+            replay_full=replay_full,
             begin_end_markers=False,
             compact_ws=True,
             delete_after=True,
         )
 
-    _ingest_and_remove(os.path.join(wd, "drizzle_shifts.txt"), "tweakreg shifts")
+    # Shift tables are summarized by astrometry INFO; avoid duplicating every line.
+    _ingest_and_remove(
+        os.path.join(wd, "drizzle_shifts.txt"),
+        "tweakreg shifts",
+        replay_full=False,
+        level=logging.DEBUG,
+    )
     for path in sorted(glob.glob(os.path.join(wd, "drizzle_shifts_*.txt"))):
-        _ingest_and_remove(path, "tweakreg shifts")
-    _ingest_and_remove(os.path.join(wd, "headerlet.log"), "headerlet")
+        _ingest_and_remove(
+            path,
+            "tweakreg shifts",
+            replay_full=False,
+            level=logging.DEBUG,
+        )
+    _ingest_and_remove(os.path.join(wd, "headerlet.log"), "headerlet", replay_full=False)
 
     for pattern in _INTERSTITIAL_GLOBS:
         for path in glob.glob(os.path.join(wd, pattern)):

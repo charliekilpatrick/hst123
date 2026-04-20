@@ -77,6 +77,7 @@ from hst123.utils.astrodrizzle_paths import (
     normalize_astrodrizzle_output_path,
     recover_drizzlepac_linear_output,
 )
+from hst123.utils.alignment_validation import write_gaia_alignment_crderr_to_reference_driz
 from hst123.utils.astrodrizzle_helpers import (
     build_astrodrizzle_keyword_args,
     build_wfpc2_skymask_catalog,
@@ -675,6 +676,7 @@ class hst123(object):
         ws_dir = pipeline_workspace_dir(dest_abs)
         if ws_dir:
             os.makedirs(ws_dir, exist_ok=True)
+        linked: list[str] = []
         for file in glob.glob(os.path.join(rawdir, "*.fits")):
             if check_for_coord:
                 warning, check = self.needs_to_be_reduced(file, save_c1m=True)
@@ -689,16 +691,16 @@ class hst123(object):
                 else os.path.join(dest_abs, base)
             )
             if not os.path.isfile(real_tgt):
-                log.info("%s -> %s (under raw/)", file, real_tgt)
+                log.debug("%s -> %s (under raw/)", file, real_tgt)
                 shutil.copyfile(file, real_tgt)
             elif not filecmp.cmp(file, real_tgt):
-                log.info("%s -> %s (refresh under raw/)", file, real_tgt)
+                log.debug("%s -> %s (refresh under raw/)", file, real_tgt)
                 shutil.copyfile(file, real_tgt)
             if os.path.lexists(dest):
                 try:
                     if os.path.islink(dest) or os.path.isfile(dest):
                         if os.path.samefile(dest, real_tgt):
-                            log.info("%s == %s", real_tgt, dest)
+                            log.debug("%s == %s", real_tgt, dest)
                             continue
                 except OSError:
                     pass
@@ -709,7 +711,8 @@ class hst123(object):
             try:
                 rel = os.path.relpath(real_tgt, os.path.dirname(dest))
                 os.symlink(rel, dest)
-                log.info("Symlink %s -> %s", dest, rel)
+                linked.append(base)
+                log.debug("Symlink %s -> %s", dest, rel)
             except OSError:
                 log.warning(
                     "Could not symlink %s -> raw/%s; copying file to work dir",
@@ -717,6 +720,18 @@ class hst123(object):
                     base,
                 )
                 shutil.copyfile(real_tgt, dest)
+                linked.append(base + " (copy)")
+        if linked:
+            sample = ", ".join(sorted(linked)[:16])
+            tail = "" if len(linked) <= 16 else f" (+{len(linked) - 16} more)"
+            log.info(
+                "Ingest: %d FITS from %s → %s (%s%s)",
+                len(linked),
+                rawdir,
+                ws_dir or dest_abs,
+                sample,
+                tail,
+            )
 
   def _archive_path_for_product(self, product, archivedir):
     """Return full path (archivedir/inst/det/ra/name) for a product row."""
@@ -1458,12 +1473,6 @@ class hst123(object):
         finally:
             hdu.close()
 
-    log.info(
-        "Reference drizzle: %s | inputs=%s",
-        drizname,
-        ",".join(os.path.basename(str(p)) for p in reference_images),
-    )
-
     if self.options['args'].drizzle_add:
         add_images = list(str(self.options['args'].drizzle_add).split(','))
         for image in add_images:
@@ -1480,9 +1489,17 @@ class hst123(object):
             if os.path.isfile(p)
         ]
 
-    obstable = self.input_list(reference_images, show=True, save=False)
-    if not obstable or len(obstable)==0:
+    obstable = self.input_list(reference_images, show=False, save=False)
+    if not obstable or len(obstable) == 0:
         return None
+    log.info(
+        "Reference drizzle: %s | n=%d %s",
+        drizname,
+        len(obstable),
+        ",".join(os.path.basename(str(p)) for p in obstable["image"]),
+    )
+    if log.isEnabledFor(py_logging.DEBUG):
+        self._log_obstable_inputs_summary(obstable, include_debug_table=True)
 
     # Interstitial `{inst}.ref.drc.fits` when n<3 (instrument-mask pass); removed
     # after the final filter-named reference drizzle succeeds.
@@ -1505,12 +1522,20 @@ class hst123(object):
         instrument_mask_ref_path = outimage
 
         if not self.options['args'].skip_tweakreg:
-            error, shift_table = self._astrom.run_tweakreg(obstable[mask], '')
+            error, shift_table = self._astrom.run_alignment(obstable[mask], '')
         if not self.run_astrodrizzle(
             obstable[mask], output_name=outimage, clean=False, save_fullfile=True
         ):
             log.error("Reference drizzle failed for %s", outimage)
             return None
+
+        if (
+            getattr(self.options["args"], "align_with", "tweakreg") == "jhat"
+            and not self.options["args"].skip_tweakreg
+        ):
+            jg = getattr(self, "_jhat_gaia_ref_stats", None)
+            if jg:
+                write_gaia_alignment_crderr_to_reference_driz(outimage, jg, log=log)
 
         # Add cosmic ray mask to static image mask
         if self.options['args'].add_crmask:
@@ -1534,12 +1559,20 @@ class hst123(object):
                         maskhdu.writeto(file, overwrite=True)
 
     if not self.options['args'].skip_tweakreg:
-        error, shift_table = self._astrom.run_tweakreg(obstable, '')
+        error, shift_table = self._astrom.run_alignment(obstable, '')
     if not self.run_astrodrizzle(
         obstable, output_name=drizname, save_fullfile=True
     ):
         log.error("Reference drizzle failed for %s", drizname)
         return None
+
+    if (
+        getattr(self.options["args"], "align_with", "tweakreg") == "jhat"
+        and not self.options["args"].skip_tweakreg
+    ):
+        jg = getattr(self, "_jhat_gaia_ref_stats", None)
+        if jg:
+            write_gaia_alignment_crderr_to_reference_driz(drizname, jg, log=log)
 
     if instrument_mask_ref_path:
         remove_superseded_instrument_mask_reference_drizzle(
@@ -1955,7 +1988,9 @@ class hst123(object):
             shutil.copyfile(first, dup_path)
             tmp_input.append(dup_path)
 
-    self.input_list(obstable["image"], show=True, save=False)
+    self.input_list(obstable["image"], show=False, save=False)
+    if log.isEnabledFor(py_logging.DEBUG):
+        self._log_obstable_inputs_summary(obstable, include_debug_table=True)
 
     # If drizmask, then edit tmp_input masks for everything except for drizadd
     # files
@@ -2040,15 +2075,12 @@ class hst123(object):
                     logfile=photeq_log,
                 )
     if n_photeq:
-        log.info(
-            "photeq: %d image(s); replaying runfile into session log (not kept in work dir)",
-            n_photeq,
-        )
+        log.debug("photeq: equalized %d image(s); compact runfile ingest", n_photeq)
         ingest_text_file_to_logger(
             photeq_log,
             get_logger(PHOTEQ_DETAIL_LOGGER),
             log_tag="photeq",
-            replay_full=True,
+            replay_full=False,
             begin_end_markers=False,
             compact_ws=True,
             delete_after=True,
@@ -2526,7 +2558,7 @@ class hst123(object):
             )
         shutil.move(download['Local Path'][0], filename)
 
-        log.info("MAST ok %s", message)
+        log.debug("MAST ok %s", message)
 
     except Exception as e:
         log.warning("MAST fail %s: %s", message, e)
@@ -2582,17 +2614,8 @@ class hst123(object):
     mast_download_tree = os.path.join(mast_staging_parent, "mastDownload")
 
     n = len(productlist)
-    log.info("MAST download: %i file(s) in product list.", n)
-    log.info(
-        "MAST download staging (astroquery temp): %s",
-        mast_staging_parent,
-    )
-    if dest:
-        log.info("Download target directory (dest): %s", os.path.abspath(dest))
-    if archivedir:
-        log.info("Archive directory: %s", os.path.abspath(archivedir))
-    if not dest and not archivedir:
-        log.info("Download target: current directory (%s)", os.getcwd())
+    dest_abs = os.path.abspath(dest) if dest else None
+    arch_abs = os.path.abspath(archivedir) if archivedir else None
 
     pending = []
     for i, prod in enumerate(productlist):
@@ -2617,22 +2640,27 @@ class hst123(object):
 
     n_pending = len(pending)
 
+    tgt = dest_abs or arch_abs or os.getcwd()
+    log.info(
+        "MAST download: %d product(s), %d to fetch → %s (temp %s; sequential)",
+        n,
+        n_pending,
+        tgt,
+        mast_staging_parent,
+    )
+
     if n_pending:
-        log.info(
-            "MAST download: fetching %i file(s) sequentially (astroquery is not "
-            "safe for parallel downloads).",
-            n_pending,
-        )
         items = [
             (i, prod, filename, n, mast_staging_parent)
             for i, prod, filename in pending
         ]
         for it in items:
             self._mast_download_one_product_row(it)
+        log.info("MAST download: finished %d file(s).", n_pending)
 
     # Remove astroquery staging under work-dir (not the shell cwd when --work-dir is set)
     if os.path.isdir(mast_download_tree):
-        log.info("Removing temporary MAST staging: %s", mast_download_tree)
+        log.debug("Removing temporary MAST staging: %s", mast_download_tree)
         shutil.rmtree(mast_download_tree)
     try:
         if os.path.isdir(mast_staging_parent) and not os.listdir(mast_staging_parent):
@@ -2753,14 +2781,16 @@ class hst123(object):
         using ``--redo-astrodrizzle``, ``--redo``, or ``--clobber`` (see
         :func:`~hst123.utils.options.want_redo_astrodrizzle`).
     do_tweakreg : bool, optional
-        Run TweakReg on each group before AstroDrizzle when alignment is enabled.
+        When True and alignment is not skipped, run :meth:`run_alignment` on each
+        group before AstroDrizzle (respects ``--align-with`` / ``--skip-tweakreg``).
+        Name kept for backward compatibility.
 
     Notes
     -----
     Optional per-drizzle ``calcsky`` for non-reference products is controlled by
     ``HST123_DOLPHOT_SKY_FOR_DRIZZLE_ALL``.
 
-    Groups are processed **sequentially**: each step calls :meth:`run_tweakreg`, which
+    Groups are processed **sequentially**: each step calls :meth:`run_alignment`, which
     sets the process working directory to ``workspace/``; parallelizing groups in
     threads would race on ``chdir``. DOLPHOT prep thread count is set by
     ``--max-cores`` (same as AstroDrizzle workers).
@@ -2777,9 +2807,9 @@ class hst123(object):
         else:
             message = 'Constructing drizzled image: {im}'
             log.info(message.format(im=name))
-            # Run tweakreg on the sub-table to make sure frames are aligned
+            # Align the sub-table before drizzle (TweakReg or JHAT per --align-with)
             if do_tweakreg:
-                error, shift_table = self._astrom.run_tweakreg(driztable, '')
+                error, shift_table = self._astrom.run_alignment(driztable, '')
             # Next run astrodrizzle to construct the drizzled frame
             if not self.run_astrodrizzle(
                 driztable, output_name=name, save_fullfile=True
@@ -2835,6 +2865,8 @@ class hst123(object):
         img = self.pick_deepest_images(driztable['image'])
         deepest = sorted(img, key=lambda im: fits.getval(im, 'EXPTIME'))[-1]
 
+        # Hierarchical pass: relative shifts between drizzled stacks (TweakReg only;
+        # JHAT does not produce the pixel shift table this block applies downstream.)
         error, shift_table = self._astrom.run_tweakreg(driztable, deepest,
             do_cosmic=False, skip_wcs=True, search_radius=5.0)
 
@@ -3123,7 +3155,6 @@ def main():
         _phase("mast_download_skipped")
 
     if opt.archive and not opt.skip_copy:
-        log.info("Ingest: archive → work_dir (%s)", opt.work_dir)
         if hst.productlist:
             for product in hst.productlist:
                 hst.copy_raw_data_archive(product, archivedir=opt.archive,
@@ -3131,7 +3162,6 @@ def main():
         else:
             log.warning("No MAST products to copy from archive.")
     else:
-        log.info("Ingest: raw_dir (%s) → work_dir", opt.raw_dir)
         hst.copy_raw_data(opt.raw_dir, reverse=True, check_for_coord=True)
     _phase("ingest")
 
@@ -3139,7 +3169,7 @@ def main():
     hst.input_images = hst._fits.get_input_images(workdir=opt.work_dir)
 
     # Check which are HST images that need to be reduced
-    make_banner('Checking which images need to be reduced')
+    make_banner('Input census: filter non-science, then organize by visit')
     for file in list(hst.input_images):
         warning, needs_reduce = hst.needs_to_be_reduced(file)
         if not needs_reduce:
@@ -3151,7 +3181,6 @@ def main():
     if len(hst.input_images)>0:
 
         # Get metadata on all input images and put them into an obstable
-        make_banner('Organizing input images by visit')
         # Going forward, we'll refer everything to obstable for imgs + metadata
         # save=True: retain table so the final "Complete list" step can log without
         # re-reading every FITS (avoids ~O(n_images) duplicate work in post_visit).

@@ -612,6 +612,9 @@ def write_dolphot_catalog_hdf5(
     compression: bool = True,
     dolphot_dir: Optional[PathLike] = None,
     embed_dolphot_directory_text: bool = False,
+    catalog_array: Optional[np.ndarray] = None,
+    include_directory_manifest: bool = True,
+    serialize_meta: bool = True,
 ) -> Path:
     """
     Write one HDF5 file with the full DOLPHOT catalog and metadata.
@@ -642,6 +645,16 @@ def write_dolphot_catalog_hdf5(
     embed_dolphot_directory_text : bool, optional
         If True, embed small UTF-8 text files from *dolphot_dir* (can be slow for
         large trees). Default False (manifest only).
+    catalog_array : ndarray, optional
+        If provided, skips re-reading the DOLPHOT ``base`` catalog from disk
+        (avoids a second full ``numpy.loadtxt`` when the pipeline already holds
+        the array in memory after scraping).
+    include_directory_manifest : bool, optional
+        If True, walk *dolphot_dir* and store a JSON file manifest (can be slow
+        for trees with very many files). Set False for faster HDF5 when the
+        manifest is not needed.
+    serialize_meta : bool, optional
+        If False, skip rich HDF5 table metadata (faster writes, smaller files).
 
     Returns
     -------
@@ -673,7 +686,12 @@ def write_dolphot_catalog_hdf5(
 
     columns = parse_dolphot_columns_file(col_path)
     names = unique_hdf5_column_names(columns)
-    catalog = load_dolphot_catalog_array(base)
+    if catalog_array is not None:
+        catalog = np.asarray(catalog_array, dtype=np.float64)
+        if catalog.ndim != 2:
+            raise ValueError("catalog_array must be 2-D")
+    else:
+        catalog = load_dolphot_catalog_array(base)
     table = dolphot_columns_to_astropy_table(catalog, columns, names=names)
 
     # Column descriptions as table meta (serialized by Astropy HDF5)
@@ -685,7 +703,7 @@ def write_dolphot_catalog_hdf5(
         "format": "hdf5",
         "path": photometry_path,
         "overwrite": True,
-        "serialize_meta": True,
+        "serialize_meta": serialize_meta,
     }
     if compression:
         write_kw["compression"] = "gzip"
@@ -742,7 +760,7 @@ def write_dolphot_catalog_hdf5(
             if warn_p.is_file():
                 _write_str_dataset(raw, "warnings", warn_p.read_text(encoding="utf-8", errors="replace"))
 
-        if dolphot_dir.is_dir():
+        if include_directory_manifest and dolphot_dir.is_dir():
             _embed_dolphot_directory_metadata(
                 hf,
                 dolphot_dir,
@@ -750,6 +768,79 @@ def write_dolphot_catalog_hdf5(
             )
 
     return out_path
+
+
+def append_scraped_final_phot_hdf5(
+    out_path: PathLike,
+    final_phot: list,
+    *,
+    group_path: str = "scraped_photometry",
+    compression: bool = False,
+    serialize_meta: bool = False,
+) -> None:
+    """
+    Append all scraped-source photometry tables as one stacked dataset in an existing HDF5 file.
+
+    Adds column ``scrape_source_index`` (0-based) so rows from different sources
+    can be split after readback. Uses a single HDF5 write (no per-source files).
+
+    Parameters
+    ----------
+    out_path : path-like
+        Existing file produced by :func:`write_dolphot_catalog_hdf5`.
+    final_phot : list of astropy.table.Table
+        One table per source from the scrape pipeline (e.g. output of ``scrapedolphot``).
+    group_path : str, optional
+        HDF5 path for the stacked table. Default ``scraped_photometry``.
+    compression : bool, optional
+        If True, gzip the appended table.
+    serialize_meta : bool, optional
+        If False, smaller/faster writes (recommended for large ``--scrape-all`` runs).
+    """
+    try:
+        import h5py
+    except ImportError as exc:  # pragma: no cover - env-specific
+        raise ImportError(
+            "append_scraped_final_phot_hdf5 requires h5py; pip install h5py"
+        ) from exc
+
+    from astropy.table import vstack
+
+    if not final_phot:
+        return
+    out_path = Path(out_path)
+    if not out_path.is_file():
+        raise FileNotFoundError(f"expected existing HDF5: {out_path}")
+
+    pieces = []
+    for i, t in enumerate(final_phot):
+        if t is None or len(t) == 0:
+            continue
+        if "scrape_source_index" in t.colnames:
+            raise ValueError("table already has column scrape_source_index")
+        ti = t.copy()
+        ti["scrape_source_index"] = np.full(len(ti), i, dtype=np.int32)
+        pieces.append(ti)
+    if not pieces:
+        return
+
+    stacked = vstack(pieces, metadata_conflicts="silent")
+    write_kw: dict[str, Any] = {
+        "format": "hdf5",
+        "path": group_path,
+        "append": True,
+        "overwrite": False,
+        "serialize_meta": serialize_meta,
+    }
+    if compression:
+        write_kw["compression"] = "gzip"
+    stacked.write(str(out_path), **write_kw)
+
+    with h5py.File(out_path, "a") as hf:
+        if group_path in hf:
+            grp = hf[group_path]
+            grp.attrs["hst123_scraped_photometry_format"] = 1
+            grp.attrs["n_scrape_sources"] = int(len(final_phot))
 
 
 def read_dolphot_catalog_hdf5(path: PathLike, photometry_path: str = "photometry"):

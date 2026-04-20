@@ -973,51 +973,93 @@ class DolphotPrimitive(BasePrimitive):
                     visit_obstable=visit_obstable,
                 )
                 p.final_phot = phot
-                if getattr(opt, "write_dolphot_hdf5", True):
-                    try:
-                        from pathlib import Path
+                cat_for_h5 = getattr(p, "_last_dolphot_catalog_array", None)
+                try:
+                    if getattr(opt, "write_dolphot_hdf5", True):
+                        try:
+                            from pathlib import Path
 
-                        from hst123.utils.dolphot_catalog_hdf5 import (
-                            write_dolphot_catalog_hdf5,
-                        )
+                            from hst123.utils.dolphot_catalog_hdf5 import (
+                                append_scraped_final_phot_hdf5,
+                                write_dolphot_catalog_hdf5,
+                            )
 
-                        base = Path(dp["base"])
-                        wda = os.path.abspath(
-                            os.path.expanduser(getattr(opt, "work_dir", None) or ".")
-                        )
-                        out_h5 = Path(wda) / (base.name + ".h5")
-                        dolphot_dir = base.parent
-                        write_dolphot_catalog_hdf5(
-                            out_h5,
-                            base,
-                            include_raw_sidecars=True,
-                            dolphot_dir=dolphot_dir,
-                            embed_dolphot_directory_text=False,
-                        )
-                        log.info(
-                            "Wrote DOLPHOT HDF5 archive: %s "
-                            "(photometry table, parsed sidecars; manifest of %s)",
-                            out_h5,
-                            dolphot_dir,
-                        )
-                    except ImportError as exc:
-                        log.info(
-                            "DOLPHOT HDF5 not written (install h5py: pip install h5py): %s",
-                            exc,
-                        )
-                    except Exception as exc:
-                        log.warning("DOLPHOT HDF5 not written: %s", exc)
+                            base = Path(dp["base"])
+                            wda = os.path.abspath(
+                                os.path.expanduser(getattr(opt, "work_dir", None) or ".")
+                            )
+                            out_h5 = Path(wda) / (base.name + ".h5")
+                            dolphot_dir = base.parent
+                            fast_h5 = getattr(opt, "dolphot_hdf5_fast", True)
+                            write_dolphot_catalog_hdf5(
+                                out_h5,
+                                base,
+                                include_raw_sidecars=not fast_h5,
+                                dolphot_dir=dolphot_dir,
+                                embed_dolphot_directory_text=False,
+                                catalog_array=cat_for_h5,
+                                compression=not fast_h5,
+                                include_directory_manifest=not fast_h5,
+                                serialize_meta=not fast_h5,
+                            )
+                            if phot:
+                                try:
+                                    append_scraped_final_phot_hdf5(
+                                        out_h5,
+                                        phot,
+                                        compression=not fast_h5,
+                                        serialize_meta=False,
+                                    )
+                                except Exception as exc:
+                                    log.warning(
+                                        "Could not append stacked scrape photometry to HDF5: %s",
+                                        exc,
+                                    )
+                            if fast_h5:
+                                log.info(
+                                    "Wrote compact DOLPHOT HDF5: %s "
+                                    "(full catalog + stacked scraped photometry; use "
+                                    "--dolphot-hdf5-full for gzip/manifest/raw sidecars)",
+                                    out_h5,
+                                )
+                            else:
+                                log.info(
+                                    "Wrote full DOLPHOT HDF5 archive: %s "
+                                    "(gzipped table, parsed sidecars, manifest of %s)",
+                                    out_h5,
+                                    dolphot_dir,
+                                )
+                        except ImportError as exc:
+                            log.info(
+                                "DOLPHOT HDF5 not written (install h5py: pip install h5py): %s",
+                                exc,
+                            )
+                        except Exception as exc:
+                            log.warning("DOLPHOT HDF5 not written: %s", exc)
+                finally:
+                    p.__dict__.pop("_last_dolphot_catalog_array", None)
                 if phot:
-                    make_banner(
-                        "Printing out the final photometry for: {ra} {dec}\n"
-                        "There is photometry for {n} sources".format(
-                            ra=ra, dec=dec, n=len(phot)
+                    write_per_source = getattr(
+                        opt, "scrape_write_per_source_phot", False
+                    )
+                    skip_ascii = bool(opt.scrape_all and not write_per_source)
+                    if skip_ascii:
+                        log.info(
+                            "Skipped per-source .phot/.snana (--scrape-all); stacked "
+                            "photometry is in HDF5 under scraped_photometry/ (%d sources).",
+                            len(phot),
                         )
-                    )
-                    allphot = p.options["args"].scrape_all
-                    p._scrape_dolphot.print_final_phot(
-                        phot, p.dolphot, allphot=allphot
-                    )
+                    else:
+                        make_banner(
+                            "Printing out the final photometry for: {ra} {dec}\n"
+                            "There is photometry for {n} sources".format(
+                                ra=ra, dec=dec, n=len(phot)
+                            )
+                        )
+                        allphot = p.options["args"].scrape_all
+                        p._scrape_dolphot.print_final_phot(
+                            phot, p.dolphot, allphot=allphot
+                        )
                 else:
                     make_banner(
                         f"Did not find a source for: {ra} {dec}"

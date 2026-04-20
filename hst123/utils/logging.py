@@ -32,7 +32,13 @@ loggers ``hst123.astrodrizzle`` / ``hst123.photeq``, then removed. The pipeline 
 Environment variables: ``HST123_LOG_LEVEL`` (use ``DEBUG`` to show ``@log_calls``
 entry/exit lines), ``HST123_LOG_ENABLE_STDOUT``, ``HST123_LOG_ENABLE_FILE``,
 ``HST123_LOG_DIR``, ``HST123_REPLAY_SUBLOGS``, ``HST123_LOG_FULL_NAMES`` (set to
-``1`` to show full logger names in ``[…]`` instead of compressed tags).
+``1`` to show full logger names in ``[…]`` instead of compressed tags),
+``HST123_LOG_PROPAGATE_ROOT`` (set to ``1`` to propagate the ``hst123`` logger to
+the root logger; default is off so DrizzlePac/stpipe handlers on root do not
+duplicate every line). For DOLPHOT scrape ``parse_phot`` batch progress, use
+``HST123_NO_SCRAPE_PROGRESS=1`` to disable the bar and periodic lines, or
+``HST123_SCRAPE_PROGRESS_LOG_ONLY=1`` to force INFO lines (and ETA) instead of a
+stderr progress bar when running in a terminal.
 """
 from __future__ import annotations
 
@@ -58,6 +64,27 @@ RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S")
 ROOT_LOGGER = "hst123"
 LOG_CAPTURE_PACKAGES = []
 DEFAULT_FILENAME_PREFIX = "hst123_log"
+
+
+def _apply_hst123_propagate_policy() -> None:
+    """
+    By default, disable propagation from the ``hst123`` logger to ``logging.root``.
+
+    DrizzlePac/stpipe and other stacks often attach a second handler to the root
+    logger, which repeats every ``hst123.*`` message in a second format (e.g.
+    ``… - stpipe - INFO - …``). User-facing output should use the compact
+    formatter on the ``hst123`` logger only.
+    """
+    lg = logging.getLogger(ROOT_LOGGER)
+    if os.environ.get("HST123_LOG_PROPAGATE_ROOT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        lg.propagate = True
+    else:
+        lg.propagate = False
 
 
 def _get_level(level):
@@ -368,6 +395,9 @@ class LogConfig:
                 if h not in logger.handlers:
                     logger.addHandler(h)
 
+        if ROOT_LOGGER in log_names:
+            _apply_hst123_propagate_policy()
+
         for lname in logging.root.manager.loggerDict:
             if any(lname.startswith(p) for p in LOG_CAPTURE_PACKAGES):
                 logger = logging.getLogger(lname)
@@ -573,6 +603,7 @@ def ensure_cli_logging_configured(*, level=None):
     eff = level if level is not None else env_level
     root.setLevel(_get_level(eff))
     if root.handlers:
+        _apply_hst123_propagate_policy()
         _CLI_LOGGING_INSTALLED = True
         return
     cfg = LogConfig(
@@ -582,6 +613,7 @@ def ensure_cli_logging_configured(*, level=None):
         log_stream=sys.stderr,
     )
     cfg.apply(log_names=[ROOT_LOGGER])
+    # apply() already calls _apply_hst123_propagate_policy when configuring hst123
     _CLI_LOGGING_INSTALLED = True
 
 
@@ -643,7 +675,7 @@ def attach_work_dir_log_file(
     root.addHandler(fh)
     fh._hst123_log_path = path  # type: ignore[attr-defined]
     _WORK_DIR_LOG_HANDLER = fh
-    root.info("Session log (copy of console): %s", path)
+    root.info("Session log: %s", os.path.basename(path))
     return path
 
 

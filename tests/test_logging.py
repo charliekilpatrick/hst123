@@ -31,6 +31,16 @@ from hst123.utils.logging import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _hst123_propagate_for_pytest_caplog():
+    """pytest caplog attaches to the root logger; restore propagation for child loggers."""
+    lg = logging.getLogger(ROOT_LOGGER)
+    prev = lg.propagate
+    lg.propagate = True
+    yield
+    lg.propagate = prev
+
+
 class TestLogPipelinePhaseSummary:
     """Used at the end of :func:`hst123.main` for wall-clock / phase timing."""
 
@@ -261,8 +271,10 @@ def test_ensure_cli_logging_configured_idempotent():
         ensure_cli_logging_configured(level=logging.INFO)
         n1 = len(log.handlers)
         assert n1 >= 1
+        assert log.propagate is False
         ensure_cli_logging_configured(level=logging.INFO)
         assert len(log.handlers) == n1
+        assert log.propagate is False
     finally:
         for h in list(log.handlers):
             log.removeHandler(h)
@@ -294,7 +306,7 @@ def test_attach_work_dir_log_file_creates_logs_and_mirrors(tmp_path):
                 break
         text = open(path, encoding="utf-8").read()
         assert "hello file mirror" in text
-        assert "Session log (copy of console)" in text
+        assert "Session log:" in text and "hst123_" in text
         n_handlers = len(log.handlers)
         assert attach_work_dir_log_file(str(wd)) == path
         assert len(log.handlers) == n_handlers

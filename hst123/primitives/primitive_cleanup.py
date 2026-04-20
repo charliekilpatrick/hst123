@@ -10,6 +10,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import statistics
 from typing import Any, Callable, Iterable, Sequence
 
 
@@ -150,7 +151,7 @@ def validate_fits_outputs(
                         path,
                     )
                     continue
-                logger.info(
+                logger.debug(
                     "[primitive cleanup] %s: validated FITS %s | HDUs=%d",
                     step_name,
                     os.path.basename(path),
@@ -230,7 +231,7 @@ def validate_astropy_tables(
     *,
     step_name: str,
 ) -> None:
-    """Log row counts for photometry tables (may be empty)."""
+    """Log one summary line for photometry table shapes (may be empty)."""
     try:
         n = len(tables)
     except TypeError:
@@ -245,18 +246,79 @@ def validate_astropy_tables(
             step_name,
         )
         return
-    for i, t in enumerate(tables):
+
+    nrows: list[int | None] = []
+    ncols: list[int | None] = []
+    for t in tables:
         try:
-            nrow = len(t)
+            nrows.append(len(t))
         except Exception:
-            nrow = "?"
+            nrows.append(None)
+        try:
+            ncols.append(len(t.colnames) if hasattr(t, "colnames") else None)
+        except Exception:
+            ncols.append(None)
+
+    valid_rows = [r for r in nrows if r is not None]
+    valid_cols = [c for c in ncols if c is not None]
+    if not valid_rows:
         logger.info(
-            "[primitive cleanup] %s: photometry table[%d] rows=%s cols=%s",
+            "[primitive cleanup] %s: photometry catalog: %d table(s) "
+            "(could not read row counts)",
             step_name,
-            i,
-            nrow,
-            len(t.colnames) if hasattr(t, "colnames") else "?",
+            n,
         )
+        return
+
+    rmin, rmax = min(valid_rows), max(valid_rows)
+    rmed = int(statistics.median(valid_rows))
+    col_set = set(valid_cols)
+    if len(col_set) == 1:
+        cols_summary = str(next(iter(col_set)))
+    elif col_set:
+        lo, hi = min(col_set), max(col_set)
+        cols_summary = f"{lo}" if lo == hi else f"{lo}–{hi}"
+    else:
+        cols_summary = "?"
+
+    if rmin == rmax and len(col_set) <= 1:
+        logger.info(
+            "[primitive cleanup] %s: photometry catalog: %d table(s), "
+            "each %d rows × %s cols",
+            step_name,
+            n,
+            rmin,
+            cols_summary,
+        )
+    else:
+        logger.info(
+            "[primitive cleanup] %s: photometry catalog: %d table(s); "
+            "rows min=%d max=%d median=%d; cols %s",
+            step_name,
+            n,
+            rmin,
+            rmax,
+            rmed,
+            cols_summary,
+        )
+
+    if logger.isEnabledFor(logging.DEBUG):
+        for i, t in enumerate(tables):
+            try:
+                nrow = len(t)
+            except Exception:
+                nrow = "?"
+            try:
+                ncol = len(t.colnames) if hasattr(t, "colnames") else "?"
+            except Exception:
+                ncol = "?"
+            logger.debug(
+                "[primitive cleanup] %s: photometry table[%d] rows=%s cols=%s",
+                step_name,
+                i,
+                nrow,
+                ncol,
+            )
 
 
 def run_primitive_cleanup(
@@ -287,7 +349,7 @@ def run_primitive_cleanup(
     respect_keep_artifacts
         If True and *pipeline* has ``keep_drizzle_artifacts``, skip interstitial removal.
     """
-    logger.info("[primitive cleanup] %s: starting post-step cleanup", step_name)
+    logger.debug("[primitive cleanup] %s: starting post-step cleanup", step_name)
 
     skip_remove = skip_interstitial_removal
     if (
@@ -349,4 +411,4 @@ def run_primitive_cleanup(
                 exc,
             )
 
-    logger.info("[primitive cleanup] %s: cleanup complete", step_name)
+    logger.debug("[primitive cleanup] %s: cleanup complete", step_name)

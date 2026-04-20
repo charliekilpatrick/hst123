@@ -4,7 +4,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 from astropy.io import fits
@@ -28,6 +30,56 @@ log = logging.getLogger(__name__)
 # Limiting-magnitude statistics do not need every neighbor in the aperture; a
 # modest random sample keeps scrape time bounded for large catalogs.
 _LIMIT_SAMPLE_MAX = 400
+
+# Show parse_phot progress (bar or periodic log lines) when this many sources.
+_SCRAPE_PARSE_PROGRESS_MIN = 8
+
+
+def _eta_hms(seconds: float) -> str:
+    """Human-readable ETA from seconds (or ``?`` if unknown)."""
+    if not np.isfinite(seconds) or seconds < 0:
+        return "?"
+    s = int(round(seconds))
+    if s >= 3600:
+        return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+    if s >= 60:
+        return f"{s // 60}m{s % 60:02d}s"
+    return f"{s}s"
+
+
+def _meta_strings_from_array(rd: np.ndarray, ix_x, ix_y, ix_sh, ix_rn):
+    """Format Object X/Y/sharpness/roundness for ``final_phot.meta`` (array row path)."""
+    n = len(rd)
+
+    def _one(ix):
+        if ix is None or ix < 0 or ix >= n:
+            return None
+        v = float(rd[ix])
+        if not np.isfinite(v):
+            return None
+        return str(v)
+
+    return _one(ix_x), _one(ix_y), _one(ix_sh), _one(ix_rn)
+
+
+def _iter_ftable_inst_visit_filter(obstable):
+    """Yield subtables for each (instrument, visit, filter) combination."""
+    for inst in np.unique(obstable["instrument"]):
+        m0 = obstable["instrument"] == inst
+        sub0 = obstable[m0]
+        for visit in np.unique(sub0["visit"]):
+            m1 = sub0["visit"] == visit
+            sub1 = sub0[m1]
+            for filt in np.unique(sub1["filter"]):
+                yield sub1[sub1["filter"] == filt]
+
+
+def _iter_ftable_inst_filter(obstable):
+    """Yield subtables for each (instrument, filter) (all visits combined)."""
+    for inst in np.unique(obstable["instrument"]):
+        sub0 = obstable[obstable["instrument"] == inst]
+        for filt in np.unique(sub0["filter"]):
+            yield sub0[sub0["filter"] == filt]
 
 
 def _subsample_limit_rows(limit_data, max_rows, rng):
@@ -290,37 +342,58 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                     limit_data.append([dist, line])
         return limit_data
 
-    def _calc_avg_stats_array(self, obstable, rd, measurement_idx, colfile):
+    def _calc_avg_stats_array(self, obstable, rd, measurement_idx, _colfile):
         """Vector-friendly path when the DOLPHOT row is a 1-D float array."""
         p = self._p
-        estr = "Magnitude uncertainty"
-        cstr = "Measured counts"
-        mjds, err, counts, exptime, zpt = [], [], [], [], []
-        for row in obstable:
-            img = row["image"]
-            pair = measurement_idx.get(img) if measurement_idx else None
-            if pair and pair[0] is not None and pair[1] is not None:
-                ei, ci = pair
-                if ei >= len(rd) or ci >= len(rd):
-                    error = count = None
-                else:
-                    error = str(float(rd[ei]))
-                    count = str(float(rd[ci]))
-            else:
-                error = self.get_dolphot_data(rd, colfile, estr, img)
-                count = self.get_dolphot_data(rd, colfile, cstr, img)
-            if error and count:
-                mjds.append(Time(row["datetime"]).mjd)
-                err.append(error)
-                counts.append(count)
-                exptime.append(row["exptime"])
-                zpt.append(row["zeropoint"])
-        if len(mjds) > 0:
-            avg_mjd = np.mean(mjds)
-            total_exptime = np.sum(exptime)
-            mag, magerr = p._phot.avg_magnitudes(err, counts, exptime, zpt)
-            return (avg_mjd, mag, magerr, total_exptime)
-        return (np.nan, np.nan, np.nan, np.nan)
+        n = len(obstable)
+        if n == 0:
+            return (np.nan, np.nan, np.nan, np.nan)
+        rd = np.asarray(rd, dtype=np.float64, order="C")
+        if rd.ndim != 1:
+            return (np.nan, np.nan, np.nan, np.nan)
+        nrd = rd.shape[0]
+        imgs = obstable["image"]
+        ei = np.zeros(n, dtype=np.intp)
+        ci = np.zeros(n, dtype=np.intp)
+        ok_idx = np.zeros(n, dtype=bool)
+        for i in range(n):
+            pair = measurement_idx.get(imgs[i]) if measurement_idx else None
+            if (
+                pair
+                and pair[0] is not None
+                and pair[1] is not None
+                and 0 <= pair[0] < nrd
+                and 0 <= pair[1] < nrd
+            ):
+                ei[i] = pair[0]
+                ci[i] = pair[1]
+                ok_idx[i] = True
+        if not np.any(ok_idx):
+            return (np.nan, np.nan, np.nan, np.nan)
+        t_mjd = Time(obstable["datetime"]).mjd
+        ext = obstable["exptime"].data.astype(np.float64, copy=False)
+        zp = obstable["zeropoint"].data.astype(np.float64, copy=False)
+        me = np.zeros(n, dtype=np.float64)
+        mc = np.zeros(n, dtype=np.float64)
+        me[ok_idx] = rd[ei[ok_idx]]
+        mc[ok_idx] = rd[ci[ok_idx]]
+        phot_ok = (
+            ok_idx
+            & (me < 0.5)
+            & (mc > 0.0)
+            & (ext > 0.0)
+            & (zp > 0.0)
+            & np.isfinite(me)
+            & np.isfinite(mc)
+        )
+        if not np.any(phot_ok):
+            return (np.nan, np.nan, np.nan, np.nan)
+        avg_mjd = float(np.mean(t_mjd[phot_ok]))
+        total_exptime = float(np.sum(ext[phot_ok]))
+        mag, magerr = p._phot.avg_magnitudes(
+            me[phot_ok], mc[phot_ok], ext[phot_ok], zp[phot_ok]
+        )
+        return (avg_mjd, mag, magerr, total_exptime)
 
     def calc_avg_stats(self, obstable, data, colfile, measurement_idx=None):
         """
@@ -394,6 +467,119 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             return (avg_mjd, mag, magerr, total_exptime)
         return (np.nan, np.nan, np.nan, np.nan)
 
+    def _precompute_limit_maglimits_for_aperture(
+        self,
+        obstable,
+        limit_data,
+        cfile,
+        measurement_idx,
+    ):
+        """
+        Limiting magnitudes from neighbor rows depend only on obstable and the
+        aperture (not on which catalog source is being parsed). Precompute once
+        per :meth:`parse_phot` call and reuse for every source in ``--scrape-all``
+        to avoid millions of redundant ``calc_avg_stats`` calls.
+        """
+        visit_m: dict[tuple[str, str, str], float] = {}
+        inst_m: dict[tuple[str, str], float] = {}
+        if not limit_data:
+            return visit_m, inst_m
+        for ftable in _iter_ftable_inst_visit_filter(obstable):
+            key = (
+                str(ftable["instrument"][0]),
+                str(ftable["visit"][0]),
+                str(ftable["filter"][0]),
+            )
+            visit_m[key] = self._limit_mag_from_neighbors(
+                ftable,
+                limit_data,
+                cfile,
+                measurement_idx,
+                reject_limmag_ge_99=True,
+            )
+        for ftable in _iter_ftable_inst_filter(obstable):
+            key = (str(ftable["instrument"][0]), str(ftable["filter"][0]))
+            inst_m[key] = self._limit_mag_from_neighbors(
+                ftable,
+                limit_data,
+                cfile,
+                measurement_idx,
+                reject_limmag_ge_99=False,
+            )
+        return visit_m, inst_m
+
+    def _limit_mag_from_neighbors(
+        self,
+        ftable,
+        limit_data,
+        cfile,
+        measurement_idx,
+        *,
+        reject_limmag_ge_99: bool,
+    ):
+        """
+        Median-based limiting magnitude from neighbor rows; returns NaN if too few points.
+        """
+        if not limit_data:
+            return np.nan
+        mags, errs = [], []
+        ld = limit_data
+        cas = self.calc_avg_stats
+        for data in ld:
+            _mjd, limmag, limerr, _exp = cas(
+                ftable,
+                data[1],
+                cfile,
+                measurement_idx=measurement_idx,
+            )
+            if np.isnan(limmag) or np.isnan(limerr):
+                continue
+            if reject_limmag_ge_99 and limmag >= 99:
+                continue
+            mags.append(limmag)
+            errs.append(limerr)
+        if len(mags) <= 30:
+            return np.nan
+        return self._p._phot.estimate_mag_limit(
+            mags, errs, limit=self._p.snr_limit
+        )
+
+    def _add_parse_phot_block(
+        self,
+        ftable,
+        row,
+        cfile,
+        measurement_idx,
+        limit_data,
+        final_phot,
+        is_avg: int,
+        reject_limmag_ge_99: bool,
+        maglimit_precomputed: float | None = None,
+    ):
+        """One instrument[/visit]/filter table → one output row (and limit column if needed)."""
+        p = self._p
+        mjd, mag, err, exptime = self.calc_avg_stats(
+            ftable, row, cfile, measurement_idx=measurement_idx
+        )
+        inst = str(ftable["instrument"][0])
+        filt = str(ftable["filter"][0])
+        if limit_data:
+            if maglimit_precomputed is not None:
+                maglimit = float(maglimit_precomputed)
+            else:
+                maglimit = self._limit_mag_from_neighbors(
+                    ftable,
+                    limit_data,
+                    cfile,
+                    measurement_idx,
+                    reject_limmag_ge_99=reject_limmag_ge_99,
+                )
+            final_phot.add_row(
+                (mjd, inst, filt, exptime, mag, err, is_avg, maglimit)
+            )
+        else:
+            final_phot.add_row((mjd, inst, filt, exptime, mag, err, is_avg))
+
     def parse_phot(
         self,
         obstable,
@@ -402,6 +588,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
         limit_data=None,
         measurement_idx=None,
         columns=None,
+        limit_maglimit_caches=None,
     ):
         """
         Build photometry table for one dolphot source (per instrument/filter, with optional limits).
@@ -420,6 +607,10 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             Precomputed per-image column indices for ``calc_avg_stats``.
         columns : list, optional
             Parsed ``*.columns`` definitions (avoids re-parsing when given).
+        limit_maglimit_caches : tuple of two dicts, optional
+            ``(visit_maglimits, inst_maglimits)`` from
+            :meth:`_precompute_limit_maglimits_for_aperture`. When set, LIMIT
+            values are taken from these dicts (same for all sources in an aperture).
 
         Returns
         -------
@@ -458,10 +649,21 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             init_row += [[0.0]]
         final_phot = Table(init_row, names=fnames)
         final_phot = final_phot[:0].copy()
-        x = self.get_dolphot_data(row, cfile, "Object X", "")
-        y = self.get_dolphot_data(row, cfile, "Object Y", "")
-        sharpness = self.get_dolphot_data(row, cfile, "Object sharpness", "")
-        roundness = self.get_dolphot_data(row, cfile, "Object roundness", "")
+
+        rd = self._row_tokens(row)
+        if isinstance(rd, np.ndarray) and rd.ndim == 1:
+            ix_x = find_column_index_0based(columns, "Object X", "")
+            ix_y = find_column_index_0based(columns, "Object Y", "")
+            ix_sh = find_column_index_0based(columns, "Object sharpness", "")
+            ix_rn = find_column_index_0based(columns, "Object roundness", "")
+            x, y, sharpness, roundness = _meta_strings_from_array(
+                rd, ix_x, ix_y, ix_sh, ix_rn
+            )
+        else:
+            x = self.get_dolphot_data(row, cfile, "Object X", "")
+            y = self.get_dolphot_data(row, cfile, "Object Y", "")
+            sharpness = self.get_dolphot_data(row, cfile, "Object sharpness", "")
+            roundness = self.get_dolphot_data(row, cfile, "Object roundness", "")
         final_phot.meta["x"] = x
         final_phot.meta["y"] = y
         final_phot.meta["sharpness"] = sharpness
@@ -470,86 +672,40 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             final_phot.meta["limit"] = "{0}-sigma estimate".format(
                 int(p.snr_limit)
             )
-        for inst in list(set(obstable["instrument"])):
-            insttable = obstable[obstable["instrument"] == inst]
-            for visit in list(set(insttable["visit"])):
-                visittable = insttable[insttable["visit"] == visit]
-                for filt in list(set(visittable["filter"])):
-                    ftable = visittable[visittable["filter"] == filt]
-                    mjd, mag, err, exptime = self.calc_avg_stats(
-                        ftable, row, cfile, measurement_idx=measurement_idx
-                    )
-                    new_row = (mjd, inst, filt, exptime, mag, err, 0)
-                    if limit_data:
-                        mags, errs = [], []
-                        for data in limit_data:
-                            mjd, limmag, limerr, exp = self.calc_avg_stats(
-                                ftable,
-                                data[1],
-                                cfile,
-                                measurement_idx=measurement_idx,
-                            )
-                            if (
-                                not np.isnan(limmag)
-                                and not np.isnan(limerr)
-                                and limmag < 99
-                            ):
-                                mags.append(limmag)
-                                errs.append(limerr)
-                        if len(mags) > 30:
-                            maglimit = p._phot.estimate_mag_limit(
-                                mags, errs, limit=p.snr_limit
-                            )
-                        else:
-                            maglimit = np.nan
-                        new_row = (
-                            mjd,
-                            inst,
-                            filt,
-                            exptime,
-                            mag,
-                            err,
-                            0,
-                            maglimit,
-                        )
-                    final_phot.add_row(new_row)
-        for inst in list(set(obstable["instrument"])):
-            insttable = obstable[obstable["instrument"] == inst]
-            for filt in list(set(insttable["filter"])):
-                ftable = insttable[insttable["filter"] == filt]
-                mjd, mag, err, exptime = self.calc_avg_stats(
-                    ftable, row, cfile, measurement_idx=measurement_idx
-                )
-                new_row = (mjd, inst, filt, exptime, mag, err, 1)
-                if limit_data:
-                    mags, errs = [], []
-                    for data in limit_data:
-                        mjd, limmag, limerr, exp = self.calc_avg_stats(
-                            ftable,
-                            data[1],
-                            cfile,
-                            measurement_idx=measurement_idx,
-                        )
-                        if not np.isnan(limmag) and not np.isnan(limerr):
-                            mags.append(limmag)
-                            errs.append(limerr)
-                    if len(mags) > 30:
-                        maglimit = p._phot.estimate_mag_limit(
-                            mags, errs, limit=p.snr_limit
-                        )
-                    else:
-                        maglimit = np.nan
-                    new_row = (
-                        mjd,
-                        inst,
-                        filt,
-                        exptime,
-                        mag,
-                        err,
-                        1,
-                        maglimit,
-                    )
-                final_phot.add_row(new_row)
+
+        visit_m, inst_m = limit_maglimit_caches or (None, None)
+        for ftable in _iter_ftable_inst_visit_filter(obstable):
+            key = (
+                str(ftable["instrument"][0]),
+                str(ftable["visit"][0]),
+                str(ftable["filter"][0]),
+            )
+            pre = visit_m.get(key) if visit_m is not None else None
+            self._add_parse_phot_block(
+                ftable,
+                row,
+                cfile,
+                measurement_idx,
+                limit_data,
+                final_phot,
+                0,
+                reject_limmag_ge_99=True,
+                maglimit_precomputed=pre,
+            )
+        for ftable in _iter_ftable_inst_filter(obstable):
+            key = (str(ftable["instrument"][0]), str(ftable["filter"][0]))
+            pre = inst_m.get(key) if inst_m is not None else None
+            self._add_parse_phot_block(
+                ftable,
+                row,
+                cfile,
+                measurement_idx,
+                limit_data,
+                final_phot,
+                1,
+                reject_limmag_ge_99=False,
+                maglimit_precomputed=pre,
+            )
         return final_phot
 
     def scrapedolphot(
@@ -593,6 +749,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             One table per source with meta (x, y, separation, etc.); None if no sources or error.
         """
         p = self._p
+        p.__dict__.pop("_last_dolphot_catalog_array", None)
         wd = os.path.abspath(
             os.path.expanduser(getattr(p.options["args"], "work_dir", None) or ".")
         )
@@ -817,11 +974,34 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 data[0]["sn"],
             )
 
+        limit_mag_caches_outer = None
+        if limit_data:
+            limit_mag_caches_outer = self._precompute_limit_maglimits_for_aperture(
+                obstable,
+                limit_data,
+                colfile,
+                measurement_idx,
+            )
+
         def _parse_one(dat):
             finished = False
             limit_radius = dolphot.get("limit_radius", 10.0)
             limit_data_cur = limit_data
             while not finished:
+                cur_caches = None
+                if limit_data_cur:
+                    if (
+                        limit_data_cur is limit_data
+                        and limit_mag_caches_outer is not None
+                    ):
+                        cur_caches = limit_mag_caches_outer
+                    else:
+                        cur_caches = self._precompute_limit_maglimits_for_aperture(
+                            obstable,
+                            limit_data_cur,
+                            colfile,
+                            measurement_idx,
+                        )
                 source_phot = self.parse_phot(
                     obstable,
                     dat["data"],
@@ -829,6 +1009,7 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                     limit_data=limit_data_cur,
                     measurement_idx=measurement_idx,
                     columns=columns,
+                    limit_maglimit_caches=cur_caches,
                 )
                 finished = True
                 if "LIMIT" in source_phot.keys():
@@ -874,11 +1055,161 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             mc = min(8, (os.cpu_count() or 4))
         else:
             mc = max(1, int(mc))
-        n_workers = min(mc, len(data)) if len(data) > 1 else 1
-        if n_workers > 1 and len(data) > 1:
+        cpu = os.cpu_count() or 8
+        # Large --scrape-all batches: allow more threads than max_cores default cap.
+        nd = len(data)
+        n_workers = (
+            min(max(mc, min(cpu * 2, 48)), nd) if nd > 1 else 1
+        )
+        show_progress = (
+            nd >= _SCRAPE_PARSE_PROGRESS_MIN
+            and os.environ.get("HST123_NO_SCRAPE_PROGRESS", "").strip().lower()
+            not in ("1", "true", "yes", "on")
+        )
+        prefer_log_lines = (
+            show_progress
+            and (
+                not sys.stderr.isatty()
+                or os.environ.get("HST123_SCRAPE_PROGRESS_LOG_ONLY", "").strip().lower()
+                in ("1", "true", "yes", "on")
+            )
+        )
+
+        def _indexed(ix: int, item) -> tuple[int, Table]:
+            return ix, _parse_one(item)
+
+        if n_workers > 1 and nd > 1:
+            if show_progress:
+                log.info(
+                    "Scrape parse_phot: starting %d source(s) with %d worker thread(s)…",
+                    nd,
+                    n_workers,
+                )
+            results: list = [None] * nd
+            t0 = time.perf_counter()
             with ThreadPoolExecutor(max_workers=n_workers) as ex:
-                final_phot = list(ex.map(_parse_one, data))
+                futs = [ex.submit(_indexed, i, data[i]) for i in range(nd)]
+                pb = None
+                if show_progress and not prefer_log_lines:
+                    try:
+                        import progressbar
+
+                        widgets: list = [
+                            "Scrape parse_phot ",
+                            progressbar.Bar(marker="#", left="[", right="]"),
+                            " ",
+                            progressbar.Percentage(),
+                            " ",
+                            progressbar.SimpleProgress(),
+                            " ",
+                            progressbar.Timer(format="elapsed %s "),
+                            progressbar.ETA(format="ETA %s"),
+                        ]
+                        try:
+                            pb = progressbar.ProgressBar(
+                                max_value=nd,
+                                widgets=widgets,
+                                fd=sys.stderr,
+                            )
+                        except TypeError:
+                            pb = progressbar.ProgressBar(
+                                maxval=nd,
+                                widgets=widgets,
+                                fd=sys.stderr,
+                            )
+                        try:
+                            pb.start()
+                        except Exception:
+                            pb = None
+                    except Exception:
+                        pb = None
+                # Log lines when user asked, or bar unavailable (TTY), or bar init failed.
+                use_log_steps = bool(
+                    show_progress and (prefer_log_lines or pb is None)
+                )
+                done = 0
+                step = max(1, nd // 20)
+                last_emit = t0
+                for fut in as_completed(futs):
+                    ix, phot = fut.result()
+                    results[ix] = phot
+                    done += 1
+                    if pb is not None:
+                        try:
+                            pb.update(done)
+                        except Exception:
+                            pass
+                    if use_log_steps:
+                        now = time.perf_counter()
+                        if (
+                            done == nd
+                            or done % step == 0
+                            or (now - last_emit) >= 15.0
+                        ):
+                            elapsed = now - t0
+                            rate = done / elapsed if elapsed > 0 else 0.0
+                            eta_s = (nd - done) / rate if rate > 0 and done < nd else 0.0
+                            log.info(
+                                "Scrape parse_phot: %d / %d (%.1f%%) | elapsed %s | "
+                                "ETA ~%s | %.2f sources/s",
+                                done,
+                                nd,
+                                100.0 * done / nd,
+                                _eta_hms(elapsed),
+                                _eta_hms(eta_s) if done < nd else "0s",
+                                rate,
+                            )
+                            last_emit = now
+                if pb is not None:
+                    try:
+                        pb.finish()
+                    except Exception:
+                        pass
+            if show_progress:
+                log.info(
+                    "Scrape parse_phot: finished %d source(s) in %s.",
+                    nd,
+                    _eta_hms(time.perf_counter() - t0),
+                )
+            final_phot = results
+        elif nd >= _SCRAPE_PARSE_PROGRESS_MIN and show_progress:
+            log.info(
+                "Scrape parse_phot: starting %d source(s) sequentially…",
+                nd,
+            )
+            t0 = time.perf_counter()
+            final_phot = []
+            step = max(1, nd // 20)
+            last_emit = t0
+            for i, dat in enumerate(data):
+                final_phot.append(_parse_one(dat))
+                done = i + 1
+                now = time.perf_counter()
+                if (
+                    done == nd
+                    or done % step == 0
+                    or (now - last_emit) >= 15.0
+                ):
+                    elapsed = now - t0
+                    rate = done / elapsed if elapsed > 0 else 0.0
+                    eta_s = (nd - done) / rate if rate > 0 and done < nd else 0.0
+                    log.info(
+                        "Scrape parse_phot: %d / %d (%.1f%%) | elapsed %s | ETA ~%s | %.2f sources/s",
+                        done,
+                        nd,
+                        100.0 * done / nd,
+                        _eta_hms(elapsed),
+                        _eta_hms(eta_s) if done < nd else "0s",
+                        rate,
+                    )
+                    last_emit = now
+            log.info(
+                "Scrape parse_phot: finished %d source(s) in %s.",
+                nd,
+                _eta_hms(time.perf_counter() - t0),
+            )
         else:
             final_phot = [_parse_one(dat) for dat in data]
+        p._last_dolphot_catalog_array = catalog
         _scrapedolphot_cleanup(final_phot, note="ok")
         return final_phot
