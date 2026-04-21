@@ -272,6 +272,50 @@ def wfpc2_astrodrizzle_scratch_paths(
     return tmp_c0m, None
 
 
+def astrodrizzle_chdir_bundle_for_drizzlepac(
+    internal_output: str,
+    tmp_input: Sequence[str],
+) -> tuple[str, str, list[str]]:
+    """
+    Paths for calling DrizzlePac without corrupting ``imageObject.outroot``.
+
+    DrizzlePac builds ``outroot`` from ``'_'.join(output.split('_')[:-1]).lower()``,
+    which breaks when *output* is an absolute path whose parent directories contain
+    underscores (e.g. ``.../SNII/SN1961F/...`` becomes ``.../snii/sn1961f/...``),
+    so static masks and other products are written under non-existent directories.
+
+    Callers should ``os.chdir(run_dir)`` and invoke AstroDrizzle with *output_basename*
+    and *input_rel* (paths relative to *run_dir*), then restore the previous CWD.
+
+    Parameters
+    ----------
+    internal_output
+        Absolute path to the internal ``*.drz.fits`` stem passed to DrizzlePac.
+    tmp_input
+        Absolute paths to drizzle inputs (scratch copies under the work tree).
+
+    Returns
+    -------
+    tuple
+        ``(run_dir, output_basename, input_rel_paths)``.
+    """
+    run_dir = os.path.dirname(
+        os.path.abspath(os.path.expanduser(os.fspath(internal_output)))
+    )
+    if not run_dir:
+        run_dir = os.path.abspath(".")
+    out_base = os.path.basename(os.fspath(internal_output))
+    rel_inputs: list[str] = []
+    for p in tmp_input:
+        ap = os.path.abspath(os.path.expanduser(os.fspath(p)))
+        try:
+            rel_inputs.append(os.path.relpath(ap, run_dir))
+        except ValueError:
+            # Different drive (Windows): keep absolute; may still hit drizzlepac bug.
+            rel_inputs.append(ap)
+    return run_dir, out_base, rel_inputs
+
+
 def build_astrodrizzle_keyword_args(
     *,
     output_name: str,

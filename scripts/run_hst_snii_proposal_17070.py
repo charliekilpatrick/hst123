@@ -3,6 +3,9 @@
 Fetch HST proposal 17070 target table from MAST Archive HTML, dedupe by target
 name, then run hst123 per object under a dedicated work directory.
 
+Uses TweakReg (``--align-with tweakreg``): ACS/WFC3 HST data lack headers JHAT
+expects (e.g. MJD-AVG), so JHAT is not appropriate for this program.
+
 Default base directory: /data/ckilpatrick/hst/supernovae/SNII/<TargetName>
 """
 from __future__ import annotations
@@ -102,7 +105,7 @@ def build_hst123_argv(
         "--download",
         "--drizzle-all",
         "--align-with",
-        "jhat",
+        "tweakreg",
         "--run-dolphot",
         "--scrape-dolphot",
         "--scrape-all",

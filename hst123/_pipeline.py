@@ -79,6 +79,7 @@ from hst123.utils.astrodrizzle_paths import (
 )
 from hst123.utils.alignment_validation import write_gaia_alignment_crderr_to_reference_driz
 from hst123.utils.astrodrizzle_helpers import (
+    astrodrizzle_chdir_bundle_for_drizzlepac,
     build_astrodrizzle_keyword_args,
     build_wfpc2_skymask_catalog,
     combine_type_and_nhigh,
@@ -2112,6 +2113,11 @@ class hst123(object):
 
     tries = 0
     ad_detail_log = get_logger(ASTRODRIZZLE_DETAIL_LOGGER)
+    ad_run_dir, ad_out_base, ad_rel_inputs = astrodrizzle_chdir_bundle_for_drizzlepac(
+        internal_output, tmp_input
+    )
+    ad_kwargs_run = dict(ad_kwargs)
+    ad_kwargs_run["output"] = ad_out_base
     try:
         while tries < 3:
             try:
@@ -2123,11 +2129,28 @@ class hst123(object):
                     os.path.basename(internal_output),
                 )
                 log.debug("AstroDrizzle inputs: %s", tmp_input)
+                log.debug(
+                    "AstroDrizzle cwd bundle: run_dir=%s output=%s rel_inputs=%s",
+                    ad_run_dir,
+                    ad_out_base,
+                    ad_rel_inputs,
+                )
                 # C extensions may printf to fd 1; ingest runfile in finally.
-                with limit_blas_threads_when_parallel(int(ad_kwargs.get("num_cores", 1))):
-                    with suppress_stdout_fd():
-                        with suppress_stdout():
-                            astrodrizzle.AstroDrizzle(tmp_input, **ad_kwargs)
+                # DrizzlePac imageObject corrupts absolute output paths that contain
+                # underscores in parent dirs (see astrodrizzle_chdir_bundle_for_drizzlepac).
+                prev_cwd = os.getcwd()
+                os.makedirs(ad_run_dir, exist_ok=True)
+                try:
+                    os.chdir(ad_run_dir)
+                    with limit_blas_threads_when_parallel(int(ad_kwargs_run.get("num_cores", 1))):
+                        with suppress_stdout_fd():
+                            with suppress_stdout():
+                                astrodrizzle.AstroDrizzle(ad_rel_inputs, **ad_kwargs_run)
+                finally:
+                    try:
+                        os.chdir(prev_cwd)
+                    except OSError:
+                        pass
                 break
             except FileNotFoundError:
                 # Usually happens because of a file missing in astropy cache.
