@@ -647,7 +647,13 @@ class DolphotPrimitive(BasePrimitive):
         return options[detector_string]["dolphot"]
 
     def add_image_to_param_file(
-        self, param_file, image, i, options, is_wfpc2=False
+        self,
+        param_file,
+        image,
+        i,
+        options,
+        is_wfpc2=False,
+        work_dir=None,
     ):
         """
         Write imgXXXX_file and imgXXXX_* parameters for one image to param file.
@@ -664,10 +670,23 @@ class DolphotPrimitive(BasePrimitive):
             detector_defaults for this detector.
         is_wfpc2 : bool, optional
             If True, log WFPC2-specific parameter adjustments. Default False.
+        work_dir : str, optional
+            Pipeline ``--work-dir``. When set, write ``imgXXXX_file`` paths **relative
+            to this directory** so DOLPHOT is not fed very long absolute strings (some
+            builds abort with ``*** buffer overflow detected ***`` when parsing long
+            ``img*_file`` lines). :meth:`run_dolphot` runs ``dolphot`` with ``cwd`` set
+            to *work_dir*, so relative stems resolve correctly.
         """
-        # DOLPHOT expects the path to the FITS *without* the .fits suffix; use an
-        # absolute path so the run is correct even if the process cwd changes.
-        root_no_ext = os.path.splitext(os.path.abspath(os.path.expanduser(image)))[0]
+        abs_img = os.path.abspath(os.path.expanduser(os.fspath(image)))
+        if work_dir and str(work_dir).strip():
+            wd = os.path.abspath(os.path.expanduser(str(work_dir).strip()))
+            try:
+                rel = os.path.relpath(abs_img, wd).replace("\\", "/")
+                root_no_ext = os.path.splitext(rel)[0]
+            except ValueError:
+                root_no_ext = os.path.splitext(abs_img)[0].replace("\\", "/")
+        else:
+            root_no_ext = os.path.splitext(abs_img)[0].replace("\\", "/")
         param_file.write(
             "img{i}_file = {file}\n".format(i=str(i).zfill(4), file=root_no_ext)
         )
@@ -717,11 +736,16 @@ class DolphotPrimitive(BasePrimitive):
             log.info("Checking reference %s instrument type %s", reference, inst)
             log.info("WFPC2=%s", is_wfpc2)
             self.add_image_to_param_file(
-                dolphot_file, reference, 0, dopt, is_wfpc2=is_wfpc2
+                dolphot_file,
+                reference,
+                0,
+                dopt,
+                is_wfpc2=is_wfpc2,
+                work_dir=wd,
             )
             for i, image in enumerate(images):
                 self.add_image_to_param_file(
-                    dolphot_file, image, i + 1, dopt
+                    dolphot_file, image, i + 1, dopt, work_dir=wd
                 )
         self._primitive_cleanup(
             "make_dolphot_file",
@@ -750,31 +774,36 @@ class DolphotPrimitive(BasePrimitive):
             raw_wd = getattr(args, "work_dir", None)
             if isinstance(raw_wd, str) and raw_wd.strip():
                 wd = os.path.abspath(os.path.expanduser(raw_wd))
-        param_path = (
-            os.path.join(wd, p.dolphot["param"])
-            if wd
-            else p.dolphot["param"]
-        )
-        log_path = (
-            os.path.join(wd, p.dolphot["log"]) if wd else p.dolphot["log"]
-        )
+        param_path = os.path.join(wd, p.dolphot["param"]) if wd else p.dolphot["param"]
+        log_path = os.path.join(wd, p.dolphot["log"]) if wd else p.dolphot["log"]
         base_name = p.dolphot["base"]
         try:
             if os.path.isfile(param_path):
                 base_fp = os.path.join(wd, base_name) if wd else base_name
-                orig_fp = os.path.join(wd, p.dolphot["original"]) if wd else p.dolphot["original"]
+                orig_fp = (
+                    os.path.join(wd, p.dolphot["original"]) if wd else p.dolphot["original"]
+                )
                 if os.path.exists(base_fp):
                     os.remove(base_fp)
                 if os.path.exists(orig_fp):
                     os.remove(orig_fp)
-                dolphot_argv = [
-                    "dolphot",
-                    base_name,
-                    f"-p{param_path}",
-                ]
+                # Prefer paths relative to --work-dir to avoid legacy DOLPHOT buffer
+                # overflows on long absolute paths (common on shared /data trees).
+                # We still run with cwd=wd so relative paths resolve correctly.
+                rel_base = base_name
+                rel_param = param_path
+                if wd:
+                    try:
+                        rel_base = os.path.relpath(os.path.abspath(base_name), wd)
+                        rel_param = os.path.relpath(os.path.abspath(param_path), wd)
+                    except Exception:
+                        rel_base = base_name
+                        rel_param = param_path
+
+                dolphot_argv = ["dolphot", rel_base, f"-p{rel_param}"]
                 banner_cmd = "dolphot {base} -p{par} (log -> {log})".format(
-                    base=base_name,
-                    par=param_path,
+                    base=rel_base,
+                    par=rel_param,
                     log=log_path,
                 )
                 make_banner("Running dolphot: {cmd}".format(cmd=banner_cmd))
@@ -1110,6 +1139,12 @@ class DolphotPrimitive(BasePrimitive):
         p = self._p
         dp = p.dolphot
         gopt = p.options["global_defaults"]["fake"]
+        args = p.options.get("args")
+        wd = None
+        if args is not None:
+            raw_wd = getattr(args, "work_dir", None)
+            if isinstance(raw_wd, str) and raw_wd.strip():
+                wd = os.path.abspath(os.path.expanduser(raw_wd))
         try:
             if not os.path.exists(dp["base"]) or os.path.getsize(dp["base"]) == 0:
                 log.warning(
@@ -1158,18 +1193,35 @@ class DolphotPrimitive(BasePrimitive):
                     inst = p._fits.get_instrument(refname)
                     is_wfpc2 = "wfpc2" in inst.lower()
                     self.add_image_to_param_file(
-                        dfile, refname, 0, defaults, is_wfpc2=is_wfpc2
+                        dfile,
+                        refname,
+                        0,
+                        defaults,
+                        is_wfpc2=is_wfpc2,
+                        work_dir=wd,
                     )
                     for i, row in enumerate(obstable):
                         self.add_image_to_param_file(
-                            dfile, row["image"], i + 1, defaults
+                            dfile, row["image"], i + 1, defaults, work_dir=wd
                         )
-                fake_argv = ["dolphot", dp["base"], f"-p{dp['param']}"]
+                param_path = os.path.join(wd, dp["param"]) if wd else dp["param"]
+                base_name = dp["base"]
+                rel_base = base_name
+                rel_param = param_path
+                if wd:
+                    try:
+                        rel_base = os.path.relpath(os.path.abspath(base_name), wd)
+                        rel_param = os.path.relpath(os.path.abspath(param_path), wd)
+                    except Exception:
+                        rel_base = base_name
+                        rel_param = param_path
+                fake_argv = ["dolphot", rel_base, f"-p{rel_param}"]
                 log.info("Running: %s (log -> %s)", " ".join(fake_argv), dp["fakelog"])
                 run_external_command(
                     fake_argv,
                     log=log,
                     tee_path=dp["fakelog"],
+                    cwd=wd,
                     env=dolphot_subprocess_env(),
                 )
                 log.info("dolphot fake stars is finished (whew)!")
