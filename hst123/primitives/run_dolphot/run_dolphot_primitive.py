@@ -26,6 +26,9 @@ from hst123.utils.wcs_utils import wcs_from_fits_hdu
 
 log = get_logger(__name__)
 
+# After first full WARNING for missing DOLPHOT source tree, repeat fallbacks at DEBUG.
+_dolphot_python_mask_tree_warned = False
+
 DOLPHOT_REQUIRED_SCRIPTS = [
     "dolphot",
     "calcsky",
@@ -404,11 +407,28 @@ class DolphotPrimitive(BasePrimitive):
                     log_=log,
                 )
             except Exception as exc:
-                log.warning(
-                    "Python DOLPHOT mask failed (%s); falling back to %s",
-                    exc,
-                    mask_exe,
+                global _dolphot_python_mask_tree_warned
+                err_l = str(exc).lower()
+                tree_missing = (
+                    "source tree" in err_l
+                    or "hst123_dolphot_root" in err_l
+                    or "need acs/data" in err_l
                 )
+                if tree_missing and _dolphot_python_mask_tree_warned:
+                    log.debug(
+                        "Python DOLPHOT mask (no DOLPHOT source tree): falling back "
+                        "to %s for %s",
+                        mask_exe,
+                        os.path.basename(image),
+                    )
+                else:
+                    if tree_missing:
+                        _dolphot_python_mask_tree_warned = True
+                    log.warning(
+                        "Python DOLPHOT mask failed (%s); falling back to %s",
+                        exc,
+                        mask_exe,
+                    )
                 use_ext = True
         if use_ext:
             cmd = [mask_exe, image]

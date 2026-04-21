@@ -1153,8 +1153,11 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             )
         )
 
-        def _indexed(ix: int, item) -> tuple[int, Table]:
-            return ix, _parse_one(item)
+        def _indexed(src_idx: int, item) -> tuple[int, Table]:
+            # Must not name this ``ix`` — outer scope uses ``ix``/``iy`` for DOLPHOT
+            # Object X/Y column indices; reusing ``ix`` here clobbers them while worker
+            # threads still run (late-binding closures), causing IndexError in get_limit_data.
+            return src_idx, _parse_one(item)
 
         if n_workers > 1 and nd > 1:
             if show_progress:
@@ -1209,8 +1212,8 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 step = max(1, nd // 20)
                 last_emit = t0
                 for fut in as_completed(futs):
-                    ix, phot = fut.result()
-                    results[ix] = phot
+                    src_idx, phot = fut.result()
+                    results[src_idx] = phot
                     done += 1
                     if pb is not None:
                         try:

@@ -492,7 +492,16 @@ class AstrometryPrimitive(BasePrimitive):
             os.path.basename(image),
             thresh,
         )
-        with fits.open(image, mode="readonly") as imghdu:
+        try:
+            imghdu = fits.open(image, mode="readonly")
+        except FileNotFoundError:
+            log.warning(
+                "get_nsources: FITS not found %s (removed scratch or concurrent "
+                "pipeline); returning 0 for this threshold sample.",
+                image,
+            )
+            return 0
+        with imghdu:
             for i, h in enumerate(imghdu):
                 if h.name == "SCI" or (len(imghdu) == 1 and h.name == "PRIMARY"):
                     filename = "{:s}[{:d}]".format(image, i)
@@ -624,6 +633,50 @@ class AstrometryPrimitive(BasePrimitive):
                 data.append(np.nan)
         thresh_data.add_row(data)
         return thresh_data
+
+    def _ensure_workspace_rawtmps(
+        self,
+        tmp_paths,
+        *,
+        do_cosmic: bool,
+    ) -> None:
+        """
+        Ensure each ``*.rawtmp.fits`` cosmic-ray working copy exists before TweakReg.
+
+        The main loop skips ``shutil.copyfile`` when ``rawtmp`` already exists; another
+        hst123 process (same ``--work-dir``) or cleanup can remove it before
+        ``get_tweakreg_thresholds`` / ``fits.getval`` runs. Rebuild any missing partner
+        of a workspace ``*.fits`` from the science image and ``run_cosmic``.
+        """
+        if not do_cosmic:
+            return
+        p = self._p
+        for rawtmp in tmp_paths:
+            rs = os.path.abspath(os.path.expanduser(os.fspath(rawtmp)))
+            if not rs.endswith(".rawtmp.fits"):
+                continue
+            if os.path.isfile(rs):
+                continue
+            orig = rs[: -len(".rawtmp.fits")] + ".fits"
+            if not os.path.isfile(orig):
+                log.error(
+                    "TweakReg: missing cosmic workspace copy %s and parent %s; "
+                    "cannot rebuild. Use one pipeline job per --work-dir, or remove "
+                    "stale *.rawtmp.fits and retry.",
+                    rs,
+                    orig,
+                )
+                continue
+            log.warning(
+                "TweakReg: rebuilding missing %s from %s (removed after skip-if-exists, "
+                "or concurrent run on this work directory).",
+                os.path.basename(rs),
+                os.path.basename(orig),
+            )
+            shutil.copyfile(orig, rs)
+            inst = p._fits.get_instrument(orig).split("_")[0].lower()
+            crpars = p.options["instrument_defaults"][inst]["crpars"]
+            p.run_cosmic(rs, crpars)
 
     def get_best_tweakreg_threshold(self, thresh_data, target):
         """
@@ -1149,9 +1202,11 @@ class AstrometryPrimitive(BasePrimitive):
                 continue
 
             shutil.copyfile(image, rawtmp)
-            inst = p._fits.get_instrument(image).split("_")[0]
+            inst = p._fits.get_instrument(image).split("_")[0].lower()
             crpars = p.options["instrument_defaults"][inst]["crpars"]
             p.run_cosmic(rawtmp, crpars)
+
+        self._ensure_workspace_rawtmps(tmp_images, do_cosmic=do_cosmic)
 
         modified = False
         ref_images = p.pick_deepest_images(tmp_images)
@@ -1245,6 +1300,8 @@ class AstrometryPrimitive(BasePrimitive):
                     ", ".join(os.path.basename(x) for x in tweak_img[:6])
                     + (" …" if len(tweak_img) > 6 else ""),
                 )
+
+                self._ensure_workspace_rawtmps(tweak_img, do_cosmic=do_cosmic)
 
                 deepest = sorted(tweak_img, key=lambda im: fits.getval(im, "EXPTIME"))[
                     -1

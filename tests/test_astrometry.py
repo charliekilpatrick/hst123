@@ -1,9 +1,10 @@
 """Unit tests for the astrometry primitive (parse_coord, AstrometryPrimitive)."""
+import os
+from unittest.mock import MagicMock
+
 import pytest
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-
-import os
 
 from hst123.primitives.astrometry import AstrometryPrimitive, parse_coord
 from hst123.primitives.astrometry.astrometry_primitive import (
@@ -91,3 +92,29 @@ class TestAstrometryPrimitive:
         astrom.tweakreg_error(ValueError("test"))
         assert "tweakreg failed" in caplog.text
         assert "ValueError" in caplog.text
+
+    def test_ensure_workspace_rawtmps_rebuilds_missing(self, tmp_path, mock_pipeline):
+        """Missing *.rawtmp.fits is recreated from the workspace science *.fits."""
+        sci = tmp_path / "sci_flc.fits"
+        raw = tmp_path / "sci_flc.rawtmp.fits"
+        fits.PrimaryHDU().writeto(str(sci), overwrite=True)
+        assert not raw.is_file()
+        mock_run_cosmic = MagicMock()
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_instrument.return_value = "acs_wfc"
+        mock_pipeline.options = {"instrument_defaults": {"acs": {"crpars": {}}}}
+        mock_pipeline.run_cosmic = mock_run_cosmic
+        astrom = AstrometryPrimitive(mock_pipeline)
+        astrom._ensure_workspace_rawtmps([str(raw)], do_cosmic=True)
+        assert raw.is_file()
+        mock_run_cosmic.assert_called_once()
+
+    def test_ensure_workspace_rawtmps_noop_when_do_cosmic_false(
+        self, tmp_path, mock_pipeline
+    ):
+        raw = tmp_path / "sci_flc.rawtmp.fits"
+        mock_pipeline.run_cosmic = MagicMock()
+        astrom = AstrometryPrimitive(mock_pipeline)
+        astrom._ensure_workspace_rawtmps([str(raw)], do_cosmic=False)
+        assert not raw.is_file()
+        mock_pipeline.run_cosmic.assert_not_called()
