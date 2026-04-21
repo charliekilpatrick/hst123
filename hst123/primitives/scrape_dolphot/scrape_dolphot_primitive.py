@@ -260,6 +260,84 @@ class ScrapeDolphotPrimitive(BasePrimitive):
             validation_notes={"n_sources": len(final_phot)},
         )
 
+    def log_scrape_summary(self, phot_tables: list) -> None:
+        """Log aggregate scrape statistics: source count, magnitude range, median limiting mags."""
+        if not phot_tables:
+            return
+        p = self._p
+        try:
+            snr = float(getattr(p, "snr_limit", 3.0))
+        except Exception:
+            snr = 3.0
+        n_src = len(phot_tables)
+        limits_by_band: dict[tuple[str, str], list[float]] = {}
+        mags_by_band: dict[tuple[str, str], list[float]] = {}
+        has_limit_col = False
+        for tbl in phot_tables:
+            if tbl is None or len(tbl) == 0:
+                continue
+            if "IS_AVG" not in tbl.colnames:
+                continue
+            sub = tbl[tbl["IS_AVG"] == 1]
+            if len(sub) == 0:
+                continue
+            if "LIMIT" in sub.colnames:
+                has_limit_col = True
+            for row in sub:
+                inst = str(row["INSTRUMENT"]).strip()
+                filt = str(row["FILTER"]).strip()
+                key = (inst, filt)
+                m = row["MAGNITUDE"]
+                if m is not None and np.isfinite(m):
+                    mags_by_band.setdefault(key, []).append(float(m))
+                if "LIMIT" in sub.colnames:
+                    lim = row["LIMIT"]
+                    if lim is not None and np.isfinite(lim) and float(lim) < 99:
+                        limits_by_band.setdefault(key, []).append(float(lim))
+
+        log.info(
+            "Scrape catalog summary: %d source(s) with instrument/filter-averaged rows (IS_AVG=1).",
+            n_src,
+        )
+        if mags_by_band:
+            bits = []
+            for (inst, filt) in sorted(mags_by_band.keys()):
+                vals = np.array(mags_by_band[(inst, filt)], dtype=float)
+                bits.append(
+                    "%s/%s: mag median=%.2f min=%.2f max=%.2f"
+                    % (
+                        inst,
+                        filt,
+                        float(np.nanmedian(vals)),
+                        float(np.nanmin(vals)),
+                        float(np.nanmax(vals)),
+                    )
+                )
+            log.info("Scrape photometry (per band, over sources): %s.", "; ".join(bits))
+        if has_limit_col and limits_by_band:
+            lbits = []
+            for (inst, filt) in sorted(limits_by_band.keys()):
+                vals = np.array(limits_by_band[(inst, filt)], dtype=float)
+                lbits.append(
+                    "%s/%s: median m_lim=%.2f (%.0fσ over %d sources)"
+                    % (
+                        inst,
+                        filt,
+                        float(np.nanmedian(vals)),
+                        snr,
+                        len(vals),
+                    )
+                )
+            log.info(
+                "Scrape limiting magnitude (neighbor-based median per source, then median over sources): %s.",
+                "; ".join(lbits),
+            )
+        elif has_limit_col:
+            log.info(
+                "Scrape limiting magnitude: no finite LIMIT values (per band); "
+                "try a larger scrape radius or more neighbors for limits.",
+            )
+
     def get_limit_data(
         self,
         dolphot,

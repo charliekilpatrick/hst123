@@ -1039,17 +1039,12 @@ class DolphotPrimitive(BasePrimitive):
                 finally:
                     p.__dict__.pop("_last_dolphot_catalog_array", None)
                 if phot:
+                    p._scrape_dolphot.log_scrape_summary(phot)
                     write_per_source = getattr(
                         opt, "scrape_write_per_source_phot", False
                     )
                     skip_ascii = bool(opt.scrape_all and not write_per_source)
-                    if skip_ascii:
-                        log.info(
-                            "Skipped per-source .phot/.snana (--scrape-all); stacked "
-                            "photometry is in HDF5 under scraped_photometry/ (%d sources).",
-                            len(phot),
-                        )
-                    else:
+                    if not skip_ascii:
                         make_banner(
                             "Printing out the final photometry for: {ra} {dec}\n"
                             "There is photometry for {n} sources".format(
