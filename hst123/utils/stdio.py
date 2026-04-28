@@ -9,6 +9,8 @@ DrizzlePac uses multiple workers (``num_cores`` > 1).
 """
 import os
 import sys
+import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -62,6 +64,81 @@ def suppress_stdout_fd() -> Iterator[None]:
         os.dup2(saved, 1)
         os.close(saved)
         os.close(devnull)
+
+
+@contextmanager
+def tee_stdout_fd_to_logger(
+    logger,
+    *,
+    prefix: str,
+    level: int,
+) -> Iterator[None]:
+    """
+    Tee OS file descriptor 1 (stdout) into *logger* while the context is active.
+
+    This captures C-level and Python-level writes that ultimately hit fd 1, and
+    is useful for libraries that print progress directly (JHAT, compiled tools).
+
+    Notes
+    -----
+    - Does **not** touch fd 2 (stderr) so logging handlers on stderr keep working.
+    - Also writes through to the original stdout so interactive CLI output is preserved.
+    """
+    # Create a pipe and swap stdout (fd 1) to the pipe writer.
+    rfd, wfd = os.pipe()
+    saved = os.dup(1)
+    os.dup2(wfd, 1)
+    os.close(wfd)
+
+    stop = threading.Event()
+
+    def _reader():
+        buf = ""
+        try:
+            while not stop.is_set():
+                try:
+                    chunk = os.read(rfd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                try:
+                    text = chunk.decode("utf-8", errors="replace")
+                except Exception:
+                    text = str(chunk)
+                buf += text
+                # Emit complete lines.
+                while True:
+                    if "\n" not in buf and "\r" not in buf:
+                        break
+                    # Normalize CR-only progress to newlines.
+                    buf = buf.replace("\r\n", "\n").replace("\r", "\n")
+                    line, _, rest = buf.partition("\n")
+                    buf = rest
+                    s = " ".join(line.split())
+                    if s:
+                        logger.log(level, "%s%s", prefix, s)
+        finally:
+            # Flush any tail without newline.
+            tail = " ".join(buf.replace("\r", "\n").replace("\r\n", "\n").split())
+            if tail:
+                logger.log(level, "%s%s", prefix, tail)
+
+    t = threading.Thread(target=_reader, name="hst123-tee-stdout", daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        # Restore stdout; closing the pipe causes reader to exit.
+        os.dup2(saved, 1)
+        os.close(saved)
+        stop.set()
+        try:
+            os.close(rfd)
+        except OSError:
+            pass
+        # Give the reader a moment to flush buffered lines.
+        t.join(timeout=1.0)
 
 
 _BLAS_THREAD_KEYS = (

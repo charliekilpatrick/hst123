@@ -951,9 +951,11 @@ def apply_wfpc2mask(
             if all(e == (800, 800, 1) for e in ex):
                 tp = 2
 
-        if tp == 0 and n_ext >= 3:
+        # Drizzled WFPC2 products are typically PRIMARY + SCI + WHT (n_ext==2).
+        # Some stacks include CTX as a 3rd extension; accept both layouts.
+        if tp == 0 and n_ext >= 2:
             e0 = _ext_shape(hdul[1])
-            if e0[2] == 1 and n_ext >= 3:
+            if e0[2] == 1:
                 log.info("Irregular size; assuming drizzled WFPC2")
                 tp = -1
 
@@ -1023,10 +1025,11 @@ def apply_wfpc2mask(
             w = np.asarray(wht_h.data, dtype=np.float64)
             s = s.copy()
             s[w == 0.0] = safe_down(dmin)
-        mult = 1.0
-        dmax_n = dmax * exp / mult
-        dmin_n = dmin * exp / mult
-        s = s * (exp / mult)
+        # Drizzled WFPC2 products are already in science units expected by DOLPHOT
+        # (counts/count-rate depending on upstream), and the C wfpc2mask does not
+        # rescale by EXPTIME for this drizzled single-SCI path. Match that behavior.
+        dmax_n = dmax
+        dmin_n = dmin
         sci_h.data = s.astype(np.float32)
         _wfpc2_insert_cards(sci_h.header, gain, rn, exp, dmin_n, dmax_n, epoch, exp)
         sci_h.header["DOLWFPC2"] = (-1, "DOLPHOT WFPC2 tag")

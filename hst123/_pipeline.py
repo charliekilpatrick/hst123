@@ -80,6 +80,7 @@ from hst123.utils.astrodrizzle_paths import (
 from hst123.utils.alignment_validation import write_gaia_alignment_crderr_to_reference_driz
 from hst123.utils.astrodrizzle_helpers import (
     astrodrizzle_chdir_bundle_for_drizzlepac,
+    astrodrizzle_exc_is_restore_wcs_distortion_failure,
     build_astrodrizzle_keyword_args,
     build_wfpc2_skymask_catalog,
     combine_type_and_nhigh,
@@ -105,6 +106,10 @@ from hst123.utils.reference_download import (
     ref_prefix_for_header,
 )
 from hst123.utils.visit import add_visit_info as add_visit_info_util
+from hst123.utils.mjd_header import (
+    ensure_mjd_avg_on_pipeline_science_image,
+    mjd_avg_from_primary_header,
+)
 from hst123.utils.wcs_utils import (
     fix_sip_ctype_headers_fits,
     make_meta_wcs_header as make_meta_wcs_header_util,
@@ -628,6 +633,9 @@ class hst123(object):
     # Save as the primary obstable for this reduction?
     if save:
         self.obstable = obstable
+
+    for pth in obstable["image"]:
+        ensure_mjd_avg_on_pipeline_science_image(str(pth))
 
     return obstable
 
@@ -2118,6 +2126,8 @@ class hst123(object):
     )
     ad_kwargs_run = dict(ad_kwargs)
     ad_kwargs_run["output"] = ad_out_base
+    wcs_restore_fallback_used = False
+    wcs_updatewcs_fallback_used = False
     try:
         while tries < 3:
             try:
@@ -2157,6 +2167,49 @@ class hst123(object):
                 # Try clearing the download cache and then re-try
                 self.clear_downloads(self.options['global_defaults'])
                 tries += 1
+            except Exception as exc:
+                chain = (exc, exc.__cause__, exc.__context__)
+                wcs_bad = any(
+                    e is not None and astrodrizzle_exc_is_restore_wcs_distortion_failure(e)
+                    for e in chain
+                )
+                wk = ad_kwargs_run.get("wcskey")
+                wk_norm = (
+                    ""
+                    if wk is None
+                    else str(wk).strip().upper().replace("INDEF", "").replace("NONE", "")
+                )
+                if wcs_bad:
+                    # (1) DrizzlePac restoreWCS / alternate key — skip restore if it fails.
+                    if not wcs_restore_fallback_used and wk_norm:
+                        log.warning(
+                            "AstroDrizzle failed with a WCS/distortion error (wcskey=%r): %s. "
+                            "Retrying with wcskey unset so DrizzlePac does not call restoreWCS.",
+                            wk,
+                            exc,
+                        )
+                        ad_kwargs_run = dict(ad_kwargs_run)
+                        ad_kwargs_run["output"] = ad_out_base
+                        ad_kwargs_run["wcskey"] = " "
+                        wcs_restore_fallback_used = True
+                        continue
+                    # (2) Primary SCI WCS still invalid for HSTWCS — let stwcs.updatewcs repair headers.
+                    if not wcs_updatewcs_fallback_used and not ad_kwargs_run.get(
+                        "updatewcs"
+                    ):
+                        log.warning(
+                            "AstroDrizzle still failed loading WCS (e.g. HSTWCS on SCI): %s. "
+                            "Retrying with updatewcs=True so input headers are refreshed from "
+                            "calibration before drizzle.",
+                            exc,
+                        )
+                        ad_kwargs_run = dict(ad_kwargs_run)
+                        ad_kwargs_run["output"] = ad_out_base
+                        ad_kwargs_run["wcskey"] = " "
+                        ad_kwargs_run["updatewcs"] = True
+                        wcs_updatewcs_fallback_used = True
+                        continue
+                raise
     finally:
         ingest_text_file_to_logger(
             logfile_name,
@@ -2254,6 +2307,20 @@ class hst123(object):
     hdu[0].header['MJD-OBS'] = time_start.mjd
     hdu[0].header['DATE-OBS'] = time_start.datetime.strftime('%Y-%m-%d')
     hdu[0].header['TIME-OBS'] = time_start.datetime.strftime('%H:%M:%S')
+    mjds_driz = []
+    for img in obstable["image"]:
+        try:
+            with fits.open(str(img), mode="readonly") as imh:
+                m = mjd_avg_from_primary_header(imh[0].header)
+            if m is not None:
+                mjds_driz.append(m)
+        except OSError:
+            log.debug("Could not read %s for MJD-AVG on drizzle", img, exc_info=True)
+    if mjds_driz:
+        hdu[0].header["MJD-AVG"] = (
+            float(np.mean(mjds_driz)),
+            "Mean MJD of co-added inputs (hst123)",
+        )
     # These keys are useful for auditing drz image later
     hdu[0].header['NINPUT'] = ninput
     hdu[0].header['INPUT'] = str_input
@@ -2832,7 +2899,8 @@ class hst123(object):
             log.info(message.format(im=name))
             # Align the sub-table before drizzle (TweakReg or JHAT per --align-with)
             if do_tweakreg:
-                error, shift_table = self._astrom.run_alignment(driztable, '')
+                ref = getattr(self, "reference", "") or ""
+                error, shift_table = self._astrom.run_alignment(driztable, ref)
             # Next run astrodrizzle to construct the drizzled frame
             if not self.run_astrodrizzle(
                 driztable, output_name=name, save_fullfile=True

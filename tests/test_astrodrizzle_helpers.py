@@ -6,6 +6,7 @@ import numpy as np
 from astropy.io import fits
 
 from hst123.utils.astrodrizzle_helpers import (
+    astrodrizzle_exc_is_restore_wcs_distortion_failure,
     canonical_drizzle_input_stem,
     combine_type_and_nhigh,
     drizzle_canonical_weight_mask_paths,
@@ -17,6 +18,15 @@ from hst123.utils.astrodrizzle_helpers import (
     wcs_image_hdu_index,
     write_drc_multis_extension_if_requested,
 )
+
+
+def test_astrodrizzle_exc_is_restore_wcs_distortion_failure():
+    e = MemoryError(
+        "NAXES was not set (or bad) for Lookup   distortion on axis 2"
+    )
+    assert astrodrizzle_exc_is_restore_wcs_distortion_failure(e)
+    assert not astrodrizzle_exc_is_restore_wcs_distortion_failure(ValueError("other"))
+    assert not astrodrizzle_exc_is_restore_wcs_distortion_failure(MemoryError("out of memory"))
 
 
 def test_canonical_drizzle_input_stem_wfpc2_scratch():

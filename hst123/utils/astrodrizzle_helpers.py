@@ -208,6 +208,23 @@ def header_has_tweak_wcsname(header) -> bool:
     return False
 
 
+def astrodrizzle_exc_is_restore_wcs_distortion_failure(exc: BaseException) -> bool:
+    """
+    True when stwcs/astropy failed building a WCS (incomplete SIP / lookup
+    distortion tables). DrizzlePac hits this in ``restoreWCS`` and again when
+    opening inputs via ``HSTWCS`` / ``get_hstwcs``.
+
+    WCSLIB sometimes surfaces this as :class:`MemoryError` with a descriptive
+    message rather than a distinct exception type.
+    """
+    msg = str(exc).lower()
+    if "naxes" not in msg or "distortion" not in msg:
+        return False
+    if "lookup" in msg:
+        return True
+    return isinstance(exc, MemoryError)
+
+
 def ensure_wcsname_tweak_on_image(image_path: str, logger: logging.Logger) -> None:
     """
     Set ``WCSNAME=TWEAK`` on **SCI** extensions only (in place).

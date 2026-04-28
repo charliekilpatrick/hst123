@@ -23,6 +23,7 @@ from hst123.utils.dolphot_sky import (
 from hst123.utils.logging import get_logger, log_calls, make_banner, run_external_command
 from hst123.utils.paths import pipeline_chip_output_dir
 from hst123.utils.wcs_utils import wcs_from_fits_hdu
+from hst123.utils.stdio import tee_stdout_fd_to_logger
 
 log = get_logger(__name__)
 
@@ -827,13 +828,20 @@ class DolphotPrimitive(BasePrimitive):
                     log=log_path,
                 )
                 make_banner("Running dolphot: {cmd}".format(cmd=banner_cmd))
-                run_external_command(
-                    dolphot_argv,
-                    log=log,
-                    tee_path=log_path,
-                    cwd=wd,
-                    env=dolphot_subprocess_env(),
-                )
+                # Capture any Python/C stdout emitted during orchestration (in addition to
+                # dolphot subprocess output, which run_external_command already streams).
+                with tee_stdout_fd_to_logger(
+                    log,
+                    prefix="[dolphot wrapper stdout] ",
+                    level=log.level if isinstance(log.level, int) else 20,
+                ):
+                    run_external_command(
+                        dolphot_argv,
+                        log=log,
+                        tee_path=log_path,
+                        cwd=wd,
+                        env=dolphot_subprocess_env(),
+                    )
                 time.sleep(10)
                 log.info("dolphot is finished (whew)!")
                 out_cat = os.path.join(wd, base_name + ".phot") if wd else base_name + ".phot"

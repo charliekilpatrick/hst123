@@ -3,10 +3,21 @@
 Fetch HST proposal 17070 target table from MAST Archive HTML, dedupe by target
 name, then run hst123 per object under a dedicated work directory.
 
-Uses TweakReg (``--align-with tweakreg``): ACS/WFC3 HST data lack headers JHAT
-expects (e.g. MJD-AVG), so JHAT is not appropriate for this program.
+Uses JHAT (``--align-with jhat``) for Gaia alignment (requires the optional
+``jhat`` package). Input FLC/FLT/c0m and drizzle products include ``MJD-AVG``
+where the pipeline writes them.
 
 Default base directory: /data/ckilpatrick/hst/supernovae/SNII/<TargetName>
+
+Validating one target
+---------------------
+List names from the archive, then run a single target (check the command on a
+dry run first):
+
+  %(prog)s --list-targets
+  %(prog)s --dry-run --only YOUR_TARGET_NAME
+  %(prog)s --only YOUR_TARGET_NAME
+  %(prog)s --redo --only YOUR_TARGET_NAME
 """
 from __future__ import annotations
 
@@ -63,6 +74,30 @@ def sexagesimal_to_deg(ra_s: str, dec_s: str) -> tuple[float, float]:
     return float(c.ra.deg), float(c.dec.deg)
 
 
+def pick_single_target(
+    targets: list[tuple[str, float, float]], only: str
+) -> list[tuple[str, float, float]]:
+    """
+    Return the one row whose target name equals *only* (case-insensitive).
+
+    Exits the process with an error if there is no match or more than one match.
+    """
+    needle = only.strip().casefold()
+    if not needle:
+        print("error: --only requires a non-empty target name", file=sys.stderr)
+        raise SystemExit(2)
+    exact = [t for t in targets if t[0].casefold() == needle]
+    if len(exact) == 1:
+        return exact
+    if len(exact) > 1:
+        print("error: internal duplicate targets for --only", file=sys.stderr)
+        raise SystemExit(2)
+    print(f"error: no target matching --only {only!r}", file=sys.stderr)
+    names = "\n  ".join(t[0] for t in targets)
+    print(f"available targets ({len(targets)}):\n  {names}", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def unique_targets(rows: list[tuple[str, str, str]]) -> list[tuple[str, float, float]]:
     """One entry per target name; warn on coordinate mismatches."""
     best: dict[str, tuple[float, float, str, str]] = {}
@@ -91,8 +126,10 @@ def build_hst123_argv(
     work_dir: str,
     object_name: str,
     extra: list[str],
+    *,
+    redo: bool = False,
 ) -> list[str]:
-    return [
+    core = [
         sys.executable,
         "-m",
         "hst123",
@@ -105,18 +142,23 @@ def build_hst123_argv(
         "--download",
         "--drizzle-all",
         "--align-with",
-        "tweakreg",
+        "jhat",
         "--run-dolphot",
         "--scrape-dolphot",
         "--scrape-all",
         "--scrape-radius",
         "10",
-        *extra,
     ]
+    if redo:
+        core.append("--redo")
+    return [*core, *extra]
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--url", default=DEFAULT_URL, help="MAST proposal_search URL")
     ap.add_argument(
         "--base-dir",
@@ -127,6 +169,26 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="Print planned hst123 commands without running",
+    )
+    ap.add_argument(
+        "--redo",
+        action="store_true",
+        help="Pass --redo to each hst123 run (re-run alignment, drizzle, dolphot, etc.)",
+    )
+    _pick = ap.add_mutually_exclusive_group()
+    _pick.add_argument(
+        "--only",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Run only this target (case-insensitive exact name). "
+            "Use --list-targets to copy the archive spelling."
+        ),
+    )
+    _pick.add_argument(
+        "--list-targets",
+        action="store_true",
+        help="Fetch the proposal page, print deduplicated target names, and exit",
     )
     ap.add_argument(
         "extra_hst123_args",
@@ -143,10 +205,25 @@ def main() -> int:
     targets = unique_targets(rows)
     print(f"parsed {len(rows)} table rows, {len(targets)} unique targets", file=sys.stderr)
 
+    if args.list_targets:
+        for name, _ra, _dec in targets:
+            print(name)
+        return 0
+
+    if args.only is not None:
+        targets = pick_single_target(targets, args.only)
+
     for name, ra_deg, dec_deg in targets:
         safe = fs_safe_name(name)
         work_dir = os.path.join(args.base_dir, safe)
-        argv = build_hst123_argv(ra_deg, dec_deg, work_dir, name, args.extra_hst123_args)
+        argv = build_hst123_argv(
+            ra_deg,
+            dec_deg,
+            work_dir,
+            name,
+            args.extra_hst123_args,
+            redo=args.redo,
+        )
         if args.dry_run:
             print(shlex_join(argv))
             continue

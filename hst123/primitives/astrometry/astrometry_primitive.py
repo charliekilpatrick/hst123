@@ -26,6 +26,7 @@ from hst123.utils.stdio import suppress_stdout
 from hst123.utils.logging import format_hdu_list_summary, log_calls
 from hst123.utils.workdir_cleanup import cleanup_after_tweakreg
 from hst123.utils.alignment_validation import log_tweakreg_shift_metrics
+from hst123.utils.stdio import tee_stdout_fd_to_logger
 from hst123.primitives.base import BasePrimitive
 from hst123.primitives.astrometry.alignment_meta import (
     alignment_is_redundant,
@@ -736,9 +737,12 @@ class AstrometryPrimitive(BasePrimitive):
         """
         Split working copies by filter so TweakReg uses a spectrally matched reference.
 
-        Aligning e.g. F555W exposures to an F814W reference yields too few cross-band
-        matches; each filter aligns to the user reference when filters match, else to
-        the deepest exposure in that filter.
+        This implements a hierarchical strategy:
+
+        - Each filter batch aligns to its deepest exposure (robust within-band matching).
+        - If a *pipeline reference* is provided (typically the main deep reference
+          drizzle), the batch anchor for each filter is first aligned to that
+          reference, so all filters end up in the same astrometric frame.
         """
         if not tmp_images:
             return []
@@ -754,14 +758,12 @@ class AstrometryPrimitive(BasePrimitive):
         for tp in tmp_images:
             by_filt.setdefault(_filt_of(tp), []).append(tp)
 
-        ref_ok = bool(
-            reference
-            and reference != "dummy.fits"
-            and os.path.isfile(reference)
-        )
-        ref_filt = self._pipeline_reference_filter(reference) if ref_ok else None
+        ref_ok = bool(reference and str(reference).strip() and reference != "dummy.fits")
+        ref_path = normalize_fits_path(reference) if ref_ok else None
+        if ref_path and not os.path.isfile(ref_path):
+            ref_path = None
 
-        batches = []
+        batches: list[tuple[str, list[str]]] = []
         for filt in sorted(by_filt.keys(), key=str):
             paths = by_filt[filt]
             if len(paths) < 2:
@@ -771,13 +773,17 @@ class AstrometryPrimitive(BasePrimitive):
                     len(paths),
                 )
                 continue
-            if ref_filt is not None and filt == ref_filt:
-                batches.append((reference, paths))
-            else:
-                deepest = sorted(
-                    paths, key=lambda im: fits.getval(im, "EXPTIME")
-                )[-1]
-                batches.append((deepest, paths))
+
+            deepest = sorted(paths, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
+
+            # Bridge batch: align the filter anchor to the pipeline reference (if provided).
+            # This is the step that ties all filters into a single astrometric frame.
+            if ref_path and os.path.abspath(deepest) != os.path.abspath(ref_path):
+                batches.append((ref_path, [deepest]))
+
+            # Main batch: align all images in this filter to its anchor.
+            batches.append((deepest, paths))
+
         return batches
 
     def get_shallow_param(self, image):
@@ -931,9 +937,208 @@ class AstrometryPrimitive(BasePrimitive):
             align_with,
             reference,
         )
+        # align_with=jhat means: use JHAT for BOTH absolute (Gaia anchor) and relative
+        # (image-to-reference) alignment. No TweakReg is used in this mode.
         if align_with == "jhat":
-            result = self.run_jhat_align(obstable, reference)
+            from hst123.primitives.astrometry.jhat import (
+                jhat_gaia_good_phot_path,
+                jhat_image_phot_path,
+                read_jhat_gaia_residual_stats,
+                run_jhat,
+            )
+
+            p = self._p
+            outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
+            params = getattr(settings, "jhat_params", None) or {}
+            force_realign = want_redo_astrometry(p.options["args"])
+
+            ref_for_hier = str(reference).strip() if reference else ""
+            if ref_for_hier and ref_for_hier != "dummy.fits" and os.path.isfile(ref_for_hier):
+                # JHAT requires an image-like FITS with SCI WCS. hst123's canonical
+                # drizzle MEF (".drc.fits") may be header-only (PRIMARY+HDRTAB) and
+                # not include any SCI extension. In that case, fall back to the
+                # canonical ".drz.fits" (or sidecar) for JHAT catalog generation.
+                try:
+                    from astropy.io import fits as _fits
+
+                    with _fits.open(ref_for_hier, mode="readonly") as _h:
+                        has_sci = any(
+                            str(getattr(hdu, "name", "")).strip().upper() == "SCI"
+                            or str(hdu.header.get("EXTNAME", "")).strip().upper() == "SCI"
+                            for hdu in _h
+                        )
+                    if not has_sci:
+                        cand = []
+                        if ref_for_hier.endswith(".drc.fits"):
+                            cand.append(ref_for_hier.replace(".drc.fits", ".drz.fits"))
+                            cand.append(ref_for_hier.replace(".drc.fits", ".drz_sci.fits"))
+                        # Also try common sidecar naming in the same directory.
+                        base = os.path.basename(ref_for_hier)
+                        d = os.path.dirname(ref_for_hier) or "."
+                        cand.append(os.path.join(d, base + ".drz.fits"))
+                        for c in cand:
+                            if c and os.path.isfile(c):
+                                log.info(
+                                    "JHAT reference %s has no SCI; using %s for catalog generation.",
+                                    os.path.basename(ref_for_hier),
+                                    os.path.basename(c),
+                                )
+                                ref_for_hier = c
+                                break
+                except Exception:
+                    pass
+                # 1) Anchor the reference drizzle to Gaia.
+                try:
+                    log.info(
+                        "JHAT hierarchical: anchoring reference to Gaia: %s",
+                        os.path.basename(ref_for_hier),
+                    )
+                    with tee_stdout_fd_to_logger(
+                        log,
+                        prefix="[jhat stdout] ",
+                        level=logging.INFO,
+                    ):
+                        stats = run_jhat(
+                            ref_for_hier,
+                            outdir=outdir,
+                            params=params,
+                            gaia=True,
+                            verbose=False,
+                        )
+                    if stats:
+                        stats["image"] = os.path.basename(ref_for_hier)
+                        p._jhat_gaia_ref_stats = [stats]
+                    else:
+                        # If already aligned, try reading stats from existing good.phot table.
+                        st = read_jhat_gaia_residual_stats(ref_for_hier, outdir)
+                        if st:
+                            st["image"] = os.path.basename(ref_for_hier)
+                            p._jhat_gaia_ref_stats = [st]
+
+                    with fits.open(ref_for_hier, mode="update") as hdu:
+                        hdu[0].header["TWEAKSUC"] = 1
+                        write_alignment_provenance(
+                            hdu[0].header, method="jhat", ref_id="GAIA", success=True
+                        )
+                        hdu.flush()
+                except Exception as exc:
+                    log.warning(
+                        "JHAT Gaia anchor failed for reference %s; continuing with relative-only alignment: %s",
+                        os.path.basename(ref_for_hier),
+                        exc,
+                    )
+
+                # 2) Use the reference matched catalog (preferred) or reference phot catalog
+                # as the relative reference catalog for aligning other images.
+                refcat = None
+                gp = jhat_gaia_good_phot_path(ref_for_hier, outdir)
+                if os.path.isfile(gp):
+                    refcat = gp
+                else:
+                    pp = jhat_image_phot_path(ref_for_hier, outdir)
+                    if os.path.isfile(pp):
+                        refcat = pp
+                if refcat is None:
+                    log.warning(
+                        "JHAT reference catalog not found for %s; expected %s or %s. "
+                        "Relative alignment may fail.",
+                        os.path.basename(ref_for_hier),
+                        os.path.basename(gp),
+                        os.path.basename(jhat_image_phot_path(ref_for_hier, outdir)),
+                    )
+                    refcat = gp  # let JHAT error with a clear missing-file message
+
+                missing = 0
+                aligned = 0
+                for image in obstable["image"]:
+                    if str(image) == ref_for_hier:
+                        continue
+                    if not os.path.exists(image):
+                        missing += 1
+                        continue
+                    if not force_realign:
+                        with fits.open(image, mode="readonly") as hdu:
+                            if alignment_is_redundant(
+                                hdu[0].header,
+                                method="jhat",
+                                ref_id=refcat,
+                                require_success=True,
+                            ):
+                                continue
+                    with tee_stdout_fd_to_logger(
+                        log,
+                        prefix="[jhat stdout] ",
+                        level=logging.INFO,
+                    ):
+                        run_jhat(
+                            image,
+                            outdir=outdir,
+                            params=params,
+                            gaia=False,
+                            photfilename=refcat,
+                            verbose=False,
+                        )
+                    with fits.open(image, mode="update") as hdu:
+                        hdu[0].header["TWEAKSUC"] = 1
+                        write_alignment_provenance(
+                            hdu[0].header, method="jhat", ref_id=refcat, success=True
+                        )
+                        hdu.flush()
+                    aligned += 1
+
+                if aligned:
+                    log.info("JHAT relative: aligned %d image(s) to reference catalog.", aligned)
+                if missing:
+                    log.warning("JHAT relative: skipped %d missing image(s).", missing)
+
+                result = ("jhat success", None)
+            else:
+                # No explicit pipeline reference: align the obstable internally by picking
+                # the deepest image as the anchor and using its phot catalog as reference.
+                imgs = [str(x) for x in obstable["image"] if os.path.isfile(str(x))]
+                if len(imgs) < 2:
+                    return ("jhat success", None)
+                anchor = sorted(imgs, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
+                log.info("JHAT internal: anchor=%s (deepest exposure)", os.path.basename(anchor))
+                with tee_stdout_fd_to_logger(
+                    log,
+                    prefix="[jhat stdout] ",
+                    level=logging.INFO,
+                ):
+                    # Run once on anchor to create its phot catalog (match to Gaia for stability,
+                    # but do not use it as the global absolute anchor unless a pipeline reference
+                    # was provided).
+                    run_jhat(anchor, outdir=outdir, params=params, gaia=True, verbose=False)
+                # Prefer Gaia-matched table when available; fall back to plain phot catalog.
+                refcat = None
+                gp = jhat_gaia_good_phot_path(anchor, outdir)
+                if os.path.isfile(gp):
+                    refcat = gp
+                else:
+                    pp = jhat_image_phot_path(anchor, outdir)
+                    if os.path.isfile(pp):
+                        refcat = pp
+                if refcat is None:
+                    log.warning(
+                        "JHAT internal: reference catalog not found for %s; expected %s or %s. "
+                        "Relative alignment may fail.",
+                        os.path.basename(anchor),
+                        os.path.basename(gp),
+                        os.path.basename(jhat_image_phot_path(anchor, outdir)),
+                    )
+                    refcat = gp
+                for im in imgs:
+                    if im == anchor:
+                        continue
+                    with tee_stdout_fd_to_logger(log, prefix="[jhat stdout] ", level=logging.INFO):
+                        run_jhat(im, outdir=outdir, params=params, gaia=False, photfilename=refcat, verbose=False)
+                    with fits.open(im, mode="update") as hdu:
+                        hdu[0].header["TWEAKSUC"] = 1
+                        write_alignment_provenance(hdu[0].header, method="jhat", ref_id=refcat, success=True)
+                        hdu.flush()
+                result = ("jhat success", None)
         else:
+            # align_with=tweakreg: keep the TweakReg-based relative alignment.
             result = self.run_tweakreg(
                 obstable,
                 reference,

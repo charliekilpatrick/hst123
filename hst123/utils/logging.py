@@ -87,6 +87,184 @@ def _apply_hst123_propagate_policy() -> None:
         lg.propagate = False
 
 
+def suppress_third_party_root_stream_handlers() -> None:
+    """
+    Remove any StreamHandlers attached to the *root* logger.
+
+    Some third-party stacks (notably DrizzlePac/stpipe) attach a root StreamHandler
+    with their own formatter, producing extra console lines like::
+
+        2026-... - stpipe - INFO - ...
+
+    ``hst123`` logs via the ``hst123`` logger (and does not propagate to root by
+    default), so removing root stream handlers keeps stdout/stderr clean while
+    leaving our session log intact.
+    """
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        if isinstance(h, logging.StreamHandler):
+            try:
+                root.removeHandler(h)
+            except Exception:
+                continue
+
+
+_ROOT_ADDHANDLER_ORIG = None
+_STPIPE_ADDHANDLER_ORIG = None
+_LOGGER_ADDHANDLER_ORIG = None
+
+
+class _ForwardRootRecordsToHst123(logging.Handler):
+    """
+    Root logger handler that forwards third-party records into ``hst123`` logs.
+
+    This lets us *capture* messages from stacks that log on the root logger
+    (e.g. DrizzlePac/stpipe), while still keeping console output under hst123's
+    control.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._dst = logging.getLogger(f"{ROOT_LOGGER}.third_party")
+        # Suppress redundant duplicates: stpipe often mirrors messages emitted by
+        # other third-party loggers (via its own wrappers / delegation). Keep a
+        # small recent-message cache so we can drop identical "stpipe" copies.
+        self._recent: list[tuple[float, int, str, str]] = []  # (t, level, name, msg)
+        self._recent_max = 200
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            # Avoid loops: do not re-emit hst123 records back into itself.
+            if str(getattr(record, "name", "")).startswith(ROOT_LOGGER):
+                return
+            name = str(getattr(record, "name", ""))
+            msg = record.getMessage()
+
+            # De-duplicate: if stpipe logs the exact same message/level that was
+            # just logged by a non-stpipe third-party logger, drop the stpipe copy.
+            # Use a small time window to avoid hiding legitimate repeated stpipe logs.
+            try:
+                import time
+
+                now = time.time()
+                # Prune old entries (>2s)
+                self._recent = [x for x in self._recent if (now - x[0]) <= 2.0]
+                if name.startswith("stpipe"):
+                    for (t0, lvl0, n0, m0) in reversed(self._recent):
+                        if lvl0 == record.levelno and m0 == msg and not n0.startswith("stpipe"):
+                            if (now - t0) <= 1.0:
+                                return
+                self._recent.append((now, int(record.levelno), name, msg))
+                if len(self._recent) > self._recent_max:
+                    self._recent = self._recent[-self._recent_max :]
+            except Exception:
+                pass
+
+            # Preserve the original logger name for debugging.
+            self._dst.log(record.levelno, "[%s] %s", name, msg)
+        except Exception:
+            return
+
+
+def capture_root_logging_to_hst123(*, block_stream_handlers: bool = True) -> None:
+    """
+    Capture third-party root-logger output into ``hst123`` and suppress their console handlers.
+
+    - Removes existing root StreamHandlers (so ``stpipe - INFO - ...`` lines stop).
+    - Installs a forwarding handler on root so root logger records show up in the
+      hst123 session log (as ``[third_party] [orig.logger] message``).
+    - Optionally blocks future attempts to attach StreamHandlers to the root
+      logger (common in stpipe/drizzlepac).
+    """
+    root = logging.getLogger()
+
+    # Remove any existing root StreamHandlers.
+    suppress_third_party_root_stream_handlers()
+
+    # stpipe installs a DelegationHandler on the *root* logger at import time which
+    # re-emits records under the "stpipe" logger name, creating redundant duplicates
+    # (e.g. one line from "stsci.skypac.utils" and the same line again from "stpipe").
+    # Remove it so we only capture the original third-party logger records.
+    try:
+        for h in list(root.handlers):
+            if h.__class__.__name__ == "DelegationHandler" and h.__class__.__module__.startswith("stpipe"):
+                root.removeHandler(h)
+    except Exception:
+        pass
+
+    # Ensure our forwarder exists (only once).
+    if not any(isinstance(h, _ForwardRootRecordsToHst123) for h in root.handlers):
+        root.addHandler(_ForwardRootRecordsToHst123())
+
+    # Block future StreamHandler additions to root (stpipe likes to attach one).
+    global _ROOT_ADDHANDLER_ORIG
+    if block_stream_handlers and _ROOT_ADDHANDLER_ORIG is None:
+        _ROOT_ADDHANDLER_ORIG = root.addHandler
+
+        def _add_handler_blocking_stream(h):
+            if isinstance(h, logging.StreamHandler):
+                return
+            return _ROOT_ADDHANDLER_ORIG(h)
+
+        root.addHandler = _add_handler_blocking_stream  # type: ignore[assignment]
+
+    # Some libraries attach handlers to their *own* loggers (not root), especially
+    # stpipe. Remove their console handlers so records propagate to root and get
+    # forwarded into hst123 instead of printing in the stpipe format.
+    def _strip_console_handlers(logger: logging.Logger) -> None:
+        for h in list(logger.handlers):
+            # stpipe config uses StreamHandler(sys.stderr/sys.stdout) for console output.
+            if isinstance(h, logging.StreamHandler):
+                try:
+                    logger.removeHandler(h)
+                except Exception:
+                    pass
+
+    # Remove handlers from any already-instantiated stpipe logger(s).
+    try:
+        for name, obj in list(logging.Logger.manager.loggerDict.items()):
+            if isinstance(obj, logging.Logger) and str(name).startswith("stpipe"):
+                _strip_console_handlers(obj)
+                obj.propagate = True
+    except Exception:
+        pass
+
+    # Prevent stpipe from re-attaching its own console StreamHandler later.
+    global _STPIPE_ADDHANDLER_ORIG
+    try:
+        stp = logging.getLogger("stpipe")
+        if block_stream_handlers and _STPIPE_ADDHANDLER_ORIG is None:
+            _STPIPE_ADDHANDLER_ORIG = stp.addHandler
+
+            def _stpipe_add_handler_blocking_stream(h):
+                if isinstance(h, logging.StreamHandler):
+                    return
+                return _STPIPE_ADDHANDLER_ORIG(h)
+
+            stp.addHandler = _stpipe_add_handler_blocking_stream  # type: ignore[assignment]
+    except Exception:
+        pass
+
+    # stpipe's import-time configuration (stpipe.log.load_configuration) may attach
+    # StreamHandlers to *many* stpipe.* loggers, not just "stpipe". Block that at
+    # the Logger class level so late-imported stpipe can't leak to console.
+    global _LOGGER_ADDHANDLER_ORIG
+    if block_stream_handlers and _LOGGER_ADDHANDLER_ORIG is None:
+        _LOGGER_ADDHANDLER_ORIG = logging.Logger.addHandler
+
+        def _logger_add_handler_block_stpipe_stream(self: logging.Logger, h: logging.Handler) -> None:
+            try:
+                if str(getattr(self, "name", "")).startswith("stpipe") and isinstance(
+                    h, logging.StreamHandler
+                ):
+                    return
+            except Exception:
+                pass
+            return _LOGGER_ADDHANDLER_ORIG(self, h)  # type: ignore[misc]
+
+        logging.Logger.addHandler = _logger_add_handler_block_stpipe_stream  # type: ignore[assignment]
+
+
 def _get_level(level):
     """
     Resolve a logging level name or number to an integer level.

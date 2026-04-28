@@ -124,9 +124,9 @@ def add_options(parser=None, usage=None, version=None):
         help='Keep the object file output from tweakreg.')
     parser.add_argument('--skip-tweakreg', default=False, action='store_true',
         help='Skip running alignment (tweakreg or jhat).')
-    parser.add_argument('--align-with', default='tweakreg', type=str,
+    parser.add_argument('--align-with', default='jhat', type=str,
         choices=['tweakreg', 'jhat'],
-        help='Alignment method: tweakreg (HST/drizzlepac) or jhat (JWST/Gaia). Default: tweakreg.')
+        help='Alignment method: jhat (Gaia / relative) or tweakreg (HST/drizzlepac). Default: jhat.')
     parser.add_argument('--hierarchical', default=False, action='store_true',
         help='Drizzle all visit/filter pairs then use them as basis to'+\
         ' perform alignment on the sub-frames.')

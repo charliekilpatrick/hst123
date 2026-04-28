@@ -118,3 +118,96 @@ class TestAstrometryPrimitive:
         astrom._ensure_workspace_rawtmps([str(raw)], do_cosmic=False)
         assert not raw.is_file()
         mock_pipeline.run_cosmic.assert_not_called()
+
+    def test_build_tweakreg_batches_bridges_filters_to_pipeline_reference(
+        self, tmp_path, mock_pipeline
+    ):
+        """
+        Hierarchical alignment: each filter aligns internally to its deepest image,
+        and each filter anchor is additionally aligned to the pipeline reference.
+        """
+        # Create original images (used for filter lookup) and rawtmp working copies.
+        imgs = []
+        for name, filt, exptime in [
+            ("a_flc", "F300W", 100.0),
+            ("b_flc", "F300W", 200.0),
+            ("c_flc", "F814W", 300.0),
+            ("d_flc", "F814W", 400.0),
+        ]:
+            orig = tmp_path / f"{name}.fits"
+            rawtmp = tmp_path / f"{name}.rawtmp.fits"
+            h = fits.PrimaryHDU()
+            h.header["EXPTIME"] = exptime
+            h.writeto(str(orig), overwrite=True)
+            h.writeto(str(rawtmp), overwrite=True)
+            imgs.append(str(rawtmp))
+
+        # Pipeline reference drizzle.
+        ref = tmp_path / "ref.drc.fits"
+        h = fits.PrimaryHDU()
+        h.header["EXPTIME"] = 999.0
+        h.writeto(str(ref), overwrite=True)
+
+        def _get_filter(path):
+            base = os.path.basename(path)
+            if base.startswith("a_") or base.startswith("b_"):
+                return "F300W"
+            return "F814W"
+
+        mock_pipeline._fits = MagicMock()
+        mock_pipeline._fits.get_filter.side_effect = _get_filter
+        astrom = AstrometryPrimitive(mock_pipeline)
+
+        batches = astrom._build_tweakreg_batches(imgs, str(ref))
+
+        # Expect two bridge batches (one per filter anchor), plus two main batches.
+        # Bridge batches align deepest-of-filter to the pipeline reference.
+        assert (str(ref), [str(tmp_path / "b_flc.rawtmp.fits")]) in batches
+        assert (str(ref), [str(tmp_path / "d_flc.rawtmp.fits")]) in batches
+
+        # Main batches align all images in each filter to their deepest anchor.
+        assert (str(tmp_path / "b_flc.rawtmp.fits"), [str(tmp_path / "a_flc.rawtmp.fits"), str(tmp_path / "b_flc.rawtmp.fits")]) in batches
+        assert (str(tmp_path / "d_flc.rawtmp.fits"), [str(tmp_path / "c_flc.rawtmp.fits"), str(tmp_path / "d_flc.rawtmp.fits")]) in batches
+
+    def test_run_alignment_jhat_does_not_call_tweakreg(self, tmp_path, monkeypatch):
+        """When align_with=jhat, run_alignment should not invoke run_tweakreg."""
+        # Minimal pipeline/options
+        class Args:
+            align_with = "jhat"
+            work_dir = str(tmp_path)
+            clobber = False
+
+        class P:
+            options = {"args": Args()}
+            _jhat_gaia_ref_stats = []
+
+        p = P()
+        astrom = AstrometryPrimitive(p)
+
+        # Make two dummy images and a reference drizzle.
+        im1 = tmp_path / "a.fits"
+        im2 = tmp_path / "b.fits"
+        ref = tmp_path / "ref.drc.fits"
+        fits.PrimaryHDU().writeto(im1, overwrite=True)
+        fits.PrimaryHDU().writeto(im2, overwrite=True)
+        fits.PrimaryHDU().writeto(ref, overwrite=True)
+
+        # Stub run_tweakreg to explode if called.
+        def _boom(*args, **kwargs):
+            raise AssertionError("run_tweakreg should not be called for jhat")
+
+        monkeypatch.setattr(astrom, "run_tweakreg", _boom)
+
+        # Stub JHAT helpers so we don't require jhat in unit tests.
+        import hst123.primitives.astrometry.jhat as jh
+
+        def fake_run_jhat(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(jh, "run_jhat", fake_run_jhat)
+        # Also pretend the reference catalogs exist (avoid warning path raising).
+        (tmp_path / "ref_jhat.good.phot.txt").write_text("ra dec\n0 0\n")
+
+        obstable = {"image": [str(im1), str(im2)]}
+        out = astrom.run_alignment(obstable, str(ref), do_cosmic=False, skip_wcs=True)
+        assert out[0] == "jhat success"

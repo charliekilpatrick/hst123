@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
+import types
 
 import numpy as np
 from astropy import units as u
@@ -12,6 +14,53 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 
 log = logging.getLogger(__name__)
+
+def _ensure_hst_sci_extension_for_jhat(align_image: str, *, outdir: str) -> tuple[str, str | None]:
+    """
+    JHAT's HST photometry loader expects a ``SCI`` extension.
+
+    hst123 sometimes uses single-HDU drizzle products (PRIMARY image only). Those
+    are valid FITS images with WCS, but JHAT raises ``Extension 'SCI' not found.``
+    for them. Create a temporary 2-HDU wrapper with ``SCI,1`` holding the PRIMARY
+    image so JHAT can proceed.
+
+    Returns (path_to_use, temp_path_or_None).
+    """
+    from astropy.io import fits
+
+    try:
+        with fits.open(align_image, mode="readonly") as hdul:
+            if "SCI" in hdul:
+                return align_image, None
+            prim = hdul[0]
+            naxis = int(prim.header.get("NAXIS", 0) or 0)
+            if naxis < 2 or prim.data is None:
+                return align_image, None
+            data = np.asarray(prim.data)
+            hdr = prim.header.copy()
+    except Exception:
+        return align_image, None
+
+    # Write a temp wrapper with the *same basename* so JHAT outputs are named
+    # consistently (it keys output table names off the input basename).
+    od = os.path.abspath(os.path.expanduser(os.fspath(outdir)))
+    tmpdir = os.path.join(od, ".hst123_runfiles")
+    try:
+        os.makedirs(tmpdir, exist_ok=True)
+    except Exception:
+        tmpdir = od
+    tmp_path = os.path.join(tmpdir, os.path.basename(align_image))
+
+    try:
+        phdu = fits.PrimaryHDU(header=hdr)
+        shdr = hdr.copy()
+        shdr["EXTNAME"] = "SCI"
+        shdr["EXTVER"] = 1
+        sci = fits.ImageHDU(data=data, header=shdr, name="SCI")
+        fits.HDUList([phdu, sci]).writeto(tmp_path, overwrite=True, output_verify="silentfix")
+        return tmp_path, tmp_path
+    except Exception:
+        return align_image, None
 
 
 def _infer_jhat_telescope(align_image: str) -> str:
@@ -40,6 +89,24 @@ def jhat_gaia_good_phot_path(align_image: str | os.PathLike[str], outdir: str | 
     inputbasename = re.sub(r"_([a-zA-Z0-9]+)\.fits$", "", base)
     od = os.path.abspath(os.path.expanduser(os.fspath(outdir)))
     return os.path.join(od, f"{inputbasename}_jhat.good.phot.txt")
+
+
+def jhat_image_phot_path(
+    align_image: str | os.PathLike[str], outdir: str | os.PathLike[str]
+) -> str:
+    """
+    Path to JHAT's per-image photometry output (``*.phot.txt``) written by run_all().
+
+    This file includes at least ``x,y`` and (after JHAT computes WCS for those
+    detections) ``ra,dec`` columns, which makes it usable as a relative reference
+    catalog for aligning other images.
+    """
+    base = os.path.basename(os.fspath(align_image))
+    inputbasename = re.sub(r"_([a-zA-Z0-9]+)\.fits$", "", base)
+    od = os.path.abspath(os.path.expanduser(os.fspath(outdir)))
+    # JHAT writes per-image photometry as "<outbasename>.phot.txt" where outbasename
+    # is "<outdir>/<inputbasename>" (no "_jhat" infix).
+    return os.path.join(od, f"{inputbasename}.phot.txt")
 
 
 def read_jhat_gaia_residual_stats(align_image: str | os.PathLike[str], outdir: str | os.PathLike[str]):
@@ -193,6 +260,10 @@ def run_jhat(
             "run_jhat requires the jhat package. Install with: pip install jhat"
         ) from e
 
+    from hst123.primitives.astrometry.jhat_wfpc2_patch import ensure_jhat_hst_phot_wfpc2_patch
+
+    ensure_jhat_hst_phot_wfpc2_patch()
+
     wcs_align = st_wcs_align()
     align_image = os.path.abspath(os.path.expanduser(os.fspath(align_image)))
     # JHAT appends outsubdir to outrootdir (default '.'). Passing an absolute path
@@ -200,49 +271,229 @@ def run_jhat(
     outdir = os.path.abspath(os.path.expanduser(os.fspath(outdir)))
     extra = dict(params or {})
 
-    if gaia:
-        # Defaults from JHAT HST "Align to Gaia" example; user/settings may override via *params*.
+    # If this is an HST PRIMARY-only FITS, wrap to include SCI for JHAT.
+    tmp_to_cleanup = None
+    try:
+        tel0 = (extra.get("telescope") or _infer_jhat_telescope(align_image)).strip().lower()
+        if tel0 == "hst":
+            align_image_use, tmp_to_cleanup = _ensure_hst_sci_extension_for_jhat(
+                align_image, outdir=outdir
+            )
+            align_image = align_image_use
+    except Exception:
+        tmp_to_cleanup = None
+
+    # JHAT currently calls pandas.read_table(..., delim_whitespace=...) via pdastro.
+    # pandas 2.2+ removed/changed this kw, raising TypeError. Patch in a small
+    # compatibility shim so JHAT can read whitespace-delimited catalogs.
+    try:
+        import inspect
+        import pandas as pd  # type: ignore
+
+        sig = inspect.signature(pd.read_table)
+        if "delim_whitespace" not in sig.parameters and not hasattr(pd, "_hst123_read_table_compat"):
+            _orig_read_table = pd.read_table
+
+            def _read_table_compat(*args, delim_whitespace=None, **kwargs):
+                kwargs.pop("delim_whitespace", None)
+                if delim_whitespace:
+                    # Match old behavior: any whitespace is a delimiter.
+                    kwargs.setdefault("sep", r"\s+")
+                    return pd.read_csv(*args, **kwargs)
+                return _orig_read_table(*args, **kwargs)
+
+            pd.read_table = _read_table_compat  # type: ignore[assignment]
+            pd._hst123_read_table_compat = True  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    # -------------------------------------------------------------------------
+    # Safety shim: avoid known segfault in tweakwcs.imalign.align_wcs() invoked
+    # by JHAT via tweakreg_hack on some HST inputs (MultiSlitModel from *_flc.fits).
+    # Instead, apply a robust translation-only update to CRVAL based on the
+    # JHAT-matched objects, keeping the original distortion (SIP) terms intact.
+    # -------------------------------------------------------------------------
+    tel_infer = (extra.get("telescope") or _infer_jhat_telescope(align_image)).strip().lower()
+    if tel_infer == "hst":
+
+        def _run_align2refcat_shift_only(
+            self,
+            imfilename,
+            *,
+            outputfits=None,
+            phot=None,
+            ixs=None,
+            refcat_racol=None,
+            refcat_deccol=None,
+            xcol="x",
+            ycol="y",
+            outdir=None,
+            overwrite=False,
+            skip_if_exists=False,
+            savephot=True,
+        ):
+            from astropy.io import fits
+            from astropy.wcs import WCS
+
+            if phot is None:
+                phot = self.phot
+            if ixs is None or len(ixs) < 1:
+                raise RuntimeError("JHAT safe align: no matched objects (ixs empty).")
+
+            if refcat_racol is None:
+                refcat_racol = phot.refcat_racol
+            if refcat_deccol is None:
+                refcat_deccol = phot.refcat_deccol
+
+            if outputfits is None:
+                base = os.path.basename(str(imfilename))
+                outbase = re.sub(r"_([a-zA-Z0-9]+)\.fits$", "", base) + "_jhat.fits"
+                if outdir is None:
+                    outdir = getattr(self, "outdir", None) or os.path.dirname(str(imfilename))
+                outputfits = os.path.join(str(outdir), outbase)
+
+            if os.path.exists(outputfits):
+                if not overwrite:
+                    if skip_if_exists:
+                        return (False, outputfits)
+                    raise RuntimeError(f"Output exists: {outputfits}")
+                try:
+                    os.remove(outputfits)
+                except Exception:
+                    pass
+
+            # Copy input → output, then update WCS in-place.
+            shutil.copyfile(str(imfilename), str(outputfits))
+
+            with fits.open(str(outputfits), mode="update") as hdul:
+                # Prefer SCI,1 WCS when present; else fall back to primary.
+                if "SCI" in hdul:
+                    hdu = hdul["SCI", 1] if ("SCI", 1) in hdul else hdul["SCI"]
+                else:
+                    hdu = hdul[0]
+                hdr = hdu.header
+                w = WCS(hdr, hdul)
+
+                t = phot.t.loc[ixs, [xcol, ycol, refcat_racol, refcat_deccol]]
+                x = np.asarray(t[xcol], dtype=float)
+                y = np.asarray(t[ycol], dtype=float)
+                ra_ref = np.asarray(t[refcat_racol], dtype=float)
+                dec_ref = np.asarray(t[refcat_deccol], dtype=float)
+
+                pred = w.pixel_to_world(x, y)
+                ra_pred = np.asarray(pred.ra.deg, dtype=float)
+                dec_pred = np.asarray(pred.dec.deg, dtype=float)
+
+                # Small-angle offsets in tangent plane (arcsec), then convert to CRVAL deltas.
+                good = (
+                    np.isfinite(x)
+                    & np.isfinite(y)
+                    & np.isfinite(ra_ref)
+                    & np.isfinite(dec_ref)
+                    & np.isfinite(ra_pred)
+                    & np.isfinite(dec_pred)
+                )
+                if not np.any(good):
+                    raise RuntimeError("JHAT safe align: all matched points are non-finite.")
+
+                dra_deg = (ra_ref[good] - ra_pred[good] + 180.0) % 360.0 - 180.0
+                dec_rad = np.deg2rad(dec_ref[good])
+                dra_cos_deg = dra_deg * np.cos(dec_rad)
+                ddec_deg = (dec_ref[good] - dec_pred[good])
+
+                dra_cos_med = float(np.nanmedian(dra_cos_deg))
+                ddec_med = float(np.nanmedian(ddec_deg))
+                if not (np.isfinite(dra_cos_med) and np.isfinite(ddec_med)):
+                    raise RuntimeError("JHAT safe align: computed non-finite median WCS shift.")
+
+                crval1 = float(hdr.get("CRVAL1", w.wcs.crval[0]))
+                crval2 = float(hdr.get("CRVAL2", w.wcs.crval[1]))
+                if not np.isfinite(crval1) or not np.isfinite(crval2):
+                    crval1, crval2 = map(float, w.wcs.crval)
+
+                cos_crval2 = float(np.cos(np.deg2rad(crval2)))
+                if (not np.isfinite(cos_crval2)) or cos_crval2 == 0.0:
+                    cos_crval2 = 1.0
+
+                hdr["CRVAL1"] = (crval1 + dra_cos_med / cos_crval2, "Updated by hst123 (JHAT safe shift-only)")
+                hdr["CRVAL2"] = (crval2 + ddec_med, "Updated by hst123 (JHAT safe shift-only)")
+                hdu.header = hdr
+                hdul.flush()
+
+            return (True, outputfits)
+
+        # Monkeypatch the instance method that triggers the segfault.
+        try:
+            wcs_align.run_align2refcat = types.MethodType(_run_align2refcat_shift_only, wcs_align)
+            log.warning(
+                "JHAT: applying hst123 safety shim (shift-only WCS update) to avoid a known "
+                "segfault in tweakwcs alignment on some HST inputs."
+            )
+        except Exception:
+            pass
+
+    try:
+        if gaia:
+            # Defaults from JHAT HST "Align to Gaia" example; user/settings may override via *params*.
+            tel = extra.pop("telescope", None) or _infer_jhat_telescope(align_image)
+            gaia_kw: dict = {
+                "telescope": tel,
+                "overwrite": True,
+                "d2d_max": 0.5,
+                "showplots": 0,
+                "histocut_order": "dxdy",
+                "sharpness_lim": (0.3, 0.9),
+                "roundness1_lim": (-0.7, 0.7),
+                "SNR_min": 3,
+                "dmag_max": 1.0,
+                "objmag_lim": (14, 24),
+            }
+            gaia_kw.update(extra)
+            gaia_kw.pop("outrootdir", None)
+            gaia_kw.pop("outsubdir", None)
+            # Final matched table (needed for CRDER* on reference drizzle); user may set 0 in jhat_params.
+            savephottable = int(gaia_kw.pop("savephottable", 1))
+            wcs_align.run_all(
+                align_image,
+                outrootdir=outdir,
+                outsubdir=None,
+                refcatname="Gaia",
+                pmflag=True,
+                use_dq=False,
+                verbose=verbose,
+                xshift=xshift,
+                yshift=yshift,
+                savephottable=savephottable,
+                **gaia_kw,
+            )
+            if savephottable:
+                return read_jhat_gaia_residual_stats(align_image, outdir)
+            return None
+        else:
+            if photfilename is None:
+                raise ValueError("Input photometric catalog is required when gaia=False")
         tel = extra.pop("telescope", None) or _infer_jhat_telescope(align_image)
-        gaia_kw: dict = {
+        # JHAT's custom-catalog path sometimes leaves refcat.racol/refcat.deccol set to
+        # the literal string "auto", and then treats it as a real column name,
+        # failing even when columns "ra"/"dec" exist. For hst123's use (JHAT phot.txt
+        # catalogs), the columns are always named "ra"/"dec".
+        rel_kw = {
             "telescope": tel,
             "overwrite": True,
-            "d2d_max": 0.5,
             "showplots": 0,
-            "histocut_order": "dxdy",
-            "sharpness_lim": (0.3, 0.9),
-            "roundness1_lim": (-0.7, 0.7),
-            "SNR_min": 3,
-            "dmag_max": 1.0,
-            "objmag_lim": (14, 24),
+            "refcat_racol": "ra",
+            "refcat_deccol": "dec",
+            # JHAT requires a "mainfilter" magnitude column name for custom catalogs.
+            # Our JHAT phot.txt tables always include "mag" and "dmag".
+            "refcat_magcol": "mag",
+            "refcat_magerrcol": "dmag",
+            **extra,
         }
-        gaia_kw.update(extra)
-        gaia_kw.pop("outrootdir", None)
-        gaia_kw.pop("outsubdir", None)
-        # Final matched table (needed for CRDER* on reference drizzle); user may set 0 in jhat_params.
-        savephottable = int(gaia_kw.pop("savephottable", 1))
-        wcs_align.run_all(
-            align_image,
-            outrootdir=outdir,
-            outsubdir=None,
-            refcatname="Gaia",
-            pmflag=True,
-            use_dq=False,
-            verbose=verbose,
-            xshift=xshift,
-            yshift=yshift,
-            savephottable=savephottable,
-            **gaia_kw,
-        )
-        if savephottable:
-            return read_jhat_gaia_residual_stats(align_image, outdir)
-        return None
-    else:
-        if photfilename is None:
-            raise ValueError("Input photometric catalog is required when gaia=False")
-        tel = extra.pop("telescope", None) or _infer_jhat_telescope(align_image)
-        rel_kw = {"telescope": tel, "overwrite": True, "showplots": 0, **extra}
         rel_kw.pop("outrootdir", None)
         rel_kw.pop("outsubdir", None)
+        # Save the matched photometry table by default so hst123 can diagnose/QA
+        # relative alignment quality (users may override via jhat_params).
+        savephottable = int(rel_kw.pop("savephottable", 1))
         wcs_align.run_all(
             align_image,
             outrootdir=outdir,
@@ -252,7 +503,14 @@ def run_jhat(
             verbose=verbose,
             xshift=xshift,
             yshift=yshift,
+            savephottable=savephottable,
             Nbright=Nbright,
             **rel_kw,
         )
         return None
+    finally:
+        if tmp_to_cleanup:
+            try:
+                os.remove(tmp_to_cleanup)
+            except Exception:
+                pass
