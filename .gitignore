@@ -13,3 +13,8 @@ build/
 docs/build/
 # Setuptools-scm writes this at build time; do not commit
 hst123/_version.py
+
+# JHAT STScI encircled-energy tables (belong under work-dir or ~/.cache/hst123/jhat_ee)
+wfc3*aper*.csv
+ir_ee_corrections.csv
+bohlin2016_wfc_ee-1.txt

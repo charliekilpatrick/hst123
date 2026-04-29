@@ -302,6 +302,10 @@ pipeline_images = ["*flc.fits", "*flt.fits", "*c0m.fits", "*c1m.fits"]
 # DOLPHOT sky sidecars live next to ``*.drc.fits`` and are not input FITS names.
 cleanup_extra_globs = ("*drc.noise.fits",)
 
+# JHAT: default cone radius for Gaia pre-download (written under work_dir).
+# Large relative to a single HST exposure so one file covers the field.
+jhat_gaia_prefetch_radius = 22 * u.arcmin
+
 names = [
     "image", "exptime", "datetime", "filter", "instrument",
     "detector", "zeropoint", "chip", "imagenumber",

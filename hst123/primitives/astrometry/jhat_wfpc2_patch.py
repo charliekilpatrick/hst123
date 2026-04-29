@@ -8,14 +8,56 @@ filenames must match flt/flc/drz/drc only (``*_c0m.fits`` raises "Unknown image
 type"). WFPC2 calibration uses ``FILTNAM1``/``FILTNAM2`` and ``*_c0m.fits``.
 
 This module applies a one-time class-method replacement after ``import jhat``.
+
+Encircled-energy calibration tables (e.g. ``wfc3uvis2_aper_007_syn.csv``) are
+downloaded under the directory set by :func:`push_jhat_ee_calibration_dir`
+(``run_jhat`` passes the pipeline workspace ``outdir``). When nothing is pushed,
+files go to ``~/.cache/hst123/jhat_ee`` so the process cwd / repository root is
+not used. Tests should push a ``tmp_path`` (see ``tests/conftest.py``).
 """
 from __future__ import annotations
 
 import logging
+import os
 import re
+import threading
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+_tls = threading.local()
+
+
+def _user_cache_jhat_ee_dir() -> str:
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    d = os.path.join(base, "hst123", "jhat_ee")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def get_jhat_ee_calibration_dir() -> str:
+    """Directory for STScI JHAT encircled-energy CSV downloads (absolute path)."""
+    stack = getattr(_tls, "ee_dir_stack", None)
+    if stack:
+        return stack[-1]
+    return _user_cache_jhat_ee_dir()
+
+
+def push_jhat_ee_calibration_dir(path: str) -> None:
+    """Push *path* so downloads use it until :func:`pop_jhat_ee_calibration_dir` (nested-safe)."""
+    p = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    if not hasattr(_tls, "ee_dir_stack"):
+        _tls.ee_dir_stack = []
+    _tls.ee_dir_stack.append(p)
+
+
+def pop_jhat_ee_calibration_dir() -> None:
+    """Pop the innermost EE download directory pushed for this thread."""
+    stack = getattr(_tls, "ee_dir_stack", None)
+    if stack:
+        stack.pop()
+        if not stack:
+            delattr(_tls, "ee_dir_stack")
 
 
 def _ensure_jhat_scihdr_mjd_avg(primaryhdr: Any, scihdr: Any) -> None:
@@ -199,39 +241,47 @@ def ensure_jhat_hst_phot_wfpc2_patch() -> None:
         try:
             import numpy as np
             import scipy
-            import os
             import urllib
             from astropy.table import Table
 
+            ee_base = get_jhat_ee_calibration_dir()
+            try:
+                os.makedirs(ee_base, exist_ok=True)
+            except Exception:
+                pass
+
             # Re-implement upstream logic, but sort waves/apps before spline.
             if str(inst).lower() == "ir":
-                if not os.path.exists("ir_ee_corrections.csv"):
+                ir_path = os.path.join(ee_base, "ir_ee_corrections.csv")
+                if not os.path.exists(ir_path):
                     urllib.request.urlretrieve(
                         "https://www.stsci.edu/files/live/sites/www/files/home/hst/"
                         "instrumentation/wfc3/data-analysis/photometric-calibration/"
                         "ir-encircled-energy/_documents/ir_ee_corrections.csv",
-                        "ir_ee_corrections.csv",
+                        ir_path,
                     )
-                ee = Table.read("ir_ee_corrections.csv", format="ascii")
+                ee = Table.read(ir_path, format="ascii")
                 ee.rename_column("PIVOT", "WAVELENGTH")
             else:
-                if not os.path.exists("wfc3uvis2_aper_007_syn.csv"):
+                uvis_path = os.path.join(ee_base, "wfc3uvis2_aper_007_syn.csv")
+                if not os.path.exists(uvis_path):
                     urllib.request.urlretrieve(
                         "https://www.stsci.edu/files/live/sites/www/files/home/hst/"
                         "instrumentation/wfc3/data-analysis/photometric-calibration/"
                         "uvis-encircled-energy/_documents/wfc3uvis2_aper_007_syn.csv",
-                        "wfc3uvis2_aper_007_syn.csv",
+                        uvis_path,
                     )
-                ee = Table.read("wfc3uvis2_aper_007_syn.csv", format="ascii")
+                ee = Table.read(uvis_path, format="ascii")
                 if str(filt).upper() not in [str(x).upper() for x in ee["FILTER"]]:
-                    if not os.path.exists("bohlin2016_wfc_ee-1.txt"):
+                    bohlin_path = os.path.join(ee_base, "bohlin2016_wfc_ee-1.txt")
+                    if not os.path.exists(bohlin_path):
                         urllib.request.urlretrieve(
                             "https://www.stsci.edu/files/live/sites/www/files/home/hst/"
                             "instrumentation/acs/data-analysis/aperture-corrections/_documents/"
                             "bohlin2016_wfc_ee-1.txt",
-                            "bohlin2016_wfc_ee-1.txt",
+                            bohlin_path,
                         )
-                    ee = Table.read("bohlin2016_wfc_ee-1.txt", format="ascii", data_start=1)
+                    ee = Table.read(bohlin_path, format="ascii", data_start=1)
                     ee.rename_column("col1", "FILTER")
                     ee["WAVELENGTH"] = [
                         float(x[1:-1]) * 10 if len(x) == 5 else float(x[1:-2]) * 10

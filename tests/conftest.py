@@ -11,6 +11,21 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+@pytest.fixture(autouse=True)
+def _hst123_jhat_ee_download_dir(tmp_path):
+    """
+    JHAT encircled-energy tables must not be written to the repository cwd.
+
+    Each test gets a fresh tmp dir; :func:`run_jhat` pushes ``outdir`` on top
+    when it runs so pipeline-style tests still download into their workspace.
+    """
+    from hst123.primitives.astrometry import jhat_wfpc2_patch as jwp
+
+    jwp.push_jhat_ee_calibration_dir(str(tmp_path))
+    yield
+    jwp.pop_jhat_ee_calibration_dir()
+
+
 def _dolphot_scripts_available():
     """Return True if all DOLPHOT executables are on PATH."""
     from hst123.primitives.run_dolphot import DOLPHOT_REQUIRED_SCRIPTS

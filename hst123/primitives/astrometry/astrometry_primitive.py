@@ -995,7 +995,7 @@ class AstrometryPrimitive(BasePrimitive):
                     )
                     with tee_stdout_fd_to_logger(
                         log,
-                        prefix="[jhat stdout] ",
+                        prefix="[jhat] ",
                         level=logging.INFO,
                     ):
                         stats = run_jhat(
@@ -1067,7 +1067,7 @@ class AstrometryPrimitive(BasePrimitive):
                                 continue
                     with tee_stdout_fd_to_logger(
                         log,
-                        prefix="[jhat stdout] ",
+                        prefix="[jhat] ",
                         level=logging.INFO,
                     ):
                         run_jhat(
@@ -1102,7 +1102,7 @@ class AstrometryPrimitive(BasePrimitive):
                 log.info("JHAT internal: anchor=%s (deepest exposure)", os.path.basename(anchor))
                 with tee_stdout_fd_to_logger(
                     log,
-                    prefix="[jhat stdout] ",
+                    prefix="[jhat] ",
                     level=logging.INFO,
                 ):
                     # Run once on anchor to create its phot catalog (match to Gaia for stability,
@@ -1130,7 +1130,7 @@ class AstrometryPrimitive(BasePrimitive):
                 for im in imgs:
                     if im == anchor:
                         continue
-                    with tee_stdout_fd_to_logger(log, prefix="[jhat stdout] ", level=logging.INFO):
+                    with tee_stdout_fd_to_logger(log, prefix="[jhat] ", level=logging.INFO):
                         run_jhat(im, outdir=outdir, params=params, gaia=False, photfilename=refcat, verbose=False)
                     with fits.open(im, mode="update") as hdu:
                         hdu[0].header["TWEAKSUC"] = 1
