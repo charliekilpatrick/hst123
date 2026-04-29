@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import types
+import time
 
 import numpy as np
 from astropy import units as u
@@ -228,6 +229,23 @@ def run_jhat(
     params : dict
         Parameters for JHAT (e.g. strict_gaia_params, strict_jwst_params).
         Passed as keyword arguments to ``st_wcs_align().run_all()``.
+
+        Gaia-related keys (consumed by hst123, not forwarded to JHAT):
+
+        ``gaia_refcat_path`` (str), optional
+            Use this local refcat (``ra``, ``dec``, ``mag``, ``dmag``) directly; the
+            automatic prefetch step is skipped.
+
+        ``skip_gaia_prefetch`` (bool), optional
+            If True, do not pre-download Gaia; JHAT uses its built-in ``refcatname="Gaia"``
+            TAP path (legacy behavior).
+
+        ``gaia_prefetch_radius``
+            Cone radius as an ``astropy.units.Quantity`` or a float interpreted as **degrees**.
+
+        ``gaia_prefetch_center`` (:class:`~astropy.coordinates.SkyCoord`), optional
+            Override field center for the prefetch cone (ICRS). Default: image center
+            from the input FITS WCS.
     gaia : bool, optional
         If True, align to Gaia. Default is False.
     photfilename : str, optional
@@ -260,7 +278,11 @@ def run_jhat(
             "run_jhat requires the jhat package. Install with: pip install jhat"
         ) from e
 
-    from hst123.primitives.astrometry.jhat_wfpc2_patch import ensure_jhat_hst_phot_wfpc2_patch
+    from hst123.primitives.astrometry.jhat_wfpc2_patch import (
+        ensure_jhat_hst_phot_wfpc2_patch,
+        pop_jhat_ee_calibration_dir,
+        push_jhat_ee_calibration_dir,
+    )
 
     ensure_jhat_hst_phot_wfpc2_patch()
 
@@ -432,10 +454,66 @@ def run_jhat(
         except Exception:
             pass
 
+    push_jhat_ee_calibration_dir(outdir)
     try:
         if gaia:
             # Defaults from JHAT HST "Align to Gaia" example; user/settings may override via *params*.
             tel = extra.pop("telescope", None) or _infer_jhat_telescope(align_image)
+            gaia_refcat_path = extra.pop("gaia_refcat_path", None)
+            skip_gaia_prefetch = bool(extra.pop("skip_gaia_prefetch", False))
+            gaia_prefetch_radius_raw = extra.pop("gaia_prefetch_radius", None)
+            gaia_prefetch_center = extra.pop("gaia_prefetch_center", None)
+
+            if gaia_refcat_path is None and not skip_gaia_prefetch:
+                from hst123 import settings as _hst123_settings
+                from hst123.utils.gaia_prefetch import (
+                    gaia_prefetch_cache_path,
+                    icrs_field_center_from_fits,
+                    prefetch_gaia_catalog,
+                )
+
+                radius_q = getattr(
+                    _hst123_settings, "jhat_gaia_prefetch_radius", 22 * u.arcmin
+                )
+                if gaia_prefetch_radius_raw is not None:
+                    if hasattr(gaia_prefetch_radius_raw, "to"):
+                        radius_q = u.Quantity(gaia_prefetch_radius_raw).to(u.deg)
+                    else:
+                        radius_q = float(gaia_prefetch_radius_raw) * u.deg
+
+                if gaia_prefetch_center is not None:
+                    if not isinstance(gaia_prefetch_center, SkyCoord):
+                        raise TypeError("jhat_params['gaia_prefetch_center'] must be a SkyCoord")
+                    center = gaia_prefetch_center.transform_to("icrs")
+                else:
+                    center = icrs_field_center_from_fits(align_image)
+
+                cache_path = gaia_prefetch_cache_path(outdir, center, radius_q)
+                min_bytes = 80
+                if os.path.isfile(cache_path) and os.path.getsize(cache_path) >= min_bytes:
+                    log.info(
+                        "JHAT: using existing Gaia prefetch catalog %s",
+                        os.path.basename(cache_path),
+                    )
+                    gaia_refcat_path = cache_path
+                else:
+                    log.info(
+                        "JHAT: pre-downloading Gaia DR3 cone (r=%s) → %s",
+                        radius_q,
+                        os.path.basename(cache_path),
+                    )
+                    res = prefetch_gaia_catalog(
+                        center=center,
+                        radius=radius_q,
+                        out_path=cache_path,
+                    )
+                    log.info(
+                        "JHAT: Gaia prefetch complete (%s, n_row=%d).",
+                        res.source,
+                        res.n_rows,
+                    )
+                    gaia_refcat_path = res.path
+
             gaia_kw: dict = {
                 "telescope": tel,
                 "overwrite": True,
@@ -453,19 +531,130 @@ def run_jhat(
             gaia_kw.pop("outsubdir", None)
             # Final matched table (needed for CRDER* on reference drizzle); user may set 0 in jhat_params.
             savephottable = int(gaia_kw.pop("savephottable", 1))
-            wcs_align.run_all(
-                align_image,
-                outrootdir=outdir,
-                outsubdir=None,
-                refcatname="Gaia",
-                pmflag=True,
-                use_dq=False,
-                verbose=verbose,
-                xshift=xshift,
-                yshift=yshift,
-                savephottable=savephottable,
-                **gaia_kw,
-            )
+            # If using a custom (prefetched) catalog file, JHAT needs explicit column names.
+            if gaia_refcat_path:
+                gaia_kw.setdefault("refcat_racol", "ra")
+                gaia_kw.setdefault("refcat_deccol", "dec")
+                gaia_kw.setdefault("refcat_magcol", "mag")
+                gaia_kw.setdefault("refcat_magerrcol", "dmag")
+            def _run_all_with_gaia() -> None:
+                wcs_align.run_all(
+                    align_image,
+                    outrootdir=outdir,
+                    outsubdir=None,
+                    refcatname=gaia_refcat_path or "Gaia",
+                    pmflag=False if gaia_refcat_path else True,
+                    use_dq=False,
+                    verbose=verbose,
+                    xshift=xshift,
+                    yshift=yshift,
+                    savephottable=savephottable,
+                    **gaia_kw,
+                )
+
+            # If we were given a pre-fetched catalog file, use it directly without
+            # exercising TAP retries/fallback logic here.
+            if gaia_refcat_path:
+                _run_all_with_gaia()
+            else:
+                # Gaia TAP can intermittently return HTTP 500 for async-job result retrieval.
+                # Retry a few times; if it still fails, fall back to a cached local cone-search
+                # catalog so alignment can proceed.
+                last_exc: Exception | None = None
+                for attempt in range(1, 4):
+                    try:
+                        _run_all_with_gaia()
+                        last_exc = None
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        msg = str(exc)
+                        # Only retry for known network/service failures.
+                        retryable = (
+                            "Error 500" in msg
+                            or "Cannot find result 'result'" in msg
+                            or "RemoteServiceError" in msg
+                            or "requests.exceptions.HTTPError" in msg
+                        )
+                        if not retryable or attempt >= 3:
+                            break
+                        log.warning("JHAT Gaia query failed (attempt %d/3): %s", attempt, exc)
+                        time.sleep(2.0 * attempt)
+
+                if last_exc is not None:
+                    # Fallback: use a cached local catalog (from Vizier) instead of TAP "Gaia".
+                    try:
+                        from astroquery.vizier import Vizier  # type: ignore
+
+                        from hst123 import settings as _hst123_settings
+                        from hst123.utils.gaia_prefetch import icrs_field_center_from_fits
+
+                        _cen = icrs_field_center_from_fits(align_image)
+                        ra0 = float(_cen.ra.deg)
+                        dec0 = float(_cen.dec.deg)
+                        radius_deg = float(
+                            getattr(
+                                _hst123_settings, "jhat_gaia_prefetch_radius", 22 * u.arcmin
+                            )
+                            .to(u.deg)
+                            .value
+                        )
+                        cache_path = os.path.join(
+                            outdir,
+                            f"gaia_vizier_cache_{ra0:.5f}_{dec0:.5f}_{radius_deg:.5f}.txt",
+                        )
+                        if not os.path.isfile(cache_path):
+                            v = Vizier(columns=["RA_ICRS", "DE_ICRS", "Gmag", "e_Gmag"])
+                            v.ROW_LIMIT = -1
+                            tabs = v.query_region(
+                                SkyCoord(ra0, dec0, unit="deg", frame="icrs"),
+                                radius=radius_deg * u.deg,
+                                catalog="I/355/gaiadr3",
+                            )
+                            if not tabs:
+                                raise RuntimeError("Vizier Gaia cone search returned no tables.")
+                            t = tabs[0]
+                            # Write a minimal JHAT-compatible refcat: ra dec mag dmag
+                            out = Table()
+                            out["ra"] = np.asarray(t["RA_ICRS"], dtype=float)
+                            out["dec"] = np.asarray(t["DE_ICRS"], dtype=float)
+                            out["mag"] = np.asarray(t["Gmag"], dtype=float)
+                            if "e_Gmag" in t.colnames:
+                                out["dmag"] = np.asarray(t["e_Gmag"], dtype=float)
+                            else:
+                                out["dmag"] = np.full(len(out), 0.02, dtype=float)
+                            out.write(cache_path, format="ascii.basic", overwrite=True)
+
+                        log.warning(
+                            "JHAT Gaia TAP failed; falling back to cached Vizier Gaia DR3 catalog: %s",
+                            os.path.basename(cache_path),
+                        )
+                        # Re-run as a custom-catalog alignment (no proper motion correction).
+                        rel_kw = dict(gaia_kw)
+                        rel_kw.update(
+                            {
+                                "refcat_racol": "ra",
+                                "refcat_deccol": "dec",
+                                "refcat_magcol": "mag",
+                                "refcat_magerrcol": "dmag",
+                            }
+                        )
+                        wcs_align.run_all(
+                            align_image,
+                            outrootdir=outdir,
+                            outsubdir=None,
+                            refcatname=cache_path,
+                            pmflag=False,
+                            use_dq=False,
+                            verbose=verbose,
+                            xshift=xshift,
+                            yshift=yshift,
+                            savephottable=savephottable,
+                            **rel_kw,
+                        )
+                    except Exception:
+                        # If fallback also fails, raise the original Gaia exception.
+                        raise last_exc
             if savephottable:
                 return read_jhat_gaia_residual_stats(align_image, outdir)
             return None
@@ -509,6 +698,7 @@ def run_jhat(
         )
         return None
     finally:
+        pop_jhat_ee_calibration_dir()
         if tmp_to_cleanup:
             try:
                 os.remove(tmp_to_cleanup)
