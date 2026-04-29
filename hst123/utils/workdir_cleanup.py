@@ -7,9 +7,9 @@ successful step. Use ``--keep-drizzle-artifacts`` to skip this.
 
 Intermediate names such as ``single_sci.fits``, ``single_wht.fits``,
 ``staticMask.fits``, and ``drz_med.fits`` are produced by DrizzlePac during
-``run_astrodrizzle``. WFPC2 pipeline scratch files matching
-``*hst123drz*_c0m.fits`` / ``*hst123drz*_c1m.fits`` come from
-``wfpc2_astrodrizzle_scratch_paths`` in ``hst123.utils.astrodrizzle_helpers``.
+``run_astrodrizzle``. WFPC2 scratch ``*hst123drz*_c0m.fits`` / ``*_c1m.fits`` (from
+``wfpc2_astrodrizzle_scratch_paths``) are removed either with other interstitials
+or in one deferred pass after ``drizzle_all`` (see ``cleanup_hst123_wfpc2_astrodrizzle_scratch``).
 """
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ _INTERSTITIAL_EXACT = frozenset(
 # Glob patterns relative to work_dir (headerlets; drizzlepac temp FITS).
 # DrizzlePac often writes root-prefixed names (e.g. ``wfpc2..._1_staticMask.fits``),
 # not only the legacy bare basenames in ``_INTERSTITIAL_EXACT``.
-_INTERSTITIAL_GLOBS = (
+_INTERSTITIAL_GLOBS_CORE = (
     "*_hlet.fits",
     "*drztmp*.fits",
     "*_skymatch_mask_*.fits",
@@ -121,11 +121,17 @@ _INTERSTITIAL_GLOBS = (
     "*single_wht.fits",
     "*blt.fits",
     "*crclean.fits",
-    # WFPC2 scratch copies beside inputs: ``wfpc2_astrodrizzle_scratch_paths``
-    # in ``hst123.utils.astrodrizzle_helpers``.
+)
+
+# WFPC2 scratch copies (``wfpc2_astrodrizzle_scratch_paths``). Removed either with
+# other interstitials (e.g. after ``pick_reference`` drizzle) or in a single deferred
+# pass after :meth:`hst123.hst123.drizzle_all` finishes all groups.
+_HST123_WFPC2_ASTRODRIZZLE_SCRATCH_GLOBS = (
     "*hst123drz*_c0m.fits",
     "*hst123drz*_c1m.fits",
 )
+
+_INTERSTITIAL_GLOBS = _INTERSTITIAL_GLOBS_CORE + _HST123_WFPC2_ASTRODRIZZLE_SCRATCH_GLOBS
 
 
 def _logs_dir(work_dir: str) -> str:
@@ -210,6 +216,7 @@ def _remove_interstitial_drizzle_scratch_files(
     directory: str,
     *,
     log: logging.Logger,
+    remove_wfpc2_astrodrizzle_scratch: bool = True,
 ) -> list[str]:
     """
     Delete DrizzlePac / pipeline scratch FITS and sidecar text under *directory*.
@@ -228,7 +235,10 @@ def _remove_interstitial_drizzle_scratch_files(
             except OSError as e:
                 log.debug("Could not remove %s: %s", path, e)
 
-    for pattern in _INTERSTITIAL_GLOBS:
+    patterns: tuple[str, ...] = _INTERSTITIAL_GLOBS_CORE
+    if remove_wfpc2_astrodrizzle_scratch:
+        patterns = _INTERSTITIAL_GLOBS
+    for pattern in patterns:
         for path in glob.glob(os.path.join(directory, pattern)):
             if not os.path.isfile(path):
                 continue
@@ -240,12 +250,87 @@ def _remove_interstitial_drizzle_scratch_files(
     return removed
 
 
+def astrodrizzle_cleanup_scan_directories(
+    work_dir: str,
+    base_work_dir: str | os.PathLike[str] | None,
+) -> list[str]:
+    """
+    Directories to scan for AstroDrizzle interstitial files (workspace, drizzle/, base).
+    """
+    wd = os.path.abspath(os.path.expanduser(os.fspath(work_dir)))
+    scan_dirs: list[str] = [wd]
+    d_sub = os.path.join(wd, "drizzle")
+    if os.path.isdir(d_sub):
+        scan_dirs.append(d_sub)
+
+    if base_work_dir:
+        bw = os.path.abspath(os.path.expanduser(os.fspath(base_work_dir)))
+        if bw != wd:
+            scan_dirs.append(bw)
+            bd = os.path.join(bw, "drizzle")
+            if os.path.isdir(bd):
+                scan_dirs.append(bd)
+
+    seen_dir: set[str] = set()
+    uniq_dirs: list[str] = []
+    for d in scan_dirs:
+        ad = os.path.abspath(d)
+        if ad not in seen_dir and os.path.isdir(ad):
+            seen_dir.add(ad)
+            uniq_dirs.append(ad)
+    return uniq_dirs
+
+
+def cleanup_hst123_wfpc2_astrodrizzle_scratch(
+    work_dir: str,
+    *,
+    log: logging.Logger,
+    keep_artifacts: bool = False,
+    base_work_dir: str | os.PathLike[str] | None = None,
+) -> None:
+    """
+    Remove WFPC2 ``*_hst123drz*_c0m.fits`` / ``*_c1m.fits`` scratch copies only.
+
+    Call once after :meth:`hst123.hst123.drizzle_all` has finished every ``drizname``
+    group so paths in ``obstable`` are never invalidated mid-loop. Other callers
+    (e.g. reference drizzle) remove these via :func:`cleanup_after_astrodrizzle`
+    immediately.
+    """
+    if keep_artifacts or not work_dir:
+        return
+    wd = os.path.abspath(os.path.expanduser(os.fspath(work_dir)))
+    if not os.path.isdir(wd):
+        return
+
+    uniq_dirs = astrodrizzle_cleanup_scan_directories(wd, base_work_dir)
+    removed: list[str] = []
+    for d in uniq_dirs:
+        for pattern in _HST123_WFPC2_ASTRODRIZZLE_SCRATCH_GLOBS:
+            for path in glob.glob(os.path.join(d, pattern)):
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    os.remove(path)
+                    removed.append(os.path.basename(path))
+                except OSError as exc:
+                    log.debug("Could not remove %s: %s", path, exc)
+
+    if removed:
+        log.info(
+            "Removed %d WFPC2 AstroDrizzle scratch file(s): %s",
+            len(removed),
+            ", ".join(sorted(set(removed))[:20])
+            + (" …" if len(set(removed)) > 20 else ""),
+        )
+
+
 def cleanup_after_astrodrizzle(
     work_dir: str,
     *,
     log: logging.Logger,
     keep_artifacts: bool = False,
     base_work_dir: str | os.PathLike[str] | None = None,
+    remove_wfpc2_astrodrizzle_scratch: bool = True,
 ) -> None:
     """
     After a successful AstroDrizzle run: remove well-known scratch products.
@@ -262,6 +347,11 @@ def cleanup_after_astrodrizzle(
     AstroDrizzle scratch/output tree); DrizzlePac may also drop ``staticMask.fits``
     and similar files in the **base** work directory, so pass *base_work_dir* to
     scrub both trees.
+
+    remove_wfpc2_astrodrizzle_scratch
+        If False, skip ``*hst123drz*_c0m.fits`` / ``*hst123drz*_c1m.fits`` so
+        :meth:`hst123.hst123.drizzle_all` can defer that cleanup until all groups
+        complete (:func:`cleanup_hst123_wfpc2_astrodrizzle_scratch`).
     """
     if keep_artifacts or not work_dir:
         return
@@ -271,31 +361,17 @@ def cleanup_after_astrodrizzle(
 
     _archive_file(wd, "astrodrizzle.log", log)
 
-    scan_dirs: list[str] = [wd]
-    d_sub = os.path.join(wd, "drizzle")
-    if os.path.isdir(d_sub):
-        scan_dirs.append(d_sub)
-
-    if base_work_dir:
-        bw = os.path.abspath(os.path.expanduser(os.fspath(base_work_dir)))
-        if bw != wd:
-            scan_dirs.append(bw)
-            bd = os.path.join(bw, "drizzle")
-            if os.path.isdir(bd):
-                scan_dirs.append(bd)
-
-    # De-duplicate (workspace/drizzle should not appear when drizzle/ is only under base)
-    seen_dir: set[str] = set()
-    uniq_dirs: list[str] = []
-    for d in scan_dirs:
-        ad = os.path.abspath(d)
-        if ad not in seen_dir and os.path.isdir(ad):
-            seen_dir.add(ad)
-            uniq_dirs.append(ad)
+    uniq_dirs = astrodrizzle_cleanup_scan_directories(wd, base_work_dir)
 
     removed: list[str] = []
     for d in uniq_dirs:
-        removed.extend(_remove_interstitial_drizzle_scratch_files(d, log=log))
+        removed.extend(
+            _remove_interstitial_drizzle_scratch_files(
+                d,
+                log=log,
+                remove_wfpc2_astrodrizzle_scratch=remove_wfpc2_astrodrizzle_scratch,
+            )
+        )
 
     if removed:
         log.info(

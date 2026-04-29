@@ -8,6 +8,8 @@ from astropy.io import fits
 from hst123.utils.astrodrizzle_helpers import (
     astrodrizzle_exc_is_restore_wcs_distortion_failure,
     canonical_drizzle_input_stem,
+    canonicalize_wfpc2_astrodrizzle_input_path,
+    is_hst123_wfpc2_astrodrizzle_scratch,
     combine_type_and_nhigh,
     drizzle_canonical_weight_mask_paths,
     drizzle_reference_inputs_match,
@@ -33,6 +35,23 @@ def test_canonical_drizzle_input_stem_wfpc2_scratch():
     s = "/w/u2460107t_hst123drz8297683a44664ac2_c0m.fits"
     assert canonical_drizzle_input_stem(s) == "u2460107t_c0m"
     assert canonical_drizzle_input_stem("u2460107t_c0m.fits") == "u2460107t_c0m"
+
+
+def test_is_hst123_wfpc2_astrodrizzle_scratch():
+    assert is_hst123_wfpc2_astrodrizzle_scratch("/x/u1_hst123drzab_c0m.fits")
+    assert is_hst123_wfpc2_astrodrizzle_scratch("/x/u1_hst123drzab_c1m.fits")
+    assert not is_hst123_wfpc2_astrodrizzle_scratch("/x/u1_c0m.fits")
+
+
+def test_canonicalize_wfpc2_astrodrizzle_input_path(tmp_path):
+    d = tmp_path / "ws"
+    d.mkdir()
+    c0 = d / "u2460107t_c0m.fits"
+    c0.write_text("x", encoding="ascii")
+    scratch = d / "u2460107t_hst123drz111_c0m.fits"
+    scratch.write_text("y", encoding="ascii")
+    assert canonicalize_wfpc2_astrodrizzle_input_path(str(scratch)) == str(c0)
+    assert canonicalize_wfpc2_astrodrizzle_input_path(str(c0)) == str(c0)
 
 
 def test_drizzle_reference_inputs_match_scratch_vs_workspace():

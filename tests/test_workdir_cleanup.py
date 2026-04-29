@@ -5,6 +5,7 @@ import os
 from hst123.utils.workdir_cleanup import (
     cleanup_after_astrodrizzle,
     cleanup_after_tweakreg,
+    cleanup_hst123_wfpc2_astrodrizzle_scratch,
     remove_files_matching_globs,
     remove_superseded_instrument_mask_reference_drizzle,
 )
@@ -57,6 +58,24 @@ def test_cleanup_after_astrodrizzle_removes_hst123drz_scratch_glob(tmp_path):
 
     assert not (wd / "u2465107t_hst123drz12345_c0m.fits").exists()
     assert not (wd / "u2465107t_hst123drz12345_c1m.fits").exists()
+
+
+def test_cleanup_defer_wfpc2_scratch_then_finalize(tmp_path):
+    """drizzle_all defers WFPC2 scratch removal; finalize helper deletes it."""
+    wd = tmp_path / "w"
+    wd.mkdir()
+    (wd / "u2465107t_hst123drz99999_c0m.fits").write_bytes(b"0")
+    (wd / "u2465107t_hst123drz99999_c1m.fits").write_bytes(b"0")
+    log = logging.getLogger("test_defer_wfpc2")
+
+    cleanup_after_astrodrizzle(
+        str(wd), log=log, keep_artifacts=False, remove_wfpc2_astrodrizzle_scratch=False
+    )
+    assert (wd / "u2465107t_hst123drz99999_c0m.fits").exists()
+
+    cleanup_hst123_wfpc2_astrodrizzle_scratch(str(wd), log=log, keep_artifacts=False)
+    assert not (wd / "u2465107t_hst123drz99999_c0m.fits").exists()
+    assert not (wd / "u2465107t_hst123drz99999_c1m.fits").exists()
 
 
 def test_cleanup_after_astrodrizzle_base_work_dir_removes_interstitials_in_base(tmp_path):

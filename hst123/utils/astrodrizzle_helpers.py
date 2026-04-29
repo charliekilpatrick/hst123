@@ -133,6 +133,41 @@ def canonical_drizzle_input_stem(token: str) -> str:
     return base
 
 
+def is_hst123_wfpc2_astrodrizzle_scratch(path: str | os.PathLike[str]) -> bool:
+    """
+    True for WFPC2 AstroDrizzle scratch copies (``*_hst123drz*_c0m.fits`` / ``*_c1m.fits``).
+
+    These must not appear in ``obstable['image']`` or :meth:`FitsPrimitive.get_input_images`;
+    :meth:`hst123.hst123.run_astrodrizzle` creates them privately as ``tmp_input``.
+    """
+    b = os.path.basename(os.fspath(path)).lower()
+    if "_hst123drz" not in b or not b.endswith(".fits"):
+        return False
+    return b.endswith("_c0m.fits") or b.endswith("_c1m.fits")
+
+
+def canonicalize_wfpc2_astrodrizzle_input_path(path: str | os.PathLike[str]) -> str:
+    """
+    Map a WFPC2 scratch path to the stable calibrated exposure beside it when it exists.
+
+    If *path* is not scratch, or the canonical ``{{root}}_c0m.fits`` / ``_c1m.fits`` is
+    missing, returns *path* unchanged.
+    """
+    p = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    if not is_hst123_wfpc2_astrodrizzle_scratch(p):
+        return p
+    base = os.path.basename(p)
+    low = base.lower()
+    head, _rest = base.split("_hst123drz", 1)
+    if low.endswith("_c0m.fits"):
+        cand = os.path.join(os.path.dirname(p), f"{head}_c0m.fits")
+    elif low.endswith("_c1m.fits"):
+        cand = os.path.join(os.path.dirname(p), f"{head}_c1m.fits")
+    else:
+        return p
+    return cand if os.path.isfile(cand) else p
+
+
 def drizzle_reference_inputs_match(
     reference_paths: Sequence[str | os.PathLike[str]],
     hdr,

@@ -79,6 +79,7 @@ from hst123.utils.astrodrizzle_paths import (
 )
 from hst123.utils.alignment_validation import write_gaia_alignment_crderr_to_reference_driz
 from hst123.utils.astrodrizzle_helpers import (
+    is_hst123_wfpc2_astrodrizzle_scratch,
     astrodrizzle_chdir_bundle_for_drizzlepac,
     astrodrizzle_exc_is_restore_wcs_distortion_failure,
     build_astrodrizzle_keyword_args,
@@ -86,6 +87,7 @@ from hst123.utils.astrodrizzle_helpers import (
     combine_type_and_nhigh,
     wfpc2_astrodrizzle_scratch_paths,
     canonical_drizzle_input_stem,
+    canonicalize_wfpc2_astrodrizzle_input_path,
     drizzle_product_catalog_header,
     drizzle_reference_inputs_match,
     drizzle_sidecar_paths,
@@ -98,6 +100,7 @@ from hst123.utils.astrodrizzle_helpers import (
 )
 from hst123.utils.workdir_cleanup import (
     cleanup_after_astrodrizzle,
+    cleanup_hst123_wfpc2_astrodrizzle_scratch,
     remove_files_matching_globs,
     remove_superseded_instrument_mask_reference_drizzle,
 )
@@ -492,6 +495,9 @@ class hst123(object):
         img = copy.copy(good)
 
     img = [normalize_fits_path(p) for p in img]
+    img = list(
+        dict.fromkeys(canonicalize_wfpc2_astrodrizzle_input_path(p) for p in img)
+    )
     for p in img:
         if not os.path.isfile(p):
             log.warning("Dropping missing or unreadable FITS from observation table: %s", p)
@@ -1495,7 +1501,7 @@ class hst123(object):
         reference_images = [
             normalize_fits_path(p)
             for p in glob.glob(os.path.join(ws, "u*c0m.fits"))
-            if os.path.isfile(p)
+            if os.path.isfile(p) and not is_hst123_wfpc2_astrodrizzle_scratch(p)
         ]
 
     obstable = self.input_list(reference_images, show=False, save=False)
@@ -1844,7 +1850,7 @@ class hst123(object):
 
   @log_calls
   def run_astrodrizzle(self, obstable, output_name=None, ra=None, dec=None,
-    clean=None, save_fullfile=False):
+    clean=None, save_fullfile=False, defer_wfpc2_astrodrizzle_scratch=False):
     """
     Drizzle a stack of exposures with DrizzlePac (sky match, CR rejection, combine).
 
@@ -1864,6 +1870,10 @@ class hst123(object):
         DrizzlePac ``clean`` flag; resolved via :func:`~hst123.utils.astrodrizzle_helpers.resolve_drizzle_clean_flag`.
     save_fullfile : bool, optional
         If True, build a multi-extension DRC product when supported.
+    defer_wfpc2_astrodrizzle_scratch : bool, optional
+        If True (used by :meth:`drizzle_all`), do not delete WFPC2 ``*_hst123drz*``
+        scratch FITS during workspace cleanup; :func:`cleanup_hst123_wfpc2_astrodrizzle_scratch`
+        runs once after all drizzle groups finish.
 
     Returns
     -------
@@ -2261,6 +2271,7 @@ class hst123(object):
                 self.options["args"], "keep_drizzle_artifacts", False
             ),
             base_work_dir=self.options["args"].work_dir,
+            remove_wfpc2_astrodrizzle_scratch=not defer_wfpc2_astrodrizzle_scratch,
         )
         return False
 
@@ -2389,6 +2400,7 @@ class hst123(object):
             self.options["args"], "keep_drizzle_artifacts", False
         ),
         base_work_dir=self.options["args"].work_dir,
+        remove_wfpc2_astrodrizzle_scratch=not defer_wfpc2_astrodrizzle_scratch,
     )
 
     return True
@@ -2903,7 +2915,10 @@ class hst123(object):
                 error, shift_table = self._astrom.run_alignment(driztable, ref)
             # Next run astrodrizzle to construct the drizzled frame
             if not self.run_astrodrizzle(
-                driztable, output_name=name, save_fullfile=True
+                driztable,
+                output_name=name,
+                save_fullfile=True,
+                defer_wfpc2_astrodrizzle_scratch=True,
             ):
                 log.error("Drizzle failed for %s; skipping sanitize/sky for this product.", name)
                 continue
@@ -2921,6 +2936,19 @@ class hst123(object):
                 sky_image = name.replace('.fits', '.sky.fits')
                 noise_name = name.replace('.fits', '.noise.fits')
                 shutil.copy(sky_image, noise_name)
+
+    wd_arg = opt.work_dir
+    if wd_arg:
+        _driz_cleanup_ws = pipeline_workspace_dir(wd_arg) or os.path.abspath(wd_arg)
+    else:
+        _driz_cleanup_ws = os.path.abspath(".")
+    if not getattr(opt, "keep_drizzle_artifacts", False):
+        cleanup_hst123_wfpc2_astrodrizzle_scratch(
+            _driz_cleanup_ws,
+            log=log,
+            keep_artifacts=False,
+            base_work_dir=wd_arg,
+        )
 
     if hierarchical:
         driztable = unique(obstable, keys='drizname')

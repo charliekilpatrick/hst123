@@ -6,6 +6,7 @@ import numpy as np
 from astropy.io import fits
 
 from hst123.primitives.base import BasePrimitive
+from hst123.utils.astrodrizzle_helpers import is_hst123_wfpc2_astrodrizzle_scratch
 from hst123.utils.paths import normalize_fits_path, pipeline_workspace_dir
 from hst123.utils.logging import log_calls
 
@@ -212,6 +213,8 @@ class FitsHelper(BasePrimitive):
             for p in pattern:
                 for s in glob.glob(os.path.join(root, p)):
                     if not os.path.isfile(s):
+                        continue
+                    if is_hst123_wfpc2_astrodrizzle_scratch(s):
                         continue
                     n = normalize_fits_path(s)
                     if n not in seen:
