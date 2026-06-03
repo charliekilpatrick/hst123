@@ -13,6 +13,7 @@ import numpy as np
 from hst123.utils.logging import (
     ROOT_LOGGER,
     LogConfig,
+    _normalize_third_party_log_text,
     attach_work_dir_log_file,
     compress_logger_name,
     ensure_cli_logging_configured,
@@ -300,17 +301,30 @@ def test_attach_work_dir_log_file_creates_logs_and_mirrors(tmp_path):
         assert (wd / "logs").is_dir()
         assert os.path.basename(path) in [p.name for p in (wd / "logs").iterdir()]
         get_logger("hst123.test").info("hello file mirror")
+        console_handlers = [
+            h
+            for h in log.handlers
+            if isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.FileHandler)
+        ]
+        assert console_handlers
+        assert console_handlers[0].stream is sys.stderr
         for h in log.handlers:
             if getattr(h, "_hst123_log_path", None) == path:
                 h.flush()
                 break
+        print("raw_stdout_mirror_probe", flush=True)
+        print("raw_stderr_mirror_probe", file=sys.stderr, flush=True)
         text = open(path, encoding="utf-8").read()
         assert "hello file mirror" in text
+        assert "raw_stdout_mirror_probe" in text
+        assert "raw_stderr_mirror_probe" in text
         assert "Session log:" in text and "hst123_" in text
         n_handlers = len(log.handlers)
         assert attach_work_dir_log_file(str(wd)) == path
         assert len(log.handlers) == n_handlers
     finally:
+        logmod._restore_session_stream_mirrors()  # noqa: SLF001
         for h in list(log.handlers):
             log.removeHandler(h)
             h.close()
@@ -410,3 +424,22 @@ class TestIngestTextFileToLogger:
         )
         assert n == 0
         assert not caplog.records
+
+
+class TestNormalizeThirdPartyLogText:
+    """Forwarding root records into ``hst123.third_party`` trims and drops blanks."""
+
+    def test_strips_leading_trailing(self):
+        assert _normalize_third_party_log_text("  hello  ") == "hello"
+
+    def test_blank_or_whitespace_only_is_none(self):
+        assert _normalize_third_party_log_text("") is None
+        assert _normalize_third_party_log_text("   ") is None
+        assert _normalize_third_party_log_text("\n\n") is None
+        assert _normalize_third_party_log_text("\t  \n") is None
+
+    def test_multiline_strips_each_line_and_drops_empty_lines(self):
+        assert _normalize_third_party_log_text(" a \n\n  b  ") == "a\nb"
+
+    def test_non_string_coerced(self):
+        assert _normalize_third_party_log_text(42) == "42"

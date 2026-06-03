@@ -122,11 +122,35 @@ def add_options(parser=None, usage=None, version=None):
         help='Initial threshold for finding sources in tweakreg.')
     parser.add_argument('--keep-objfile', default=False, action='store_true',
         help='Keep the object file output from tweakreg.')
+    parser.add_argument(
+        '--no-tweakreg-flc-grid',
+        default=False,
+        action='store_true',
+        help='Disable FLC CRPIX grid pre-alignment before TweakReg (see settings '
+        '``tweakreg_flc_grid_*``).',
+    )
+    parser.add_argument(
+        '--tweakreg-flc-grid-factor',
+        default=None,
+        type=float,
+        metavar='F',
+        help='Multiply FLC grid min_cost (arcsec) by F for TweakReg search radius '
+        '(default: settings tweakreg_flc_grid_search_factor).',
+    )
+    parser.add_argument(
+        '--tweakreg-flc-grid-min-arcsec',
+        default=None,
+        type=float,
+        metavar='A',
+        help='Floor for TweakReg search radius in arcseconds after grid pre-align '
+        '(default: settings tweakreg_flc_grid_search_min_arcsec).',
+    )
     parser.add_argument('--skip-tweakreg', default=False, action='store_true',
         help='Skip running alignment (tweakreg or jhat).')
-    parser.add_argument('--align-with', default='jhat', type=str,
+    parser.add_argument('--align-with', default='tweakreg', type=str,
         choices=['tweakreg', 'jhat'],
-        help='Alignment method: jhat (Gaia / relative) or tweakreg (HST/drizzlepac). Default: jhat.')
+        help='Alignment method: tweakreg (default; drizzle-first + TweakReg on stacks) '
+        'or jhat (Gaia / relative on calibrated exposures, legacy flow).')
     parser.add_argument('--hierarchical', default=False, action='store_true',
         help='Drizzle all visit/filter pairs then use them as basis to'+\
         ' perform alignment on the sub-frames.')
@@ -134,10 +158,28 @@ def add_options(parser=None, usage=None, version=None):
         action='store_true',
         help='Testing for hierarchical alignment mode so the script exits'+\
         ' after tweakreg alignment is performed on drz files.')
+    parser.add_argument(
+        '--no-gaia-reference',
+        default=False,
+        action='store_true',
+        help='In tweakreg (drizzle-first) mode, skip Gaia anchoring of the main '
+        'reference drizzle (absolute astrometry on that stack only).',
+    )
 
-    # Drizzling options
-    parser.add_argument('--drizzle-all', default=False, action='store_true',
-        help='Drizzle all visit/filter pairs together.')
+    # Drizzling options (default: drizzle all stacks; opt out with --no-drizzle-all)
+    parser.set_defaults(drizzle_all=True)
+    parser.add_argument(
+        '--drizzle-all',
+        dest='drizzle_all',
+        action='store_true',
+        help='Drizzle each visit/filter epoch into work_dir/drizzle/ (default: on).',
+    )
+    parser.add_argument(
+        '--no-drizzle-all',
+        dest='drizzle_all',
+        action='store_false',
+        help='Skip per-visit/filter AstroDrizzle products (disables drizzle-first tweakreg path).',
+    )
     parser.add_argument('--drizzle-add', default=None, type=str,
         help='Comma-separated list of images to add to the drizzled reference'+\
         ' image.  Use this to inject data from other instruments, filters, '+\

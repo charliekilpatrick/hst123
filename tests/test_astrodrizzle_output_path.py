@@ -1,7 +1,11 @@
 """AstroDrizzle output path normalization / recovery (truncated drizname regression)."""
 import logging
+import os
 
-from hst123.utils.astrodrizzle_helpers import astrodrizzle_chdir_bundle_for_drizzlepac
+from hst123.utils.astrodrizzle_helpers import (
+    astrodrizzle_chdir_bundle_for_drizzlepac,
+    path_for_drizzlepac_when_cwd_run_dir,
+)
 from hst123.utils.astrodrizzle_paths import (
     astrodrizzle_output_exists,
     logical_driz_to_internal_astrodrizzle,
@@ -104,3 +108,25 @@ def test_astrodrizzle_chdir_bundle_basename_and_relpath(tmp_path):
     assert rd == str(drizzle.resolve())
     assert ob == "wfc3_uvis_full.ref.drz.fits"
     assert rels == ["../workspace/a_flc.drztmp.fits", "../workspace/b_flc.drztmp.fits"]
+
+
+def test_path_for_drizzlepac_when_cwd_basename(tmp_path):
+    run = tmp_path / "SNII" / "SN1964H" / "ws"
+    run.mkdir(parents=True)
+    f = run / "jey_flc.fits"
+    f.write_bytes(b"x")
+    rd = str(run.resolve())
+    got = path_for_drizzlepac_when_cwd_run_dir(str(f), rd)
+    assert got == "jey_flc.fits"
+    assert not os.path.isabs(got)
+
+
+def test_path_for_drizzlepac_when_cwd_outside_returns_abs(tmp_path):
+    run = tmp_path / "ws"
+    run.mkdir()
+    other = tmp_path / "other" / "x.fits"
+    other.parent.mkdir(parents=True)
+    other.write_bytes(b"x")
+    got = path_for_drizzlepac_when_cwd_run_dir(str(other), str(run.resolve()))
+    assert os.path.isabs(got)
+    assert os.path.normpath(got) == os.path.normpath(str(other))

@@ -43,55 +43,62 @@ def test_download_files_skips_existing_files_no_mast_call(hst123_instance, tmp_p
     mock_dl.assert_not_called()
 
 
-def test_mast_download_one_product_row_moves_staged_file(hst123_instance, tmp_path):
+def test_mast_download_product_batch_moves_staged_files(hst123_instance, tmp_path):
     _require_hst123()
     hst = hst123_instance
-    staging = tmp_path / "staging.fits"
+    staging = tmp_path / "science.fits"
     staging.write_bytes(b"DATA")
     dest = tmp_path / "out.fits"
     prod = Table(
         {
+            "productFilename": ["science.fits"],
             "downloadFilename": ["out.fits"],
             "obsID": ["obs1"],
         }
     )[0]
-    item = (0, prod, str(dest), 1, str(tmp_path))
+    batch = [(0, prod, str(dest))]
     with patch("hst123._pipeline.Observations.download_products") as mock_dl:
-        mock_dl.return_value = Table({"Local Path": [str(staging)]})
-        hst._mast_download_one_product_row(item)
+        mock_dl.return_value = Table(
+            {"Local Path": [str(staging)], "Status": ["COMPLETE"], "Message": [""]},
+        )
+        hst._mast_download_product_batch(batch, str(tmp_path), 1)
     mock_dl.assert_called_once()
     assert dest.read_bytes() == b"DATA"
     assert not staging.exists()
 
 
-def test_mast_download_one_product_row_logs_warning_on_failure(hst123_instance, tmp_path, caplog):
+def test_mast_download_product_batch_logs_warning_on_failure(
+    hst123_instance, tmp_path, caplog
+):
     _require_hst123()
     import logging
 
     hst = hst123_instance
     prod = Table(
         {
+            "productFilename": ["missing.fits"],
             "downloadFilename": ["missing.fits"],
             "obsID": ["obs1"],
         }
     )[0]
     dest = tmp_path / "missing.fits"
-    item = (0, prod, str(dest), 1, str(tmp_path))
+    batch = [(0, prod, str(dest))]
     caplog.set_level(logging.WARNING)
-    with patch("hst123._pipeline.Observations.download_products", side_effect=RuntimeError("network")):
-        hst._mast_download_one_product_row(item)
+    with patch(
+        "hst123._pipeline.Observations.download_products",
+        side_effect=TimeoutError("timeout"),
+    ):
+        hst._mast_download_product_batch(batch, str(tmp_path), 1)
     assert "MAST fail" in caplog.text
 
 
-def test_download_files_runs_one_worker_call_per_pending_file(
-    hst123_instance, tmp_path
-):
+def test_download_files_batches_pending_downloads(hst123_instance, tmp_path):
     _require_hst123()
     hst = hst123_instance
-    setattr(hst.options["args"], "drizzle_num_cores", 6)
 
     t = Table(
         {
+            "productFilename": ["a.fits", "b.fits", "c.fits"],
             "downloadFilename": ["a.fits", "b.fits", "c.fits"],
             "obsID": ["1", "2", "3"],
         }
@@ -99,11 +106,12 @@ def test_download_files_runs_one_worker_call_per_pending_file(
     dest = tmp_path / "out"
     dest.mkdir()
 
-    with patch.object(hst, "_mast_download_one_product_row") as mock_one:
-        with patch("hst123._pipeline.Observations.download_products"):
-            hst.download_files(t, dest=str(dest), work_dir=str(tmp_path))
+    with patch.object(hst, "_mast_download_product_batch") as mock_batch:
+        hst.download_files(t, dest=str(dest), work_dir=str(tmp_path))
 
-    assert mock_one.call_count == 3
+    assert mock_batch.call_count == 1
+    batch_arg = mock_batch.call_args[0][0]
+    assert len(batch_arg) == 3
 
 
 def test_archive_path_for_product_acs_wfc(hst123_instance, tmp_path):

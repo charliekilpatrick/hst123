@@ -41,6 +41,16 @@ class TestAddOptions:
         assert args.drizzle_dim == 4000
         assert args.wht_type == "IVM"
 
+    def test_default_align_with_tweakreg_and_drizzle_all(self):
+        parser = options.add_options()
+        args = parser.parse_args(["0", "0"])
+        assert args.align_with == "tweakreg"
+        assert args.drizzle_all is True
+        args = parser.parse_args(["0", "0", "--no-drizzle-all"])
+        assert args.drizzle_all is False
+        args = parser.parse_args(["0", "0", "--align-with", "jhat"])
+        assert args.align_with == "jhat"
+
     def test_max_cores_optional(self):
         parser = options.add_options()
         args = parser.parse_args(["0", "0"])

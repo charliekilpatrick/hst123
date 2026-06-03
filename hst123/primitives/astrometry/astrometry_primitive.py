@@ -92,6 +92,61 @@ def _workspace_rawtmp_path(workspace_fits: str) -> str:
     return workspace_fits + ".rawtmp.fits"
 
 
+def _fits_safe_primary_header_string(s: str) -> str:
+    """
+    Coerce a string for FITS PRIMARY cards: printable ASCII only.
+
+    Archive metadata (e.g. HISTORY with newlines or ``A&A``-style titles) can
+    violate Astropy's strict ASCII check when :meth:`prepare_reference_tweakreg`
+    copies PRIMARY keywords onto a new HDU list.
+    """
+    if not isinstance(s, str):
+        return s
+    collapsed = " ".join(s.split())
+    out: list[str] = []
+    for ch in collapsed:
+        o = ord(ch)
+        if 32 <= o <= 126:
+            out.append(ch)
+        else:
+            out.append("?")
+    return "".join(out)
+
+
+def _fits_header_merge_value(val):
+    """
+    Normalize a PRIMARY header value for safe assignment to another Header.
+
+    Astropy may expose commentary or archive fields as ``str``, ``bytes``,
+    ``numpy.str_`` (not always ``isinstance(..., str)``), or other scalars.
+    """
+    from astropy.io.fits import Undefined
+
+    if val is Undefined or val is None:
+        return None
+    if isinstance(val, (bool, int, float)):
+        return val
+    if isinstance(val, np.bool_):
+        return bool(val)
+    if isinstance(val, np.integer):
+        return int(val)
+    if isinstance(val, np.floating):
+        return float(val)
+    if isinstance(val, bytes):
+        return _fits_safe_primary_header_string(
+            val.decode("latin-1", errors="replace")
+        )
+    if isinstance(val, str):
+        return _fits_safe_primary_header_string(val)
+    if hasattr(val, "dtype") and getattr(val.dtype, "kind", "") in "SU":
+        return _fits_safe_primary_header_string(str(val))
+    if isinstance(val, (list, tuple)):
+        return _fits_safe_primary_header_string(
+            " ".join(str(x) for x in val)
+        )
+    return _fits_safe_primary_header_string(str(val))
+
+
 def _is_number(num):
     """
     Return True if num can be interpreted as a number.
@@ -157,6 +212,44 @@ except ImportError:
     HSTWCS = None  # type: ignore[misc,assignment]
 
 
+def strip_sci_distortion_lookup_headers_from_hdul(hdul: fits.HDUList) -> None:
+    """
+    Remove tabular-distortion lookup metadata from every SCI extension (in-memory).
+
+    Deletes ``D2IM*``, ``CPDIS*``, and ``DP<number>…`` keys (see :func:`re.match`
+    on ``^DP\\\\d``). Some CAL products store related ``*.EXTVER`` values as floats;
+    astropy's WCS then requests extension tuples like ``('D2IMARR', 1.0)`` that do
+    not match FITS integer ``EXTVER`` on the array HDUs. Used for TweakReg source
+    counting and for optional on-disk sanitization before drizzlepac tasks.
+    """
+    for hdu in hdul:
+        if getattr(hdu, "name", None) != "SCI":
+            continue
+        hdr = hdu.header
+        for kw in list(hdr.keys()):
+            ku = str(kw).upper()
+            if "D2IM" in ku or ku.startswith("CPDIS") or re.match(r"^DP\d", ku):
+                try:
+                    del hdr[kw]
+                except KeyError:
+                    pass
+
+
+def sanitize_flc_distortion_headers_inplace(path: str | os.PathLike[str]) -> None:
+    """
+    Update a FITS file on disk: strip SCI distortion lookup keys and set PRIMARY
+    ``FILENAME`` to the file's absolute path (helps ``stwcs``/drizzlepac find data).
+
+    Safe for scratch copies; do **not** use on archival CAL products you intend to keep
+    byte-identical.
+    """
+    ap = os.path.abspath(os.fspath(path))
+    with fits.open(ap, mode="update") as hdul:
+        strip_sci_distortion_lookup_headers_from_hdul(hdul)
+        hdul[0].header["FILENAME"] = ap
+        hdul.flush()
+
+
 class AstrometryPrimitive(BasePrimitive):
     """TweakReg (HST) or JHAT (JWST/Gaia) alignment, reference prep, WCS updates."""
 
@@ -209,7 +302,12 @@ class AstrometryPrimitive(BasePrimitive):
             for n, key in enumerate(primary.header.keys()):
                 if not key.strip():
                     continue
-                if isinstance(hdu[0].header[key], str) and "\n" in hdu[0].header[key]:
+                # Provenance / commentary: skip — not needed for TweakReg, and STScI
+                # HISTORY often contains newlines and non-ASCII (bibcodes, journal names)
+                # that still fail Card validation in some astropy versions even after
+                # string cleanup when assigned as merged commentary.
+                ku = key.strip().upper()
+                if ku in ("COMMENT", "HISTORY"):
                     continue
                 if key == "FILETYPE":
                     newhdu[0].header[key] = "SCI"
@@ -218,10 +316,15 @@ class AstrometryPrimitive(BasePrimitive):
                 elif key == "EXTEND":
                     newhdu[0].header[key] = True
                 else:
-                    val = hdu[0].header[key]
-                    if isinstance(val, str):
-                        val = val.strip().replace("\n", " ")
-                    newhdu[0].header[key] = val
+                    raw = primary.header[key]
+                    val = _fits_header_merge_value(raw)
+                    if val is None:
+                        continue
+                    try:
+                        newhdu[0].header[key] = val
+                    except (ValueError, TypeError):
+                        safe = _fits_safe_primary_header_string(str(raw))
+                        newhdu[0].header[key] = safe
 
         newhdu[0].header["FILENAME"] = reference
         newhdu[1].header["FILENAME"] = reference
@@ -487,6 +590,12 @@ class AstrometryPrimitive(BasePrimitive):
         if catalogs is None or HSTWCS is None:
             log.warning("drizzlepac or stsci_wcs (bundled STScI WCS) unavailable; cannot count sources")
             return 0
+
+        def _prepare_imghdu_for_hstwcs_catalog(imghdu, image_path: str) -> None:
+            """Set absolute ``FILENAME`` and strip distortion lookup keys (see module helpers)."""
+            imghdu[0].header["FILENAME"] = os.path.abspath(image_path)
+            strip_sci_distortion_lookup_headers_from_hdul(imghdu)
+
         nsources = 0
         log.debug(
             "Source count %s threshold=%s",
@@ -503,15 +612,19 @@ class AstrometryPrimitive(BasePrimitive):
             )
             return 0
         with imghdu:
+            _prepare_imghdu_for_hstwcs_catalog(imghdu, image)
             for i, h in enumerate(imghdu):
                 if h.name == "SCI" or (len(imghdu) == 1 and h.name == "PRIMARY"):
-                    filename = "{:s}[{:d}]".format(image, i)
-                    wcs = HSTWCS(filename)
+                    cat_target = "{:s}[{:d}]".format(
+                        os.path.abspath(image),
+                        i,
+                    )
+                    wcs = HSTWCS(imghdu, ext=i)
                     catalog_mode = "automatic"
                     catalog = catalogs.generateCatalog(
                         wcs,
                         mode=catalog_mode,
-                        catalog=filename,
+                        catalog=cat_target,
                         threshold=thresh,
                         **self._p.options["catalog"],
                     )
@@ -776,13 +889,24 @@ class AstrometryPrimitive(BasePrimitive):
 
             deepest = sorted(paths, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
 
-            # Bridge batch: align the filter anchor to the pipeline reference (if provided).
-            # This is the step that ties all filters into a single astrometric frame.
-            if ref_path and os.path.abspath(deepest) != os.path.abspath(ref_path):
-                batches.append((ref_path, [deepest]))
-
-            # Main batch: align all images in this filter to its anchor.
-            batches.append((deepest, paths))
+            # When the pipeline/TweakReg reference *is* one of the exposures in this
+            # band (typical for relative alignment of two FLCs), align the whole set
+            # to that frame once. Otherwise "deepest wins" would add a second batch
+            # that re-anchors the intended reference to the longer exposure.
+            if ref_path:
+                ref_abs = os.path.abspath(ref_path)
+                for p in paths:
+                    if os.path.abspath(p) == ref_abs:
+                        batches.append((ref_path, paths))
+                        break
+                else:
+                    # Bridge: align the filter anchor to an external pipeline reference
+                    # (e.g. drizzled product not in *paths*), then band-internal pass.
+                    if os.path.abspath(deepest) != ref_abs:
+                        batches.append((ref_path, [deepest]))
+                    batches.append((deepest, paths))
+            else:
+                batches.append((deepest, paths))
 
         return batches
 
@@ -829,6 +953,132 @@ class AstrometryPrimitive(BasePrimitive):
             exception,
         )
 
+    @staticmethod
+    def _tweakreg_xy_measured(xo, yo) -> bool:
+        """True if offsets are finite numbers (usable measured shift)."""
+        try:
+            fx = float(xo)
+            fy = float(yo)
+        except (TypeError, ValueError):
+            return False
+        return bool(np.isfinite(fx) and np.isfinite(fy))
+
+    def _tweakreg_shift_row_matches_image(self, image: str, shift_file_cell) -> bool:
+        """
+        Whether a DrizzlePac shift row ``file`` cell refers to the same exposure as *image*.
+
+        Matches absolute paths when both exist; otherwise falls back to basename containment
+        (TweakReg sometimes emits partial paths).
+        """
+        img = normalize_fits_path(str(image).strip())
+        if not os.path.isfile(img):
+            return False
+        img_real = os.path.normpath(os.path.realpath(img))
+        cell = str(shift_file_cell).strip()
+        if not cell:
+            return False
+        if os.path.isfile(cell):
+            other = os.path.normpath(os.path.realpath(normalize_fits_path(cell)))
+            return img_real == other
+        bn = os.path.basename(img_real)
+        cl = cell.replace("\\", "/")
+        return bn in cl or cl.endswith(bn)
+
+    def _tweakreg_image_has_measured_shift(self, image: str, shifts) -> bool:
+        """True if *shifts* contains a row for *image* with finite x/y offsets."""
+        for row in shifts:
+            if not self._tweakreg_shift_row_matches_image(image, row["file"]):
+                continue
+            if self._tweakreg_xy_measured(row["xoffset"], row["yoffset"]):
+                return True
+        return False
+
+    def _tweakreg_reference_anchor_realpath(self, ref_use: str) -> str | None:
+        """Real path of batch TweakReg reference when it is an on-disk FITS (not dummy)."""
+        if not ref_use or str(ref_use).strip() in ("", "dummy.fits"):
+            return None
+        rp = normalize_fits_path(str(ref_use).strip())
+        if not os.path.isfile(rp):
+            return None
+        return os.path.normpath(os.path.realpath(rp))
+
+    def _tweakreg_batch_measured_shifts_complete(
+        self, batch_imgs: list[str], ref_use: str, shifts
+    ) -> bool:
+        """
+        True when every exposure in the batch has a science-valid alignment state:
+
+        - Images that are the TweakReg reference and appear in *batch_imgs* need no
+          shift row (they define the frame); offsets are relative to them.
+        - All other on-disk batch members must have a matching shift-table row with
+          finite measured x/y.
+        """
+        ref_real = self._tweakreg_reference_anchor_realpath(ref_use)
+        for raw in batch_imgs:
+            fp = normalize_fits_path(str(raw).strip())
+            if not os.path.isfile(fp):
+                log.warning(
+                    "TweakReg batch completeness: missing file %s", os.path.basename(fp)
+                )
+                return False
+            img_real = os.path.normpath(os.path.realpath(fp))
+            if ref_real is not None and img_real == ref_real:
+                continue
+            if not self._tweakreg_image_has_measured_shift(raw, shifts):
+                log.debug(
+                    "TweakReg batch completeness: no finite shift row for %s",
+                    os.path.basename(fp),
+                )
+                return False
+        return True
+
+    def _mark_tweakreg_reference_anchor_provenance(
+        self,
+        ref_use: str,
+        batch_imgs: list[str],
+        *,
+        method: str = "tweakreg",
+    ) -> None:
+        """
+        Record alignment provenance on the reference exposure when it is part of the batch.
+
+        DrizzlePac often omits the reference from the shift table or gives NaN offsets;
+        that exposure is still the astrometric anchor for the batch.
+        """
+        ref_real = self._tweakreg_reference_anchor_realpath(ref_use)
+        if ref_real is None:
+            return
+        batch_reals = set()
+        for im in batch_imgs:
+            p = normalize_fits_path(str(im).strip())
+            if os.path.isfile(p):
+                batch_reals.add(os.path.normpath(os.path.realpath(p)))
+        if ref_real not in batch_reals:
+            return
+        ref_fp = normalize_fits_path(str(ref_use).strip())
+        hdr0 = self._primary_header_for_alignment_probe(ref_fp)
+        if alignment_is_redundant(
+            hdr0,
+            method=method,
+            ref_id=ref_use,
+            require_success=True,
+        ):
+            return
+        with fits.open(ref_fp, mode="update") as hdu:
+            write_alignment_provenance(
+                hdu[0].header,
+                method=method,
+                ref_id=ref_use,
+                success=True,
+            )
+            hdu.flush()
+        log.debug(
+            "TweakReg anchor provenance recorded for %s (method=%s, reference_id=%s)",
+            os.path.basename(ref_fp),
+            alignment_method_token(method),
+            normalize_alignment_ref_id(ref_use),
+        )
+
     def apply_tweakreg_success(
         self,
         shifts,
@@ -850,7 +1100,7 @@ class AstrometryPrimitive(BasePrimitive):
         """
         for row in shifts:
             xo, yo = row["xoffset"], row["yoffset"]
-            if np.isnan(xo) or np.isnan(yo):
+            if not self._tweakreg_xy_measured(xo, yo):
                 continue
             file = row["file"]
             if not os.path.exists(file):
@@ -937,14 +1187,19 @@ class AstrometryPrimitive(BasePrimitive):
             align_with,
             reference,
         )
-        # align_with=jhat means: use JHAT for BOTH absolute (Gaia anchor) and relative
-        # (image-to-reference) alignment. No TweakReg is used in this mode.
+        # align_with=jhat: Gaia JHAT anchors the **drizzled reference** (see pick_reference).
+        # Raw FLC–FLC steps use JHAT only (relative to an anchor refcat); TweakReg is not used.
         if align_with == "jhat":
+            from hst123.primitives.astrometry.gaia_simple import align_to_gaia_simple_inplace
             from hst123.primitives.astrometry.jhat import (
+                apply_crpix_guess_shift_to_flc,
+                apply_jhat_shift_to_science_image,
+                flc_grid_quality_sep_cap_from_min_cost,
+                guess_shift_hst_flc,
                 jhat_gaia_good_phot_path,
                 jhat_image_phot_path,
-                read_jhat_gaia_residual_stats,
                 run_jhat,
+                write_flc_anchor_refcat_for_jhat,
             )
 
             p = self._p
@@ -987,46 +1242,50 @@ class AstrometryPrimitive(BasePrimitive):
                                 break
                 except Exception:
                     pass
-                # 1) Anchor the reference drizzle to Gaia.
-                try:
+                # 1) Anchor the reference drizzle to Gaia (unless pick_reference already did).
+                hdr0 = fits.getheader(ref_for_hier, 0)
+                already_gaia = not force_realign and alignment_is_redundant(
+                    hdr0,
+                    method="gaia_simple",
+                    ref_id="GAIA",
+                    require_success=True,
+                )
+                if already_gaia:
                     log.info(
-                        "JHAT hierarchical: anchoring reference to Gaia: %s",
+                        "Gaia simple hierarchical: reference already Gaia-anchored; skipping on %s",
                         os.path.basename(ref_for_hier),
                     )
-                    with tee_stdout_fd_to_logger(
-                        log,
-                        prefix="[jhat] ",
-                        level=logging.INFO,
-                    ):
-                        stats = run_jhat(
+                else:
+                    try:
+                        log.info(
+                            "Gaia simple hierarchical: anchoring reference to Gaia: %s",
+                            os.path.basename(ref_for_hier),
+                        )
+                        stats = align_to_gaia_simple_inplace(
                             ref_for_hier,
                             outdir=outdir,
-                            params=params,
-                            gaia=True,
-                            verbose=False,
+                            write_diagnostics=False,
                         )
-                    if stats:
-                        stats["image"] = os.path.basename(ref_for_hier)
-                        p._jhat_gaia_ref_stats = [stats]
-                    else:
-                        # If already aligned, try reading stats from existing good.phot table.
-                        st = read_jhat_gaia_residual_stats(ref_for_hier, outdir)
-                        if st:
-                            st["image"] = os.path.basename(ref_for_hier)
-                            p._jhat_gaia_ref_stats = [st]
+                        if stats:
+                            stats["image"] = os.path.basename(ref_for_hier)
+                            p._jhat_gaia_ref_stats = [stats]
 
-                    with fits.open(ref_for_hier, mode="update") as hdu:
-                        hdu[0].header["TWEAKSUC"] = 1
-                        write_alignment_provenance(
-                            hdu[0].header, method="jhat", ref_id="GAIA", success=True
+                        with fits.open(ref_for_hier, mode="update") as hdu:
+                            hdu[0].header["TWEAKSUC"] = 1
+                            write_alignment_provenance(
+                                hdu[0].header,
+                                method="gaia_simple",
+                                ref_id="GAIA",
+                                success=True,
+                            )
+                            hdu.flush()
+                    except Exception as exc:
+                        log.warning(
+                            "Gaia simple anchor failed for reference %s; "
+                            "continuing with relative-only alignment: %s",
+                            os.path.basename(ref_for_hier),
+                            exc,
                         )
-                        hdu.flush()
-                except Exception as exc:
-                    log.warning(
-                        "JHAT Gaia anchor failed for reference %s; continuing with relative-only alignment: %s",
-                        os.path.basename(ref_for_hier),
-                        exc,
-                    )
 
                 # 2) Use the reference matched catalog (preferred) or reference phot catalog
                 # as the relative reference catalog for aligning other images.
@@ -1078,6 +1337,7 @@ class AstrometryPrimitive(BasePrimitive):
                             photfilename=refcat,
                             verbose=False,
                         )
+                    apply_jhat_shift_to_science_image(image, outdir, logger=log)
                     with fits.open(image, mode="update") as hdu:
                         hdu[0].header["TWEAKSUC"] = 1
                         write_alignment_provenance(
@@ -1093,49 +1353,195 @@ class AstrometryPrimitive(BasePrimitive):
 
                 result = ("jhat success", None)
             else:
-                # No explicit pipeline reference: align the obstable internally by picking
-                # the deepest image as the anchor and using its phot catalog as reference.
+                # No pipeline reference: FLC–FLC alignment with JHAT only (no TweakReg).
+                # First-listed exposure is fixed; build an anchor refcat from its sources +
+                # WCS (no Gaia), then align each other exposure with run_jhat(..., gaia=False).
                 imgs = [str(x) for x in obstable["image"] if os.path.isfile(str(x))]
                 if len(imgs) < 2:
                     return ("jhat success", None)
-                anchor = sorted(imgs, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
-                log.info("JHAT internal: anchor=%s (deepest exposure)", os.path.basename(anchor))
-                with tee_stdout_fd_to_logger(
-                    log,
-                    prefix="[jhat] ",
-                    level=logging.INFO,
-                ):
-                    # Run once on anchor to create its phot catalog (match to Gaia for stability,
-                    # but do not use it as the global absolute anchor unless a pipeline reference
-                    # was provided).
-                    run_jhat(anchor, outdir=outdir, params=params, gaia=True, verbose=False)
-                # Prefer Gaia-matched table when available; fall back to plain phot catalog.
-                refcat = None
-                gp = jhat_gaia_good_phot_path(anchor, outdir)
-                if os.path.isfile(gp):
-                    refcat = gp
-                else:
-                    pp = jhat_image_phot_path(anchor, outdir)
-                    if os.path.isfile(pp):
-                        refcat = pp
-                if refcat is None:
-                    log.warning(
-                        "JHAT internal: reference catalog not found for %s; expected %s or %s. "
-                        "Relative alignment may fail.",
+                anchor = imgs[0]
+                log.info(
+                    "JHAT internal: FLC–FLC relative alignment (anchor=%s); "
+                    "Gaia JHAT applies only to the drizzled reference in pick_reference.",
+                    os.path.basename(anchor),
+                )
+                try:
+                    refcat = write_flc_anchor_refcat_for_jhat(anchor, outdir)
+                except Exception as exc:
+                    log.error(
+                        "JHAT internal: could not build anchor source catalog from %s: %s",
                         os.path.basename(anchor),
-                        os.path.basename(gp),
-                        os.path.basename(jhat_image_phot_path(anchor, outdir)),
+                        exc,
                     )
-                    refcat = gp
-                for im in imgs:
-                    if im == anchor:
+                    return ("jhat failure", None)
+
+                aligned = 0
+                missing = 0
+                for image in imgs[1:]:
+                    if not os.path.exists(image):
+                        missing += 1
                         continue
-                    with tee_stdout_fd_to_logger(log, prefix="[jhat] ", level=logging.INFO):
-                        run_jhat(im, outdir=outdir, params=params, gaia=False, photfilename=refcat, verbose=False)
-                    with fits.open(im, mode="update") as hdu:
+                    if not force_realign:
+                        with fits.open(image, mode="readonly") as hdu:
+                            if alignment_is_redundant(
+                                hdu[0].header,
+                                method="jhat",
+                                ref_id=refcat,
+                                require_success=True,
+                            ):
+                                continue
+                    grid_min_c = float("nan")
+                    quality_sep_cap = None
+                    if getattr(settings, "flc_guess_shift_enabled", True):
+                        try:
+                            gs_step = float(
+                                getattr(settings, "flc_guess_shift_step_px", 5.0)
+                            )
+                            gs_radius = float(
+                                getattr(
+                                    settings,
+                                    "flc_guess_shift_radius_px",
+                                    0.5 * gs_step,
+                                )
+                            )
+                            gs_dist = float(
+                                getattr(
+                                    settings,
+                                    "flc_guess_shift_dist_limit_arcsec",
+                                    5.0,
+                                )
+                            )
+                            gs_sig = float(
+                                getattr(settings, "flc_guess_shift_sigma", 2.0)
+                            )
+                            gs_maxp = int(
+                                getattr(settings, "flc_guess_shift_max_peaks", 800)
+                            )
+                            gs_fwhm = float(
+                                getattr(settings, "flc_guess_shift_fwhm_px", 3.5)
+                            )
+                            dx_gs, dy_gs, min_c, _n_match_gs = guess_shift_hst_flc(
+                                image,
+                                refcat,
+                                radius_px=gs_radius,
+                                step_px=gs_step,
+                                dist_limit_arcsec=gs_dist,
+                                sigma_clip=gs_sig,
+                                max_peak_sources=gs_maxp,
+                                fwhm_px=gs_fwhm,
+                                refine_crossmatch=bool(
+                                    getattr(
+                                        settings,
+                                        "flc_guess_shift_refine_crossmatch",
+                                        True,
+                                    )
+                                ),
+                            )
+                            grid_min_c = float(min_c)
+                            applied_gs = False
+                            if np.isfinite(min_c) and (
+                                abs(dx_gs) > 1e-6 or abs(dy_gs) > 1e-6
+                            ):
+                                apply_crpix_guess_shift_to_flc(
+                                    image,
+                                    dx_gs,
+                                    dy_gs,
+                                    min_cost_arcsec=min_c,
+                                    logger=log,
+                                )
+                                applied_gs = True
+                            cost_msg = (
+                                f"{float(min_c):.4f}"
+                                if np.isfinite(min_c)
+                                else "inf"
+                            )
+                            log.info(
+                                "FLC guess shift grid: %s winner Δ(CRPIX)=(%.4f, %.4f) px "
+                                "min_cost≈%s″ n_match=%d applied=%s",
+                                os.path.basename(str(image)),
+                                float(dx_gs),
+                                float(dy_gs),
+                                cost_msg,
+                                int(_n_match_gs),
+                                applied_gs,
+                            )
+                        except Exception as exc:
+                            log.warning(
+                                "FLC guess shift (CRPIX grid) skipped for %s: %s",
+                                os.path.basename(str(image)),
+                                exc,
+                            )
+                    if getattr(settings, "flc_guess_shift_quality_sep_from_grid", True):
+                        quality_sep_cap = flc_grid_quality_sep_cap_from_min_cost(
+                            grid_min_c,
+                            enabled=True,
+                            floor_arcsec=float(
+                                getattr(
+                                    settings,
+                                    "flc_guess_shift_quality_sep_floor_arcsec",
+                                    2.0,
+                                )
+                            ),
+                            multiplier=float(
+                                getattr(
+                                    settings,
+                                    "flc_guess_shift_quality_cost_multiplier",
+                                    15.0,
+                                )
+                            ),
+                            abs_max_arcsec=float(
+                                getattr(
+                                    settings,
+                                    "flc_guess_shift_quality_sep_abs_max_arcsec",
+                                    45.0,
+                                )
+                            ),
+                        )
+                    if quality_sep_cap is not None:
+                        log.info(
+                            "JHAT relative quality RMS uses sep≤%.3f″ inliers "
+                            "(FLC grid min_cost≈%.4f″)",
+                            quality_sep_cap,
+                            grid_min_c if np.isfinite(grid_min_c) else float("nan"),
+                        )
+                    with tee_stdout_fd_to_logger(
+                        log,
+                        prefix="[jhat] ",
+                        level=logging.INFO,
+                    ):
+                        run_jhat(
+                            image,
+                            outdir=outdir,
+                            params=params,
+                            gaia=False,
+                            photfilename=refcat,
+                            verbose=False,
+                            xshift=0,
+                            yshift=0,
+                            quality_sep_cap_arcsec=quality_sep_cap,
+                        )
+                    apply_jhat_shift_to_science_image(image, outdir, logger=log)
+                    with fits.open(image, mode="update") as hdu:
                         hdu[0].header["TWEAKSUC"] = 1
-                        write_alignment_provenance(hdu[0].header, method="jhat", ref_id=refcat, success=True)
+                        write_alignment_provenance(
+                            hdu[0].header,
+                            method="jhat",
+                            ref_id=refcat,
+                            success=True,
+                        )
                         hdu.flush()
+                    aligned += 1
+
+                if aligned:
+                    log.info(
+                        "JHAT internal: aligned %d exposure(s) to anchor catalog.",
+                        aligned,
+                    )
+                if missing:
+                    log.warning(
+                        "JHAT internal: skipped %d missing image(s).",
+                        missing,
+                    )
                 result = ("jhat success", None)
         else:
             # align_with=tweakreg: keep the TweakReg-based relative alignment.
@@ -1179,16 +1585,15 @@ class AstrometryPrimitive(BasePrimitive):
         tuple
             (message_str, None) for compatibility with run_tweakreg.
         """
-        from hst123.primitives.astrometry.jhat import read_jhat_gaia_residual_stats, run_jhat
+        from hst123.primitives.astrometry.gaia_simple import align_to_gaia_simple_inplace
 
         p = self._p
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
-        params = getattr(settings, "jhat_params", None) or {}
         force_realign = want_redo_astrometry(p.options["args"])
-        jhat_ref_id = "GAIA"
+        gaia_ref_id = "GAIA"
 
         log.debug(
-            "JHAT Gaia: workspace=%s pipeline_ref=%r (unused for Gaia catalog)",
+            "Gaia simple: workspace=%s pipeline_ref=%r (unused for Gaia catalog)",
             outdir,
             reference,
         )
@@ -1201,37 +1606,27 @@ class AstrometryPrimitive(BasePrimitive):
         for image in obstable["image"]:
             if not os.path.exists(image):
                 missing.append(os.path.basename(str(image)))
-                log.warning("Skipping missing image for JHAT: %s", image)
+                log.warning("Skipping missing image for Gaia anchoring: %s", image)
                 continue
             if not force_realign:
                 with fits.open(image, mode="readonly") as hdu:
                     if alignment_is_redundant(
                         hdu[0].header,
-                        method="jhat",
-                        ref_id=jhat_ref_id,
+                        method="gaia_simple",
+                        ref_id=gaia_ref_id,
                         require_success=True,
                     ):
                         skipped_names.append(os.path.basename(str(image)))
-                        st = read_jhat_gaia_residual_stats(image, outdir)
-                        if st:
-                            st["image"] = os.path.basename(str(image))
-                            stats_run.append(st)
                         continue
-            log.debug("JHAT run_all: %s", os.path.basename(str(image)))
+            log.debug("Gaia simple anchor: %s", os.path.basename(str(image)))
             try:
-                stats = run_jhat(
-                    image,
-                    outdir=outdir,
-                    params=params,
-                    gaia=True,
-                    verbose=False,
-                )
+                stats = align_to_gaia_simple_inplace(image, outdir=outdir, write_diagnostics=False)
                 if stats:
                     stats["image"] = os.path.basename(str(image))
                     stats_run.append(stats)
             except Exception as e:
                 log.error(
-                    "JHAT Gaia failed for %s: %s",
+                    "Gaia simple anchor failed for %s: %s",
                     os.path.basename(str(image)),
                     e,
                 )
@@ -1248,8 +1643,8 @@ class AstrometryPrimitive(BasePrimitive):
                 hdu[0].header["TWEAKSUC"] = 1
                 write_alignment_provenance(
                     hdu[0].header,
-                    method="jhat",
-                    ref_id=jhat_ref_id,
+                    method="gaia_simple",
+                    ref_id=gaia_ref_id,
                     success=True,
                 )
                 hdu.flush()
@@ -1258,7 +1653,7 @@ class AstrometryPrimitive(BasePrimitive):
             if len(skipped_names) > 10:
                 tail += ", …"
             log.info(
-                "JHAT Gaia: skipped %d already-aligned (%s)",
+                "Gaia simple: skipped %d already-aligned (%s)",
                 len(skipped_names),
                 tail,
             )
@@ -1267,17 +1662,17 @@ class AstrometryPrimitive(BasePrimitive):
             if len(aligned_names) > 10:
                 tail += ", …"
             log.info(
-                "JHAT Gaia: aligned %d exposure(s) — %s",
+                "Gaia simple: anchored %d exposure(s) — %s",
                 len(aligned_names),
                 tail,
             )
         if not ran_any and not skipped_names and missing:
             log.warning(
-                "JHAT Gaia: no exposures processed (%d missing on disk).",
+                "Gaia simple: no exposures processed (%d missing on disk).",
                 len(missing),
             )
         elif not ran_any and not skipped_names and not missing:
-            log.info("JHAT Gaia: no input exposures in obstable.")
+            log.info("Gaia simple: no input exposures in obstable.")
         vpaths = [
             normalize_fits_path(str(im))
             for im in obstable["image"]
@@ -1290,6 +1685,260 @@ class AstrometryPrimitive(BasePrimitive):
         )
         p._jhat_gaia_ref_stats = stats_run
         return ("jhat success", None)
+
+    def _is_flc_grid_candidate(self, image_path: str | os.PathLike[str]) -> bool:
+        base = os.path.basename(os.fspath(image_path)).lower()
+        return "_flc.fits" in base and base.endswith(".fits")
+
+    def _prealign_flc_for_tweakreg(
+        self,
+        anchor_fp: str | None,
+        run_images: list,
+        outdir: str,
+    ) -> float | None:
+        """
+        FLC CRPIX grid vs anchor refcat (same idea as ``compare_grid_tweakreg_flc``).
+
+        Updates each candidate exposure in place, then returns a suggested TweakReg
+        ``search_radius`` in arcseconds:
+
+            max(min_arcsec, factor × max(grid min_cost)),
+
+        where *min_cost* is per-image from ``guess_shift_hst_flc``. Returns ``None``
+        to fall back to pipeline defaults.
+        """
+        p = self._p
+        args = p.options.get("args")
+        if args is not None and getattr(args, "no_tweakreg_flc_grid", False):
+            return None
+        if not getattr(settings, "tweakreg_flc_grid_prealign", True):
+            return None
+        if not getattr(settings, "flc_guess_shift_enabled", True):
+            return None
+        ref = (
+            normalize_fits_path(str(anchor_fp).strip())
+            if anchor_fp and str(anchor_fp).strip()
+            else ""
+        )
+        if not ref or not os.path.isfile(ref):
+            return None
+        if os.path.basename(ref) == "dummy.fits":
+            return None
+
+        from hst123.primitives.astrometry.jhat import (
+            apply_crpix_guess_shift_to_flc,
+            guess_shift_hst_flc,
+            write_flc_anchor_refcat_for_jhat,
+        )
+
+        sanitize_flc_distortion_headers_inplace(ref)
+        try:
+            refcat = write_flc_anchor_refcat_for_jhat(ref, outdir)
+        except Exception as exc:
+            log.warning(
+                "TweakReg FLC grid: anchor refcat failed (%s); skipping pre-align.",
+                exc,
+            )
+            return None
+
+        gs_step = float(getattr(settings, "flc_guess_shift_step_px", 5.0))
+        gs_radius = float(
+            getattr(settings, "flc_guess_shift_radius_px", 0.5 * gs_step)
+        )
+        gs_dist = float(
+            getattr(settings, "flc_guess_shift_dist_limit_arcsec", 5.0)
+        )
+        gs_sig = float(getattr(settings, "flc_guess_shift_sigma", 2.0))
+        gs_maxp = int(getattr(settings, "flc_guess_shift_max_peaks", 800))
+        gs_fwhm = float(getattr(settings, "flc_guess_shift_fwhm_px", 3.5))
+        gs_refine = bool(
+            getattr(settings, "flc_guess_shift_refine_crossmatch", True)
+        )
+
+        factor = float(getattr(settings, "tweakreg_flc_grid_search_factor", 2.0))
+        floor_a = float(getattr(settings, "tweakreg_flc_grid_search_min_arcsec", 0.05))
+        if args is not None:
+            if getattr(args, "tweakreg_flc_grid_factor", None) is not None:
+                factor = float(args.tweakreg_flc_grid_factor)
+            if getattr(args, "tweakreg_flc_grid_min_arcsec", None) is not None:
+                floor_a = float(args.tweakreg_flc_grid_min_arcsec)
+
+        mc_vals: list[float] = []
+        for image in run_images:
+            if not self._is_flc_grid_candidate(image):
+                continue
+            img = normalize_fits_path(str(image))
+            sanitize_flc_distortion_headers_inplace(img)
+            try:
+                dx_gs, dy_gs, min_c, n_match = guess_shift_hst_flc(
+                    img,
+                    refcat,
+                    radius_px=gs_radius,
+                    step_px=gs_step,
+                    dist_limit_arcsec=gs_dist,
+                    sigma_clip=gs_sig,
+                    max_peak_sources=gs_maxp,
+                    fwhm_px=gs_fwhm,
+                    refine_crossmatch=gs_refine,
+                )
+            except Exception as exc:
+                log.warning(
+                    "TweakReg FLC grid: guess_shift_hst_flc failed for %s: %s",
+                    os.path.basename(img),
+                    exc,
+                )
+                continue
+            applied = False
+            if np.isfinite(min_c) and (abs(dx_gs) > 1e-6 or abs(dy_gs) > 1e-6):
+                apply_crpix_guess_shift_to_flc(
+                    img,
+                    dx_gs,
+                    dy_gs,
+                    min_cost_arcsec=min_c,
+                    logger=log,
+                )
+                applied = True
+            cost_msg = f"{float(min_c):.4f}" if np.isfinite(min_c) else "inf"
+            log.info(
+                "TweakReg FLC grid: %s Δ(CRPIX)=(%.4f, %.4f) px min_cost≈%s″ "
+                "n_match=%d applied=%s",
+                os.path.basename(img),
+                float(dx_gs),
+                float(dy_gs),
+                cost_msg,
+                int(n_match),
+                applied,
+            )
+            if np.isfinite(min_c):
+                mc_vals.append(float(min_c))
+
+        if not mc_vals:
+            return None
+        mc_max = max(mc_vals)
+        sr = max(floor_a, factor * mc_max)
+        log.info(
+            "TweakReg FLC grid: max min_cost≈%.6f″ across %d exposure(s) → "
+            "search_radius≈%.6f″ (factor=%g floor=%g″)",
+            mc_max,
+            len(mc_vals),
+            sr,
+            factor,
+            floor_a,
+        )
+        return float(sr)
+
+    def _stamp_hst123_tweakreg_rms_headers(self, shift_table: Table) -> None:
+        """
+        Record measured fit RMS on each aligned exposure: RMSX, RMSY (pixels) and
+        RMSRA, RMSDEC (arcseconds), plus FITS-standard RMS_RA/RMS_DEC (deg) when
+        approximating from pixel RMS × plate scale.
+        """
+        try:
+            from stwcs.wcsutil import HSTWCS
+        except Exception:
+            HSTWCS = None
+
+        for row in shift_table:
+            fp = normalize_fits_path(str(row["file"]))
+            if not os.path.isfile(fp):
+                continue
+            try:
+                rx = float(row["rms_x"])
+                ry = float(row["rms_y"])
+            except (TypeError, KeyError, ValueError):
+                continue
+            if not (np.isfinite(rx) and np.isfinite(ry)):
+                continue
+
+            ps_arcsec: float | None = None
+            if HSTWCS is not None:
+                try:
+                    with fits.open(fp, memmap=False) as hdul:
+                        _sc = []
+                        for i in range(len(hdul)):
+                            if getattr(hdul[i], "name", "").upper() != "SCI":
+                                continue
+                            if hdul[i].data is None:
+                                continue
+                            try:
+                                w = HSTWCS(hdul, ext=i)
+                                psc = getattr(w, "pscale", None)
+                                if psc is not None and np.isfinite(psc) and float(psc) > 0:
+                                    _sc.append(float(psc))
+                            except Exception:
+                                continue
+                        if _sc:
+                            ps_arcsec = float(np.mean(_sc))
+                except OSError:
+                    pass
+
+            # Sky RMS (arcsec): prefer DrizzlePac/stwcs header values already on disk
+            rra_deg = None
+            rdd_deg = None
+            try:
+                with fits.open(fp, memmap=False) as hdul:
+                    for hdu in hdul:
+                        if getattr(hdu, "name", "").upper() != "SCI":
+                            continue
+                        h = hdu.header
+                        if "RMS_RA" in h and "RMS_DEC" in h:
+                            rra_deg = float(h["RMS_RA"])
+                            rdd_deg = float(h["RMS_DEC"])
+                            break
+                        if "CRDER1" in h and "CRDER2" in h:
+                            rra_deg = abs(float(h["CRDER1"]))
+                            rdd_deg = abs(float(h["CRDER2"]))
+                            break
+            except OSError:
+                pass
+
+            if (
+                rra_deg is None
+                and rdd_deg is None
+                and ps_arcsec is not None
+                and ps_arcsec > 0
+            ):
+                rra_deg = abs(rx) * ps_arcsec / 3600.0
+                rdd_deg = abs(ry) * ps_arcsec / 3600.0
+
+            try:
+                with fits.open(fp, mode="update", memmap=False) as hdul:
+                    for i in range(len(hdul)):
+                        if getattr(hdul[i], "name", "").upper() != "SCI":
+                            continue
+                        hdr = hdul[i].header
+                        hdr["RMSX"] = (
+                            rx,
+                            "TweakReg shift-fit RMS axis 1 (pix); hst123",
+                        )
+                        hdr["RMSY"] = (
+                            ry,
+                            "TweakReg shift-fit RMS axis 2 (pix); hst123",
+                        )
+                        if rra_deg is not None and rdd_deg is not None:
+                            hdr["RMSRA"] = (
+                                rra_deg * 3600.0,
+                                "WCS fit RMS RA (arcsec); hst123",
+                            )
+                            hdr["RMSDEC"] = (
+                                rdd_deg * 3600.0,
+                                "WCS fit RMS Dec (arcsec); hst123",
+                            )
+                            hdr["RMS_RA"] = (
+                                rra_deg,
+                                "WCS fit RMS RA (deg); hst123/stwcs convention",
+                            )
+                            hdr["RMS_DEC"] = (
+                                rdd_deg,
+                                "WCS fit RMS Dec (deg); hst123/stwcs convention",
+                            )
+                    hdul.flush()
+            except Exception as exc:
+                log.warning(
+                    "Could not write RMSX/RMSY/RMSRA/RMSDEC on %s: %s",
+                    os.path.basename(fp),
+                    exc,
+                )
 
     @log_calls
     @_quiet_headerlet_loggers
@@ -1316,14 +1965,27 @@ class AstrometryPrimitive(BasePrimitive):
         skip_wcs : bool, optional
             Skip WCS update. Default False.
         search_radius : float, optional
-            Override search radius. Default from options.
+            Override search radius (arcsec). Default from ``global_defaults``. If omitted
+            and FLC grid pre-align is on, use ``max(min_arcsec, factor × max grid
+            min_cost)`` (see ``tweakreg_flc_grid_*`` / ``--no-tweakreg-flc-grid``).
         update_hdr : bool, optional
             Update FITS headers. Default True.
+
+        Notes
+        -----
+        ``*_flc.fits`` non-reference frames may be CRPIX-pre-aligned (``guess_shift_hst_flc``)
+        before TweakReg. Afterward, :meth:`_stamp_hst123_tweakreg_rms_headers` writes
+        ``RMSX``, ``RMSY``, ``RMSRA``, ``RMSDEC``, and ``RMS_RA`` / ``RMS_DEC`` on SCI
+        headers when available.
 
         Returns
         -------
         tuple
-            (success_bool, shift_table).
+            ``(success_bool, shift_table)``. *success_bool* is True when every TweakReg
+            batch either converged by finite measured shifts for all non-reference
+            exposures (and the reference anchor is recorded when it is in-batch), or
+            matched the legacy provenance-based redundancy check; False if any batch
+            exhausted retries without meeting either criterion.
         """
         p = self._p
         outdir = _resolve_work_dir_chdir(p.options["args"].work_dir)
@@ -1365,14 +2027,28 @@ class AstrometryPrimitive(BasePrimitive):
         if reference in run_images:
             run_images.remove(reference)
 
-        shift_table = Table(
-            [run_images, [np.nan] * len(run_images), [np.nan] * len(run_images)],
-            names=("file", "xoffset", "yoffset"),
-        )
-
         if not run_images:
             log.warning("All images have been run through tweakreg.")
-            return _tweakreg_cleanup_and_return((True, shift_table))
+            shift_empty = Table(
+                names=("file", "xoffset", "yoffset", "rms_x", "rms_y"),
+            )
+            return _tweakreg_cleanup_and_return((True, shift_empty))
+
+        n_img = len(run_images)
+        shift_table = Table(
+            [
+                run_images,
+                [np.nan] * n_img,
+                [np.nan] * n_img,
+                [np.nan] * n_img,
+                [np.nan] * n_img,
+            ],
+            names=("file", "xoffset", "yoffset", "rms_x", "rms_y"),
+        )
+
+        grid_search_radius = self._prealign_flc_for_tweakreg(
+            initial_ref, run_images, outdir
+        )
 
         n_align = len(run_images)
         log.info("TweakReg: aligning %d image(s).", n_align)
@@ -1383,7 +2059,11 @@ class AstrometryPrimitive(BasePrimitive):
 
         tmp_images = []
         for image in run_images:
-            if p.updatewcs and not skip_wcs:
+            if (
+                p.updatewcs
+                and not skip_wcs
+                and settings.pipeline_updatewcs_enabled()
+            ):
                 det = "_".join(p._fits.get_instrument(image).split("_")[:2])
                 wcsoptions = p.options["detector_defaults"][det]
                 # Match run_astrodrizzle: skip MAST AstrometryDB here. DB updates call
@@ -1412,6 +2092,20 @@ class AstrometryPrimitive(BasePrimitive):
             p.run_cosmic(rawtmp, crpars)
 
         self._ensure_workspace_rawtmps(tmp_images, do_cosmic=do_cosmic)
+
+        # ``run_images`` omits the TweakReg *reference* frame (removed above), so
+        # ``tmp_images`` would only contain the other exposure(s) (e.g. one rawtmp).
+        # Per-filter batching in ``_build_tweakreg_batches`` then sees one file per
+        # band and logs "need ≥2 images" even when aligning exactly two FLCs. Re-add
+        # the anchor exposure path so each filter group has the full set.
+        if initial_ref and str(initial_ref).strip() not in ("", "dummy.fits"):
+            anchor_fp = normalize_fits_path(str(initial_ref).strip())
+            if os.path.isfile(anchor_fp):
+                have = {
+                    os.path.normpath(os.path.realpath(x)) for x in tmp_images
+                }
+                if os.path.normpath(os.path.realpath(anchor_fp)) not in have:
+                    tmp_images.insert(0, anchor_fp)
 
         modified = False
         ref_images = p.pick_deepest_images(tmp_images)
@@ -1543,9 +2237,11 @@ class AstrometryPrimitive(BasePrimitive):
 
                 nbright = options["nbright"]
                 minobj = options["minobj"]
-                search_rad = int(np.round(options["search_rad"]))
-                if search_radius:
-                    search_rad = search_radius
+                search_rad = float(options["search_rad"])
+                if search_radius is not None:
+                    search_rad = float(search_radius)
+                elif grid_search_radius is not None:
+                    search_rad = float(grid_search_radius)
 
                 trd = settings.tweakreg_defaults
                 rconv = trd["conv_width"]
@@ -1672,6 +2368,7 @@ class AstrometryPrimitive(BasePrimitive):
                     tries += 1
                     continue
 
+                # DrizzlePac row: file, dx, dy, rot, scale, rms_x, rms_y (fit residual RMS per axis, px)
                 shifts = Table.read(
                     out_this,
                     format="ascii",
@@ -1679,10 +2376,10 @@ class AstrometryPrimitive(BasePrimitive):
                         "file",
                         "xoffset",
                         "yoffset",
-                        "rotation1",
-                        "rotation2",
-                        "scale1",
-                        "scale2",
+                        "rot",
+                        "scale",
+                        "rms_x",
+                        "rms_y",
                     ),
                 )
 
@@ -1700,6 +2397,9 @@ class AstrometryPrimitive(BasePrimitive):
                 self.apply_tweakreg_success(
                     shifts, ref_id=ref_use, method="tweakreg"
                 )
+                self._mark_tweakreg_reference_anchor_provenance(
+                    ref_use, batch_imgs, method="tweakreg"
+                )
 
                 for row in shifts:
                     filename = os.path.basename(row["file"])
@@ -1714,8 +2414,21 @@ class AstrometryPrimitive(BasePrimitive):
                     if len(idx) == 1:
                         shift_table[idx[0]]["xoffset"] = row["xoffset"]
                         shift_table[idx[0]]["yoffset"] = row["yoffset"]
+                        shift_table[idx[0]]["rms_x"] = row["rms_x"]
+                        shift_table[idx[0]]["rms_y"] = row["rms_y"]
 
-                if not self.check_images_for_tweakreg(
+                measured_ok = self._tweakreg_batch_measured_shifts_complete(
+                    batch_imgs, ref_use, shifts
+                )
+                if measured_ok:
+                    batch_ok = True
+                    log.info(
+                        "TweakReg batch %d: success from finite measured shifts "
+                        "(all non-reference exposures have shift rows; ref=%s)",
+                        bi,
+                        os.path.basename(str(ref_use)),
+                    )
+                elif not self.check_images_for_tweakreg(
                     batch_imgs,
                     alignment_method="tweakreg",
                     alignment_ref_id=ref_use,
@@ -1872,5 +2585,7 @@ class AstrometryPrimitive(BasePrimitive):
 
         if modified:
             p.sanitize_reference(reference)
+
+        self._stamp_hst123_tweakreg_rms_headers(shift_table)
 
         return _tweakreg_cleanup_and_return((tweakreg_success, shift_table))

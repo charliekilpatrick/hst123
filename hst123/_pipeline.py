@@ -29,7 +29,7 @@ import warnings
 import numpy as np
 import requests
 from astropy.io import fits
-from astropy.table import Table, Column, unique
+from astropy.table import Table, Column, Row, unique, vstack
 from astropy.time import Time
 from astropy.utils.data import clear_download_cache
 import astropy.wcs as wcs
@@ -60,9 +60,11 @@ from hst123.utils.stdio import (
     limit_blas_threads_when_parallel,
     suppress_stdout,
     suppress_stdout_fd,
+    tee_stdout_fd_to_logger,
 )
 from hst123.utils.options import (
     dolphot_catalog_already_present,
+    want_redo_astrometry,
     want_redo_astrodrizzle,
     want_redo_dolphot,
 )
@@ -77,6 +79,10 @@ from hst123.utils.astrodrizzle_paths import (
     normalize_astrodrizzle_output_path,
     recover_drizzlepac_linear_output,
 )
+from hst123.primitives.astrometry.alignment_meta import (
+    alignment_is_redundant,
+    write_alignment_provenance,
+)
 from hst123.utils.alignment_validation import write_gaia_alignment_crderr_to_reference_driz
 from hst123.utils.astrodrizzle_helpers import (
     is_hst123_wfpc2_astrodrizzle_scratch,
@@ -85,6 +91,7 @@ from hst123.utils.astrodrizzle_helpers import (
     build_astrodrizzle_keyword_args,
     build_wfpc2_skymask_catalog,
     combine_type_and_nhigh,
+    suppress_drizzlepac_interactive_dgeo_prompt,
     wfpc2_astrodrizzle_scratch_paths,
     canonical_drizzle_input_stem,
     canonicalize_wfpc2_astrodrizzle_input_path,
@@ -118,6 +125,14 @@ from hst123.utils.wcs_utils import (
     make_meta_wcs_header as make_meta_wcs_header_util,
     remove_conflicting_alt_wcs_duplicate_names,
     wcs_from_fits_hdu,
+)
+from hst123.utils.mast_client import (
+    DOWNLOAD_BATCH,
+    MAST_TRANSIENT_ERRORS,
+    OBS_PRODUCT_BATCH,
+    iter_table_batches,
+    mast_call_with_retries,
+    mast_extended_timeout,
 )
 from hst123.primitives import FitsHelper, PhotometryHelper
 from hst123.primitives.astrometry import AstrometryPrimitive, parse_coord
@@ -1421,6 +1436,103 @@ class hst123(object):
 
     return reference_images
 
+  def _jhat_anchor_gaia_on_reference_drizzle(
+        self, driz_path: str, *, force: bool = False
+    ) -> None:
+    """
+    Run Gaia JHAT once on the stacked reference drizzle; set
+    ``_jhat_gaia_ref_stats`` and FITS provenance. Raw FLC alignment does not
+    use Gaia; this is the only Gaia JHAT on the reference product unless
+    ``run_alignment`` must repeat it (e.g. after ``--redo`` astrometry).
+    Skips when the drizzle PRIMARY already records successful JHAT vs GAIA.
+
+    Parameters
+    ----------
+    driz_path : str
+        Path to the reference drizzle FITS.
+    force : bool, optional
+        When True, run even if ``--align-with`` is not ``jhat`` (drizzle-first
+        TweakReg mode anchors the main stack to Gaia before stack-level TweakReg).
+    """
+    opt = self.options["args"]
+    if getattr(opt, "skip_tweakreg", False):
+        return
+    if getattr(opt, "align_with", "tweakreg").lower() != "jhat" and not force:
+        return
+
+    from hst123.primitives.astrometry.gaia_simple import align_to_gaia_simple_inplace
+
+    wd = opt.work_dir or "."
+    outdir = pipeline_workspace_dir(wd) or os.path.abspath(wd)
+    force_realign = want_redo_astrometry(opt)
+
+    ref_for_hier = os.path.abspath(normalize_fits_path(driz_path))
+    try:
+        with fits.open(ref_for_hier, mode="readonly") as _h:
+            has_sci = any(
+                str(getattr(hdu, "name", "")).strip().upper() == "SCI"
+                or str(hdu.header.get("EXTNAME", "")).strip().upper() == "SCI"
+                for hdu in _h
+            )
+        if not has_sci:
+            cand = []
+            if ref_for_hier.endswith(".drc.fits"):
+                cand.append(ref_for_hier.replace(".drc.fits", ".drz.fits"))
+                cand.append(ref_for_hier.replace(".drc.fits", ".drz_sci.fits"))
+            base = os.path.basename(ref_for_hier)
+            d = os.path.dirname(ref_for_hier) or "."
+            cand.append(os.path.join(d, base + ".drz.fits"))
+            for c in cand:
+                if c and os.path.isfile(c):
+                    log.info(
+                        "Gaia simple anchor: %s has no SCI; using %s.",
+                        os.path.basename(ref_for_hier),
+                        os.path.basename(c),
+                    )
+                    ref_for_hier = c
+                    break
+    except Exception:
+        pass
+
+    if not force_realign:
+        try:
+            hdr0 = fits.getheader(ref_for_hier, 0)
+        except Exception:
+            hdr0 = None
+        if hdr0 is not None and alignment_is_redundant(
+            hdr0,
+            method="gaia_simple",
+            ref_id="GAIA",
+            require_success=True,
+        ):
+            log.info(
+                "Gaia simple anchor: %s already anchored; skipping.",
+                os.path.basename(ref_for_hier),
+            )
+            return
+
+    try:
+        log.info(
+            "Gaia simple anchor: aligning reference drizzle to Gaia: %s",
+            os.path.basename(ref_for_hier),
+        )
+        stats = align_to_gaia_simple_inplace(ref_for_hier, outdir=outdir, write_diagnostics=False)
+        if stats:
+            stats.setdefault("image", os.path.basename(ref_for_hier))
+            self._jhat_gaia_ref_stats = [stats]
+        with fits.open(ref_for_hier, mode="update") as hdu:
+            hdu[0].header["TWEAKSUC"] = 1
+            write_alignment_provenance(
+                hdu[0].header, method="gaia_simple", ref_id="GAIA", success=True
+            )
+            hdu.flush()
+    except Exception as exc:
+        log.warning(
+            "Gaia simple anchor on reference drizzle failed (%s): %s",
+            os.path.basename(ref_for_hier),
+            exc,
+        )
+
   @log_calls
   def pick_reference(self, obstable):
     """
@@ -1429,6 +1541,14 @@ class hst123(object):
     Chooses the deepest exposures in the preferred filter, optionally runs an
     instrument-mask drizzle when ``n<3``, then drizzles to the visit reference
     filename (``{inst}.{filt}.ref_{visit}.drc.fits``) under ``work_dir``.
+
+    Pipeline order (legacy ``--align-with jhat`` / non-drizzle-first runs): align
+    reference exposures when applicable, AstroDrizzle the reference product, then
+    Gaia JHAT on that drizzle once, then :func:`main` performs visit-wide alignment.
+
+    With the default ``--align-with tweakreg`` driver, the main reference drizzle is
+    chosen from existing per-visit/filter stacks after ``--drizzle-all``; see
+    :meth:`pick_main_reference_from_drizzled` and :func:`main`.
 
     Parameters
     ----------
@@ -1585,6 +1705,7 @@ class hst123(object):
         getattr(self.options["args"], "align_with", "tweakreg") == "jhat"
         and not self.options["args"].skip_tweakreg
     ):
+        self._jhat_anchor_gaia_on_reference_drizzle(drizname)
         jg = getattr(self, "_jhat_gaia_ref_stats", None)
         if jg:
             write_gaia_alignment_crderr_to_reference_driz(drizname, jg, log=log)
@@ -1731,8 +1852,10 @@ class hst123(object):
     """
     Run STScI ``updatewcs`` on a calibrated image after header hygiene.
 
-    Skips images already marked ``TWEAKSUC`` or hierarchically aligned. Otherwise
-    resolves CRDS paths, optionally calls AstrometryDB (``use_db``), then applies
+    Skips images already marked ``TWEAKSUC`` or hierarchically aligned. When
+    :func:`~hst123.settings.pipeline_updatewcs_enabled` is false (default),
+    returns immediately without calling ``stwcs.updatewcs``. Otherwise resolves
+    CRDS paths, optionally calls AstrometryDB (``use_db``), then applies
     ``fix_hdu_wcs_keys`` and ``fix_idcscale``.
 
     Parameters
@@ -1763,6 +1886,13 @@ class hst123(object):
             with fits.open(rt, mode="readonly") as h_raw:
                 if alignment_done_on_primary_header(h_raw[0].header):
                     return True
+
+    if not settings.pipeline_updatewcs_enabled():
+        log.debug(
+            "Skipping stwcs.updatewcs (set HST123_PIPELINE_UPDATEWCS=1 to enable): %s",
+            os.path.basename(image),
+        )
+        return True
 
     message = 'Updating WCS for {file}'
     log.info(message.format(file=image))
@@ -2165,7 +2295,10 @@ class hst123(object):
                     with limit_blas_threads_when_parallel(int(ad_kwargs_run.get("num_cores", 1))):
                         with suppress_stdout_fd():
                             with suppress_stdout():
-                                astrodrizzle.AstroDrizzle(ad_rel_inputs, **ad_kwargs_run)
+                                with suppress_drizzlepac_interactive_dgeo_prompt():
+                                    astrodrizzle.AstroDrizzle(
+                                        ad_rel_inputs, **ad_kwargs_run
+                                    )
                 finally:
                     try:
                         os.chdir(prev_cwd)
@@ -2203,9 +2336,12 @@ class hst123(object):
                         ad_kwargs_run["wcskey"] = " "
                         wcs_restore_fallback_used = True
                         continue
-                    # (2) Primary SCI WCS still invalid for HSTWCS — let stwcs.updatewcs repair headers.
-                    if not wcs_updatewcs_fallback_used and not ad_kwargs_run.get(
-                        "updatewcs"
+                    # (2) Primary SCI WCS still invalid for HSTWCS — optionally let
+                    # stwcs.updatewcs repair headers (gated; default off).
+                    if (
+                        settings.pipeline_updatewcs_enabled()
+                        and not wcs_updatewcs_fallback_used
+                        and not ad_kwargs_run.get("updatewcs")
                     ):
                         log.warning(
                             "AstroDrizzle still failed loading WCS (e.g. HSTWCS on SCI): %s. "
@@ -2463,6 +2599,136 @@ class hst123(object):
   # MAST: query_region, product table, download_files
   # ---------------------------------------------------------------------------
 
+  @staticmethod
+  def _mast_science_product_filename(filename, instrument):
+    """True when *filename* is a pipeline science FLT/FLC/C0M/C1M product."""
+    return (
+        ('c0m.fits' in filename and 'WFPC2' in instrument)
+        or ('c1m.fits' in filename and 'WFPC2' in instrument)
+        or ('c0m.fits' in filename and 'PC/WFC' in instrument)
+        or ('c1m.fits' in filename and 'PC/WFC' in instrument)
+        or ('flc.fits' in filename and 'ACS/WFC' in instrument)
+        or ('flt.fits' in filename and 'ACS/HRC' in instrument)
+        or ('flc.fits' in filename and 'WFC3/UVIS' in instrument)
+        or ('flt.fits' in filename and 'WFC3/IR' in instrument)
+    )
+
+  def _mast_query_observations(self, coord, search_radius):
+    """Query MAST with server-side HST/IMAGE filters when possible."""
+    with mast_extended_timeout():
+        try:
+            return mast_call_with_retries(
+                Observations.query_criteria,
+                coordinates=coord,
+                radius=search_radius,
+                obs_collection='HST',
+                dataproduct_type='IMAGE',
+            )
+        except astroquery.exceptions.InvalidQueryError:
+            log.debug(
+                "MAST query_criteria unavailable; falling back to query_region",
+            )
+            return mast_call_with_retries(
+                Observations.query_region,
+                coord,
+                radius=search_radius,
+            )
+
+  @staticmethod
+  def _mast_observation_lookup_maps(obsTable):
+    """Maps for joining MAST product rows back to cone-search observations."""
+    by_obsid = {}
+    by_obs_id = {}
+    for row in obsTable:
+        if 'obsid' in obsTable.colnames:
+            by_obsid[str(row['obsid'])] = row
+        if 'obs_id' in obsTable.colnames:
+            by_obs_id[row['obs_id']] = row
+    return by_obsid, by_obs_id
+
+  @staticmethod
+  def _mast_lookup_observation(by_obsid, by_obs_id, product_key, key_column):
+    """Resolve one product row key to its parent observation row."""
+    if key_column in ('obsID', 'obsid'):
+        return by_obsid.get(str(product_key))
+    if key_column == 'obs_id':
+        return by_obs_id.get(product_key)
+    return None
+
+  @staticmethod
+  def _mast_product_obs_key_column(productTable):
+    """Column linking product rows to observations (MAST uses ``obsID``, not ``obsid``)."""
+    for name in ('obsID', 'obsid', 'obs_id'):
+        if name in productTable.colnames:
+            return name
+    raise KeyError(
+        "MAST product table has no observation key column "
+        f"(got {productTable.colnames}); expected obsID, obsid, or obs_id.",
+    )
+
+  def _mast_fetch_product_tables(self, obsTable):
+    """Batch ``get_product_list`` calls instead of one request per observation."""
+    tables = []
+    n_obs = len(obsTable)
+    n_batches = (n_obs + OBS_PRODUCT_BATCH - 1) // OBS_PRODUCT_BATCH if n_obs else 0
+    by_obsid, by_obs_id = self._mast_observation_lookup_maps(obsTable)
+
+    for batch_idx, chunk in enumerate(iter_table_batches(obsTable, OBS_PRODUCT_BATCH)):
+        log.info(
+            "MAST get_product_list batch %i/%i (%i observation(s))",
+            batch_idx + 1,
+            n_batches,
+            len(chunk),
+        )
+        try:
+            with mast_extended_timeout():
+                productList = mast_call_with_retries(
+                    Observations.get_product_list,
+                    chunk,
+                )
+        except MAST_TRANSIENT_ERRORS as exc:
+            log.warning(
+                "MAST get_product_list batch %i/%i failed: %s",
+                batch_idx + 1,
+                n_batches,
+                exc,
+            )
+            continue
+
+        if len(productList) == 0:
+            continue
+
+        mask = productList['type'] == 'S'
+        productList = productList[mask]
+        if len(productList) == 0:
+            continue
+
+        key_col = self._mast_product_obs_key_column(productList)
+        instruments = []
+        ras = []
+        decs = []
+        for product_key in productList[key_col]:
+            obs = self._mast_lookup_observation(
+                by_obsid, by_obs_id, product_key, key_col,
+            )
+            if obs is None:
+                instruments.append('')
+                ras.append(np.nan)
+                decs.append(np.nan)
+            else:
+                instruments.append(obs['instrument_name'])
+                ras.append(obs['s_ra'])
+                decs.append(obs['s_dec'])
+
+        productList.add_column(Column(instruments, name='instrument_name'))
+        productList.add_column(Column(ras, name='ra'))
+        productList.add_column(Column(decs, name='dec'))
+        tables.append(productList)
+
+    if not tables:
+        return None
+    return vstack(tables)
+
   @log_calls
   def get_productlist(self, coord, search_radius):
     """
@@ -2506,11 +2772,8 @@ class hst123(object):
         log.warning("Could not log in with input username/password")
 
     try:
-        obsTable = Observations.query_region(coord, radius=search_radius)
-    except (astroquery.exceptions.RemoteServiceError,
-        requests.exceptions.ConnectionError,
-        astroquery.exceptions.TimeoutError,
-        requests.exceptions.ChunkedEncodingError):
+        obsTable = self._mast_query_observations(coord, search_radius)
+    except MAST_TRANSIENT_ERRORS:
         log.error("MAST is not currently working. Try again later.")
         return productlist
 
@@ -2563,49 +2826,21 @@ class hst123(object):
             len(obsTable),
         )
 
-    # Get product lists in order of observation time
     obsTable.sort('t_min')
 
-    # Iterate through each observation and download the correct product
-    # depending on the filename and instrument/detector of the observation
-    for obs in obsTable:
-        try:
-            productList = Observations.get_product_list(obs)
-            # Ignore the 'C' type products
-            mask = productList['type']=='S'
-            productList = productList[mask]
-        except Exception:
-            log.error("MAST is not currently working. Try again later.")
-            return productlist
+    all_products = self._mast_fetch_product_tables(obsTable)
+    if all_products is None:
+        log.error("MAST is not currently working. Try again later.")
+        return productlist
 
-        instrument = obs['instrument_name']
-        s_ra = obs['s_ra']
-        s_dec = obs['s_dec']
-
-        instcol = Column([instrument]*len(productList), name='instrument_name')
-        racol = Column([s_ra]*len(productList), name='ra')
-        deccol = Column([s_dec]*len(productList), name='dec')
-
-        productList.add_column(instcol)
-        productList.add_column(racol)
-        productList.add_column(deccol)
-
-        for prod in productList:
-            filename = prod['productFilename']
-
-            if (('c0m.fits' in filename and 'WFPC2' in instrument) or
-                ('c1m.fits' in filename and 'WFPC2' in instrument) or
-                ('c0m.fits' in filename and 'PC/WFC' in instrument) or
-                ('c1m.fits' in filename and 'PC/WFC' in instrument) or
-                ('flc.fits' in filename and 'ACS/WFC' in instrument) or
-                ('flt.fits' in filename and 'ACS/HRC' in instrument) or
-                ('flc.fits' in filename and 'WFC3/UVIS' in instrument) or
-                ('flt.fits' in filename and 'WFC3/IR' in instrument)):
-
-                if not productlist:
-                    productlist = Table(prod)
-                else:
-                    productlist.add_row(prod)
+    for prod in all_products:
+        filename = prod['productFilename']
+        instrument = prod['instrument_name']
+        if self._mast_science_product_filename(filename, instrument):
+            if not productlist:
+                productlist = Table(prod)
+            else:
+                productlist.add_row(prod)
 
     if not productlist:
         log.warning(
@@ -2637,34 +2872,112 @@ class hst123(object):
 
     return productlist
 
-  def _mast_download_one_product_row(self, item):
+  def _mast_download_product_batch(self, batch, mast_staging_parent, n_total):
     """
-    Download one MAST product row (used by :meth:`download_files` thread pool).
+    Download a batch of MAST products in one ``download_products`` call.
 
     Parameters
     ----------
-    item : tuple
-        ``(i, prod, filename, n, mast_staging_parent)`` where *i* is the 0-based
-        index in the full product list, *n* is ``len(productlist)``, and
-        *filename* is the destination path after archive / dest resolution.
+    batch : list of tuple
+        ``(index, prod, dest_path)`` for each file in the batch.
+    mast_staging_parent : str
+        Staging directory (``flat=True`` downloads land here).
+    n_total : int
+        Total pending download count (for log messages).
     """
-    i, prod, filename, n, mast_staging_parent = item
-    message = f"({i+1}/{n}) {filename}"
-    log.debug("MAST download try %s", message)
+    if not batch:
+        return
+
+    dest_by_basename = {}
+    rows = []
+    for i, prod, dest_path in batch:
+        basename = os.path.basename(prod['productFilename'])
+        dest_by_basename[basename] = (i, dest_path)
+        rows.append(prod)
+
+    if isinstance(rows[0], Row):
+        products = vstack([Table(r) for r in rows])
+    else:
+        products = Table(rows)
+
+    first_i = batch[0][0]
+    last_i = batch[-1][0]
+    log.info(
+        "MAST download batch (%i–%i of %i), %i file(s)",
+        first_i + 1,
+        last_i + 1,
+        n_total,
+        len(batch),
+    )
+
     try:
         with suppress_stdout():
-            download = Observations.download_products(
-                Table(prod),
-                download_dir=mast_staging_parent,
-                cache=False,
+            with mast_extended_timeout():
+                manifest = mast_call_with_retries(
+                    Observations.download_products,
+                    products,
+                    download_dir=mast_staging_parent,
+                    flat=True,
+                    cache=False,
+                )
+    except MAST_TRANSIENT_ERRORS as exc:
+        for i, prod, dest_path in batch:
+            log.warning(
+                "MAST fail (%i/%i) %s: %s",
+                i + 1,
+                n_total,
+                dest_path,
+                exc,
             )
-        shutil.move(download['Local Path'][0], filename)
-
-        log.debug("MAST ok %s", message)
-
-    except Exception as e:
-        log.warning("MAST fail %s: %s", message, e)
+        return
+    except Exception as exc:
+        for i, prod, dest_path in batch:
+            log.warning(
+                "MAST fail (%i/%i) %s: %s",
+                i + 1,
+                n_total,
+                dest_path,
+                exc,
+            )
         log.debug("Download exception detail", exc_info=True)
+        return
+
+    if manifest is None or len(manifest) == 0:
+        for i, prod, dest_path in batch:
+            log.warning("MAST fail (%i/%i) %s: empty manifest", i + 1, n_total, dest_path)
+        return
+
+    for row in manifest:
+        local_path = row['Local Path']
+        status = row['Status']
+        basename = os.path.basename(local_path)
+        entry = dest_by_basename.get(basename)
+        if entry is None:
+            log.warning("MAST: unexpected staged file %s", local_path)
+            continue
+        i, dest_path = entry
+        if status != 'COMPLETE':
+            log.warning(
+                "MAST fail (%i/%i) %s: status=%s %s",
+                i + 1,
+                n_total,
+                dest_path,
+                status,
+                row['Message'],
+            )
+            continue
+        try:
+            os.makedirs(os.path.dirname(dest_path) or '.', exist_ok=True)
+            shutil.move(local_path, dest_path)
+            log.debug("MAST ok (%i/%i) %s", i + 1, n_total, dest_path)
+        except OSError as exc:
+            log.warning(
+                "MAST fail (%i/%i) %s: %s",
+                i + 1,
+                n_total,
+                dest_path,
+                exc,
+            )
 
   @log_calls
   def download_files(
@@ -2701,10 +3014,11 @@ class hst123(object):
     Staging always lives under *work_dir* so ``mastDownload`` is not created in an
     unrelated shell current directory.
 
-    Downloads run **sequentially**. ``Observations.download_products`` (astroquery)
-    is not thread-safe; parallel calls caused intermittent ``I/O operation on closed
-    file`` errors and staging-directory races (``[Errno 17] File exists``).
-    ``--max-cores`` still applies to drizzle/DOLPHOT parallelism elsewhere.
+    Downloads run in batches of :data:`~hst123.utils.mast_client.DOWNLOAD_BATCH`
+    files per ``download_products`` call (``flat=True`` staging, then move into
+    final paths). Batching cuts portal round-trips for large product lists.
+    Parallel ``download_products`` calls are avoided (astroquery is not
+    thread-safe). ``--max-cores`` still applies to drizzle/DOLPHOT elsewhere.
     """
     if not productlist:
         log.error('Product list is empty. Cannot download files.')
@@ -2743,21 +3057,21 @@ class hst123(object):
     n_pending = len(pending)
 
     tgt = dest_abs or arch_abs or os.getcwd()
+    n_batches = (n_pending + DOWNLOAD_BATCH - 1) // DOWNLOAD_BATCH if n_pending else 0
     log.info(
-        "MAST download: %d product(s), %d to fetch → %s (temp %s; sequential)",
+        "MAST download: %d product(s), %d to fetch → %s (temp %s; %d batch(es) of ≤%d)",
         n,
         n_pending,
         tgt,
         mast_staging_parent,
+        n_batches,
+        DOWNLOAD_BATCH,
     )
 
     if n_pending:
-        items = [
-            (i, prod, filename, n, mast_staging_parent)
-            for i, prod, filename in pending
-        ]
-        for it in items:
-            self._mast_download_one_product_row(it)
+        for batch_idx in range(0, n_pending, DOWNLOAD_BATCH):
+            batch = pending[batch_idx : batch_idx + DOWNLOAD_BATCH]
+            self._mast_download_product_batch(batch, mast_staging_parent, n_pending)
         log.info("MAST download: finished %d file(s).", n_pending)
 
     # Remove astroquery staging under work-dir (not the shell cwd when --work-dir is set)
@@ -2857,6 +3171,210 @@ class hst123(object):
 
     return refname
 
+  def _drizzle_center_radec(self, path: str):
+    """
+    Return (RA, Dec) in degrees at the central pixel of the science WCS for a stack.
+    """
+    with fits.open(path, mode="readonly") as hdu:
+      wi = wcs_image_hdu_index(hdu)
+      x = hdu[wi].header["NAXIS1"] / 2
+      y = hdu[wi].header["NAXIS2"] / 2
+      w = wcs_from_fits_hdu(hdu, wi)
+      coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
+    return coord.ra.degree, coord.dec.degree
+
+  def pick_main_reference_from_drizzled(self, obstable):
+    """
+    Choose the main astrometric anchor among existing drizzle products for this table.
+
+    The anchor must be one of the per-visit/filter ``drizname`` outputs. Selection
+    uses the same filter/instrument/exposure ranking as :meth:`pick_deepest_images`
+    over **all** on-disk stacks in *obstable* (all visits), so preferred filters
+    (e.g. F814W, F606W) and ``--avoid-wfpc2`` apply globally rather than after
+    picking whichever visit has the largest raw summed EXPTIME.
+    """
+    opt = self.options["args"]
+    if opt.reference:
+      ref_in = normalize_fits_path(str(opt.reference).strip())
+      if os.path.isfile(ref_in):
+        cand_paths = [normalize_fits_path(str(x)) for x in np.unique(obstable["drizname"].data)]
+        ref_real = os.path.realpath(ref_in)
+        for c in cand_paths:
+          if os.path.isfile(c) and os.path.realpath(c) == ref_real:
+            log.info(
+              "Main reference drizzle (--reference): %s",
+              os.path.basename(c),
+            )
+            return c
+        log.warning(
+          "User reference %s is not among this table's drizname outputs; "
+          "picking automatically.",
+          opt.reference,
+        )
+
+    all_paths: list[str] = []
+    for dn in np.unique(obstable["drizname"].data):
+      p = normalize_fits_path(str(dn))
+      if os.path.isfile(p):
+        all_paths.append(p)
+
+    if not all_paths:
+      log.error(
+        "No drizzle products on disk for obstable (run drizzle-all first).",
+      )
+      return None
+
+    log.debug(
+      "Main reference: evaluating %d drizzle stack(s) across %d visit(s).",
+      len(all_paths),
+      len(np.unique(obstable["visit"].data)),
+    )
+
+    img = self.pick_deepest_images(
+      all_paths,
+      reffilter=opt.reference_filter,
+      avoid_wfpc2=opt.avoid_wfpc2,
+      refinst=opt.reference_instrument,
+    )
+    if not img:
+      deepest = sorted(all_paths, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
+      log.info(
+        "Main reference drizzle (fallback by stacked EXPTIME): %s",
+        os.path.basename(deepest),
+      )
+      return deepest
+
+    deepest = sorted(img, key=lambda im: fits.getval(im, "EXPTIME"))[-1]
+    log.info(
+      "Main reference drizzle (pick_deepest_images): %s",
+      os.path.basename(deepest),
+    )
+    return deepest
+
+  def _propagate_crval_shift_for_drizname(
+      self,
+      obstable,
+      driz_path: str,
+      dra: float,
+      ddec: float,
+      shiftref_label: str,
+  ):
+    """
+    Apply a uniform CRVAL shift (same convention as hierarchical propagation) to
+    every exposure whose ``drizname`` matches *driz_path*.
+    """
+    dp = normalize_fits_path(str(driz_path))
+    mask = np.array(
+      [normalize_fits_path(str(x)) == dp for x in obstable["drizname"].data],
+      dtype=bool,
+    )
+    for file in obstable[mask]["image"]:
+      fp = str(file)
+      log.info("Applying stack sky shift to %s", os.path.basename(fp))
+      hdu = fits.open(fp, mode="update")
+      try:
+        hdu[0].header["HIERARCH"] = 1
+        hdu[0].header["TWEAKSUC"] = 1
+        for i, h in enumerate(hdu):
+          if "CRVAL1" in h.header.keys() and "CRVAL2" in h.header.keys():
+            corig = SkyCoord(h.header["CRVAL1"], h.header["CRVAL2"], unit="deg")
+            newdec = corig.dec.degree - ddec
+            newra = corig.ra.degree - dra
+            hdu[i].header["CRVAL1PR"] = corig.ra.degree
+            hdu[i].header["CRVAL2PR"] = corig.dec.degree
+            hdu[i].header["CRVAL1"] = newra
+            hdu[i].header["CRVAL2"] = newdec
+            hdu[i].header["SHIFTRA"] = dra
+            hdu[i].header["SHIFTDEC"] = ddec
+            hdu[i].header["SHIFTREF"] = str(shiftref_label)
+          if "c0m" in self._fits.get_instrument(fp).lower():
+            maskfile = fp.split("_")[0] + "_c1m.fits"
+            if os.path.exists(maskfile):
+              with fits.open(maskfile, mode="update") as maskhdu:
+                self._astrom.copy_wcs_keys(hdu[i], maskhdu[i])
+                maskhdu.flush()
+        hdu.flush()
+      finally:
+        hdu.close()
+
+  def run_drizzle_first_tweakreg_and_propagate(self, obstable, ref_driz: str):
+    """
+    TweakReg on drizzled stacks (anchor = main reference), then propagate shifts to
+    FLC/FLT/c0m exposures (same scheme as ``drizzle_all(..., hierarchical=True)``).
+    """
+    opt = self.options["args"]
+    driztable = unique(obstable, keys="drizname")
+    driztable = driztable["drizname", "instrument", "detector", "filter", "visit"]
+    driztable.rename_column("drizname", "image")
+
+    central: dict = {}
+    for file in driztable["image"]:
+      fp = normalize_fits_path(str(file))
+      if not os.path.isfile(fp):
+        log.warning("Missing drizzle file for TweakReg pass: %s", fp)
+        continue
+      hdu = fits.open(fp, mode="update")
+      try:
+        wi = wcs_image_hdu_index(hdu)
+        hdu[wi].header["WCSNAME"] = "TWEAK-ORIG"
+        hdu[wi].header["TWEAKSUC"] = 0
+        cra, cdec = self._drizzle_center_radec(fp)
+        central[fp] = {"cra": cra, "cdec": cdec}
+      finally:
+        hdu.close()
+
+    search_radius = getattr(opt, "tweak_search", None)
+    if search_radius is None:
+      search_radius = 5.0
+
+    err, shift_table = self._astrom.run_tweakreg(
+      driztable,
+      ref_driz,
+      do_cosmic=False,
+      skip_wcs=True,
+      search_radius=float(search_radius),
+    )
+
+    if shift_table is None:
+      log.warning(
+        "Drizzle-first TweakReg returned no shift table (outcome=%r).",
+        err,
+      )
+      self.updatewcs = False
+      return
+
+    log.info("Propagating drizzle TweakReg offsets to individual exposures")
+    for row in shift_table:
+      fp = normalize_fits_path(str(row["file"]))
+      ck = fp
+      if ck not in central:
+        rp = os.path.realpath(fp)
+        ck = next(
+          (k for k in central if os.path.realpath(k) == rp),
+          None,
+        )
+      if ck is None or ck not in central:
+        log.debug("No pre-TweakReg center cached for %s; skipping row.", fp)
+        continue
+      with fits.open(fp, mode="readonly") as hdu_ro:
+        wi = wcs_image_hdu_index(hdu_ro)
+        x = hdu_ro[wi].header["NAXIS1"] / 2
+        y = hdu_ro[wi].header["NAXIS2"] / 2
+        w = wcs_from_fits_hdu(hdu_ro, wi)
+        coord = wcs.utils.pixel_to_skycoord(x, y, w, origin=1)
+      nra = coord.ra.degree
+      ndec = coord.dec.degree
+      dra = central[ck]["cra"] - nra
+      ddec = central[ck]["cdec"] - ndec
+      self._propagate_crval_shift_for_drizname(
+        obstable, fp, dra, ddec, fp,
+      )
+
+    if opt.hierarchical_test:
+      sys.exit()
+
+    self.updatewcs = False
+
   def prepare_dolphot(self, image):
     """
     Mask, split, and sky-subtract one exposure for DOLPHOT.
@@ -2883,19 +3401,21 @@ class hst123(object):
         using ``--redo-astrodrizzle``, ``--redo``, or ``--clobber`` (see
         :func:`~hst123.utils.options.want_redo_astrodrizzle`).
     do_tweakreg : bool, optional
-        When True and alignment is not skipped, run :meth:`run_alignment` on each
-        group before AstroDrizzle (respects ``--align-with`` / ``--skip-tweakreg``).
-        Name kept for backward compatibility.
+        When True, run :meth:`run_alignment` on each ``drizname`` group before that
+        group's AstroDrizzle. The normal CLI pipeline passes ``False`` here because
+        visit-wide alignment in :func:`main` already ran (reference drizzle is built
+        earlier in :meth:`pick_reference`, then all exposures are aligned to that
+        reference). Set True only for unusual programmatic call sites.
 
     Notes
     -----
     Optional per-drizzle ``calcsky`` for non-reference products is controlled by
     ``HST123_DOLPHOT_SKY_FOR_DRIZZLE_ALL``.
 
-    Groups are processed **sequentially**: each step calls :meth:`run_alignment`, which
-    sets the process working directory to ``workspace/``; parallelizing groups in
-    threads would race on ``chdir``. DOLPHOT prep thread count is set by
-    ``--max-cores`` (same as AstroDrizzle workers).
+    Groups are processed **sequentially**. When ``do_tweakreg`` is True,
+    :meth:`run_alignment` changes the process working directory to ``workspace/``;
+    parallelizing groups in threads would race on ``chdir``. DOLPHOT prep thread
+    count is set by ``--max-cores`` (same as AstroDrizzle workers).
     """
     opt = self.options['args']
 
@@ -3046,7 +3566,7 @@ class hst123(object):
 
         # Flag for testing - exits after hierarchical alignment on drz frames
         # has been performed
-        if opt.hierarch_test:
+        if opt.hierarchical_test:
             sys.exit()
 
         # Now that WCS corrections have been applied, we want to skip this for
@@ -3320,38 +3840,116 @@ def main():
                     opt.dolphot + vnum, work_dir=opt.work_dir
                 )
 
-            hst.reference = hst.handle_reference(obstable, opt.reference)
-            if not hst.reference:
-                log.error(
-                    "Skipping visit %s: no valid reference image (check FITS on disk).",
-                    i,
+            align_with = str(getattr(opt, "align_with", "tweakreg")).lower()
+            drizzle_first = (
+                not opt.skip_tweakreg
+                and align_with == "tweakreg"
+                and opt.drizzle_all
+                and "drizname" in obstable.keys()
+            )
+
+            if drizzle_first:
+                make_banner(
+                    "Drizzle-first pipeline: AstroDrizzle per visit/filter before alignment"
                 )
-                continue
-
-            # Run main alignment (tweakreg or jhat per --align-with)
-            if not opt.skip_tweakreg:
-                make_banner('Running main alignment ({})'.format(opt.align_with))
-                error, _ = hst._astrom.run_alignment(obstable, hst.reference)
-            _phase(f"visit_{i}_alignment")
-
-            # Drizzle all visit/filter pairs if drizzleall
-            # Handle this first, especially if doing hierarchical alignment
-            if ((opt.drizzle_all or opt.hierarchical) and
-                'drizname' in obstable.keys()):
-                do_tweakreg = not opt.skip_tweakreg
                 hst.drizzle_all(
                     obstable,
-                    hierarchical=opt.hierarchical,
-                    do_tweakreg=do_tweakreg,
+                    hierarchical=False,
+                    do_tweakreg=False,
                     clobber=want_redo_astrodrizzle(opt),
                 )
+                hst.reference = hst.pick_main_reference_from_drizzled(obstable)
+                if not hst.reference:
+                    log.error(
+                        "Skipping visit %s: could not pick a main drizzle reference.",
+                        i,
+                    )
+                    continue
+                make_banner(
+                    "Sanitizing main reference drizzle: {}".format(hst.reference)
+                )
+                hst.sanitize_reference(hst.reference)
+
+                if not getattr(opt, "no_gaia_reference", False):
+                    cra0, cdec0 = hst._drizzle_center_radec(hst.reference)
+                    hst._jhat_anchor_gaia_on_reference_drizzle(
+                        hst.reference, force=True
+                    )
+                    jg = getattr(hst, "_jhat_gaia_ref_stats", None)
+                    if jg:
+                        write_gaia_alignment_crderr_to_reference_driz(
+                            hst.reference, jg, log=log
+                        )
+                    cra1, cdec1 = hst._drizzle_center_radec(hst.reference)
+                    dra_g = cra0 - cra1
+                    ddec_g = cdec0 - cdec1
+                    hst._propagate_crval_shift_for_drizname(
+                        obstable,
+                        hst.reference,
+                        dra_g,
+                        ddec_g,
+                        hst.reference,
+                    )
+
+                make_banner(
+                    "Stack-level TweakReg (anchor={})".format(
+                        os.path.basename(hst.reference)
+                    )
+                )
+                hst.run_drizzle_first_tweakreg_and_propagate(obstable, hst.reference)
+                _phase(f"visit_{i}_alignment")
+
+            else:
+                if (
+                    align_with == "tweakreg"
+                    and not opt.drizzle_all
+                    and not opt.skip_tweakreg
+                ):
+                    log.warning(
+                        "Drizzle-first TweakReg alignment needs drizzle products; "
+                        "(--no-drizzle-all) using legacy reference build and "
+                        "visit-wide alignment instead.",
+                    )
+
+                hst.reference = hst.handle_reference(obstable, opt.reference)
+                if not hst.reference:
+                    log.error(
+                        "Skipping visit %s: no valid reference image "
+                        "(check FITS on disk).",
+                        i,
+                    )
+                    continue
+
+                # Visit-wide alignment after the reference drizzle exists (legacy):
+                # pick_reference may have built the ref stack; JHAT modes anchor Gaia
+                # there; then exposures align to the reference catalog or TweakReg.
+                if not opt.skip_tweakreg:
+                    make_banner(
+                        "Running main alignment ({})".format(opt.align_with)
+                    )
+                    error, _ = hst._astrom.run_alignment(obstable, hst.reference)
+                _phase(f"visit_{i}_alignment")
+
+                # Per-group run_alignment before AstroDrizzle is disabled
+                # (do_tweakreg=False): visit-wide alignment already ran when enabled.
+                if (opt.drizzle_all or opt.hierarchical) and (
+                    "drizname" in obstable.keys()
+                ):
+                    hst.drizzle_all(
+                        obstable,
+                        hierarchical=opt.hierarchical,
+                        do_tweakreg=False,
+                        clobber=want_redo_astrodrizzle(opt),
+                    )
 
             if opt.redrizzle:
                 make_banner('Performing redrizzle of all epochs/filters')
                 hst.updatewcs = False
-                do_tweakreg = not opt.skip_tweakreg
-                hst.drizzle_all(obstable, clobber=True,
-                    do_tweakreg=do_tweakreg)
+                hst.drizzle_all(
+                    obstable,
+                    clobber=True,
+                    do_tweakreg=False,
+                )
             _phase(f"visit_{i}_drizzle_astrodrizzle")
 
             # dolphot image preparation: mask_image, split_groups, calc_sky

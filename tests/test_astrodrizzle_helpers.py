@@ -3,6 +3,7 @@ import logging
 import os
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from hst123.utils.astrodrizzle_helpers import (
@@ -16,10 +17,22 @@ from hst123.utils.astrodrizzle_helpers import (
     drizzle_sidecar_paths,
     resolve_drizzle_clean_flag,
     rename_astrodrizzle_sidecars,
+    suppress_drizzlepac_interactive_dgeo_prompt,
     wfpc2_astrodrizzle_scratch_paths,
     wcs_image_hdu_index,
     write_drc_multis_extension_if_requested,
 )
+
+
+def test_suppress_drizzlepac_interactive_dgeo_prompt_restores_userstop():
+    pytest.importorskip("drizzlepac")
+    import drizzlepac.processInput as pi
+
+    orig = pi.userStop
+    with suppress_drizzlepac_interactive_dgeo_prompt():
+        assert pi.userStop is not orig
+        assert pi.userStop("any prompt") is False
+    assert pi.userStop is orig
 
 
 def test_astrodrizzle_exc_is_restore_wcs_distortion_failure():

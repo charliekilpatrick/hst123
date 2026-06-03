@@ -306,6 +306,68 @@ cleanup_extra_globs = ("*drc.noise.fits",)
 # Large relative to a single HST exposure so one file covers the field.
 jhat_gaia_prefetch_radius = 22 * u.arcmin
 
+# Gaia JHAT anchor only: magnitude window on the reference catalog (Gaia G or file mag)
+# and on detected sources (``objmag_lim``), inclusive (bright_end, faint_end) in magnitudes.
+# Set to None to leave magnitudes to ``jhat_params`` / JHAT defaults only.
+jhat_gaia_anchor_mag_lim = (15.0, 22.0)
+
+# After each JHAT pass, compare RMS sky residuals from *_jhat.good.phot.txt to this
+# threshold (arcsec). If worse (or too few matches), rerun with broader matching.
+jhat_quality_retry_enabled = True
+jhat_max_acceptable_rms_arcsec = 2.0
+jhat_quality_min_matches = 5
+jhat_quality_retry_max_attempts = 4
+
+# FLC–FLC pre-JHAT: CRPIX grid search (jwst123-style) vs anchor refcat, then write
+# Δ(CRPIX) to SCI headers (keywords HST123GSX/Y on PRIMARY). CRPIX extent (radius_px)
+# must stay **strictly smaller** than step_px so each trial maps to a local sky patch;
+# raise step_px if you need a wider pixel search.
+flc_guess_shift_enabled = True
+flc_guess_shift_radius_px = 4.0
+flc_guess_shift_step_px = 5.0
+# Max on-sky separation (arcsec) for peak↔refcat NN pairing when *scoring* each CRPIX
+# trial (local match radius). Not JHAT's match radius. Increase only if the grid never
+# finds a finite min_cost with an otherwise plausible WCS.
+flc_guess_shift_dist_limit_arcsec = 5.0
+flc_guess_shift_sigma = 2.0
+flc_guess_shift_max_peaks = 800
+# After the discrete CRPIX grid picks a winner, add a sub-pixel correction from the
+# median pixel offset between peaks and their NN refcat positions at that WCS.
+flc_guess_shift_refine_crossmatch = True
+
+# FLC grid min_cost → max separation (arcsec) for pairs included in JHAT quality RMS.
+# cap = min(abs_max, max(floor, multiplier * min_cost)); larger defaults = wider prior
+# around the grid score when filtering JHAT phot rows for RMS acceptance.
+flc_guess_shift_quality_sep_from_grid = True
+flc_guess_shift_quality_sep_floor_arcsec = 2.0
+flc_guess_shift_quality_cost_multiplier = 15.0
+flc_guess_shift_quality_sep_abs_max_arcsec = 45.0
+
+# TweakReg (--align-with tweakreg): optional FLC CRPIX grid pre-alignment (same workflow as
+# ``examples/compare_grid_tweakreg_flc.py``), then DrizzlePac TweakReg with search radius
+# max(min_arcsec, factor × max grid min_cost across exposures).
+tweakreg_flc_grid_prealign = True
+tweakreg_flc_grid_search_factor = 2.0
+tweakreg_flc_grid_search_min_arcsec = 0.05
+
+
+def pipeline_updatewcs_enabled() -> bool:
+    """
+    Gate :meth:`~hst123._pipeline.hst123.update_image_wcs`, TweakReg's optional
+    pre-alignment ``updatewcs``, and AstroDrizzle's ``updatewcs=True`` retry path.
+
+    Default False so JHAT/TweakReg solutions are not overwritten by
+    ``stwcs.updatewcs``. Set ``HST123_PIPELINE_UPDATEWCS=1`` to restore the
+    legacy behavior.
+    """
+    v = os.environ.get("HST123_PIPELINE_UPDATEWCS", "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return False
+
+
 names = [
     "image", "exptime", "datetime", "filter", "instrument",
     "detector", "zeropoint", "chip", "imagenumber",

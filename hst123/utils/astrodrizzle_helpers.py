@@ -5,12 +5,12 @@ Keeps drizzle orchestration readable and avoids duplicated path logic.
 """
 from __future__ import annotations
 
+import contextlib
+import copy
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any
-
-import copy
 
 
 def combine_type_and_nhigh(n_frames: int, combine_type_override: str | None) -> tuple[str, int]:
@@ -38,6 +38,32 @@ def combine_type_and_nhigh(n_frames: int, combine_type_override: str | None) -> 
     if combine_type_override:
         combine_type = combine_type_override
     return combine_type, combine_nhigh
+
+
+@contextlib.contextmanager
+def suppress_drizzlepac_interactive_dgeo_prompt() -> Iterator[None]:
+    """
+    Avoid DrizzlePac blocking on stdin for DGEOFILE vs NPOLFILE.
+
+    When AstroDrizzle runs with ``updatewcs=False``, ``drizzlepac.processInput``
+    may call ``input()`` asking the user to type ``q`` or ``c``. hst123 is
+    non-interactive; this context replaces ``userStop`` so the effective choice
+    is always ``c`` (continue without the non-polynomial distortion correction),
+    matching DrizzlePac's own batch expectation when headers are not updated.
+    """
+    import drizzlepac.processInput as _pi
+
+    _orig = _pi.userStop
+
+    def _auto_continue(_message: str) -> bool:
+        # DrizzlePac: True => quit (return None from checkDGEOFile); False => continue.
+        return False
+
+    _pi.userStop = _auto_continue
+    try:
+        yield
+    finally:
+        _pi.userStop = _orig
 
 
 def resolve_drizzle_clean_flag(clean: bool | None, args_cleanup: bool) -> bool:
@@ -366,6 +392,33 @@ def astrodrizzle_chdir_bundle_for_drizzlepac(
             # Different drive (Windows): keep absolute; may still hit drizzlepac bug.
             rel_inputs.append(ap)
     return run_dir, out_base, rel_inputs
+
+
+def path_for_drizzlepac_when_cwd_run_dir(path: str | os.PathLike[str], run_dir_abs: str | os.PathLike[str]) -> str:
+    """
+    Path string to pass to DrizzlePac or JHAT when the process CWD is *run_dir_abs*.
+
+    DrizzlePac builds roots using logic equivalent to lowercasing segments derived from
+    splitting on ``_`` (see :func:`astrodrizzle_chdir_bundle_for_drizzlepac`). Passing a
+    full absolute path that contains underscores in parent directories (e.g.
+    ``.../SNII/SN1964H/...``) corrupts those directories to lowercase and breaks writes.
+
+    If *path* lies under *run_dir_abs*, return :func:`os.path.relpath` so callers can
+    ``os.chdir(run_dir_abs)`` and pass basename-only or shallow relative paths. Otherwise
+    return the absolute path unchanged (callers may still hit the DrizzlePac bug).
+    """
+    p = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    rd = os.path.abspath(os.path.expanduser(os.fspath(run_dir_abs)))
+    try:
+        common = os.path.commonpath([p, rd])
+    except ValueError:
+        return p
+    if os.path.normpath(common) != os.path.normpath(rd):
+        return p
+    try:
+        return os.path.relpath(p, rd)
+    except ValueError:
+        return p
 
 
 def build_astrodrizzle_keyword_args(

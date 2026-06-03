@@ -3,6 +3,7 @@ import logging
 import os
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from hst123.primitives.astrometry import jhat as jhat_mod
@@ -44,6 +45,54 @@ def test_read_jhat_gaia_residual_stats_from_ascii(tmp_path):
     assert st["rms_dec_as"] > 0
 
 
+def test_read_jhat_gaia_residual_stats_sep_max_arcsec_filters_pairs(tmp_path):
+    """Quality gate: only separations <= cap contribute to n_match and RMS."""
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    phot = wd / "cap_jhat.good.phot.txt"
+    phot.write_text(
+        "ra dec gaia_ra gaia_dec\n"
+        "10.0 20.0 10.0 20.0\n"
+        "10.0 20.0 10.000028 20.000028\n"
+        "10.0 20.0 10.01 20.01\n",
+        encoding="utf-8",
+    )
+    img = tmp_path / "cap_flt.fits"
+    img.write_text("", encoding="utf-8")
+    st_all = jhat_mod.read_jhat_gaia_residual_stats(str(img), str(wd))
+    st_in = jhat_mod.read_jhat_gaia_residual_stats(
+        str(img), str(wd), sep_max_arcsec=1.0
+    )
+    assert st_all is not None
+    assert st_all["n_match"] == 3
+    assert st_in is not None
+    assert st_in["n_match"] == 2
+    assert st_in["sep_cap_arcsec"] == 1.0
+    assert st_in["n_pairs_before_sep_cap"] == 3
+    assert st_in["rms_sky_as"] < st_all["rms_sky_as"]
+
+
+def test_read_jhat_gaia_residual_stats_skips_nan_reference_pairs(tmp_path):
+    """Unmatched rows often have NaN reffile_*; RMS must use finite pairs only."""
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    phot = wd / "probe_jhat.good.phot.txt"
+    phot.write_text(
+        "ra dec reffile_ra reffile_dec\n"
+        "10.0 20.0 nan nan\n"
+        "10.0 20.0 10.00001 20.00001\n"
+        "10.0 20.0 10.00002 20.00002\n",
+        encoding="utf-8",
+    )
+    img = tmp_path / "probe_flt.fits"
+    img.write_text("", encoding="utf-8")
+    st = jhat_mod.read_jhat_gaia_residual_stats(str(img), str(wd))
+    assert st is not None
+    assert st["n_match"] == 2
+    assert np.isfinite(st["rms_sky_as"])
+    assert st["rms_sky_as"] > 0
+
+
 def test_write_gaia_alignment_crderr_to_reference_driz(tmp_path):
     path = tmp_path / "acs_wfc.f555w.ref_0001.drc.fits"
     pri = fits.PrimaryHDU()
@@ -69,6 +118,37 @@ def test_write_gaia_alignment_crderr_to_reference_driz(tmp_path):
         assert h["CRDER1"] > 0
         assert h["CRDER2"] > 0
         assert h["HIERARCH HST123 NJHATGAIA"] == 8
+
+
+def test_flc_grid_quality_sep_cap_from_min_cost():
+    cap = jhat_mod.flc_grid_quality_sep_cap_from_min_cost(
+        0.05,
+        enabled=True,
+        floor_arcsec=0.25,
+        multiplier=6.0,
+        abs_max_arcsec=5.0,
+    )
+    assert cap == pytest.approx(0.3)
+    assert (
+        jhat_mod.flc_grid_quality_sep_cap_from_min_cost(
+            float("nan"),
+            enabled=True,
+            floor_arcsec=0.25,
+            multiplier=6.0,
+            abs_max_arcsec=5.0,
+        )
+        is None
+    )
+    assert (
+        jhat_mod.flc_grid_quality_sep_cap_from_min_cost(
+            0.05,
+            enabled=False,
+            floor_arcsec=0.25,
+            multiplier=6.0,
+            abs_max_arcsec=5.0,
+        )
+        is None
+    )
 
 
 def test_jhat_good_phot_path():

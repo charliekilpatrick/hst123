@@ -17,9 +17,21 @@ The helper
 else configured logging.
 
 **Work-directory session log:** after ``--work-dir`` is resolved, the pipeline
-calls ``attach_work_dir_log_file()`` to create ``<work-dir>/logs/`` and append a
-``FileHandler`` so the same formatted records as stderr go to a unique file
-(``hst123_<process>_<timestamp>_<pid>.log``).
+calls ``attach_work_dir_log_file()`` to create ``<work-dir>/logs/`` and add a
+``FileHandler`` so formatted ``hst123.*`` records (including
+``hst123.third_party`` forwarded from DrizzlePac/stpipe) match stderr. By default,
+``attach_work_dir_log_file()`` also wraps ``sys.stdout`` and ``sys.stderr`` (by
+default) so Python-level writes to both streams are **appended** to the same
+session file via one shared append handle (disable with
+``HST123_SESSION_LOG_STDOUT=0`` / ``HST123_SESSION_LOG_STDERR=0``). Because the
+CLI ``StreamHandler`` writes formatted records to stderr, those lines can appear
+**twice** in the session file (once from the ``FileHandler``, once from the
+stderr mirror). Console stream handlers are repointed to the tee when mirrors
+install so piped logging matches the terminal. C extensions that bypass Python
+``sys.stdout`` / ``sys.stderr``
+may still need ``tee_stdout_fd_to_logger`` for fd 1. At exit, hooks flush the
+handler and restore streams. Compare logs by matching the ``Session log: …``
+line at startup to the filename and PID.
 
 **External programs** (``dolphot``, ``calcsky``, ``make``, …): use
 ``run_external_command()`` so their stdout/stderr is merged, streamed to the
@@ -29,7 +41,9 @@ Third-party libraries (e.g. drizzlepac, astroquery) may still write to stdout/st
 directly; some call sites use ``suppress_stdout`` where needed. AstroDrizzle and photeq runfiles live under ``<work-dir>/.hst123_runfiles/``, are replayed into
 loggers ``hst123.astrodrizzle`` / ``hst123.photeq``, then removed. The pipeline **always** replays those runfiles into the session log with compact whitespace (not controlled by ``HST123_REPLAY_SUBLOGS``). For other uses of :func:`ingest_text_file_to_logger`, default (**``HST123_REPLAY_SUBLOGS``** unset or ``1``) is full replay; set ``HST123_REPLAY_SUBLOGS=0`` or ``summary`` for a one-line summary only.
 
-Environment variables: ``HST123_LOG_LEVEL`` (use ``DEBUG`` to show ``@log_calls``
+Environment variables: ``HST123_SESSION_LOG_STDOUT`` / ``HST123_SESSION_LOG_STDERR``
+(default ``1``: mirror each stream into the session log; set ``0`` to disable),
+``HST123_LOG_LEVEL`` (use ``DEBUG`` to show ``@log_calls``
 entry/exit lines), ``HST123_LOG_ENABLE_STDOUT``, ``HST123_LOG_ENABLE_FILE``,
 ``HST123_LOG_DIR``, ``HST123_REPLAY_SUBLOGS``, ``HST123_LOG_FULL_NAMES`` (set to
 ``1`` to show full logger names in ``[…]`` instead of compressed tags),
@@ -42,6 +56,7 @@ stderr progress bar when running in a terminal.
 """
 from __future__ import annotations
 
+import atexit
 import functools
 import logging
 import multiprocessing as mp
@@ -50,6 +65,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
@@ -59,6 +75,212 @@ _LISTENER = None
 _CONFIGURED = False
 _CLI_LOGGING_INSTALLED = False
 _WORK_DIR_LOG_HANDLER = None
+_WORK_DIR_LOG_ATEXIT_REGISTERED = False
+_SESSION_STREAM_MIRROR_STATE: dict | None = None
+_SESSION_STREAM_MIRROR_ATEXIT_REGISTERED = False
+
+
+class _StreamTee:
+    """Write to a primary stream and append a copy to a second file-like object."""
+
+    __slots__ = ("_primary", "_copy", "_lock")
+
+    def __init__(self, primary, copy_fh, *, shared_lock: threading.Lock | None = None) -> None:
+        self._primary = primary
+        self._copy = copy_fh
+        self._lock = shared_lock if shared_lock is not None else threading.Lock()
+
+    def write(self, s: str) -> int:
+        n = self._primary.write(s)
+        if s:
+            with self._lock:
+                self._copy.write(s)
+                self._copy.flush()
+        if isinstance(n, int):
+            return n
+        return len(s) if s else 0
+
+    def flush(self) -> None:
+        self._primary.flush()
+        with self._lock:
+            self._copy.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self._primary, name)
+
+
+def _is_console_stream_handler(h: logging.Handler) -> bool:
+    """True for terminal StreamHandlers (not FileHandler or rotating log files)."""
+    return isinstance(h, logging.StreamHandler) and not isinstance(
+        h,
+        (logging.FileHandler, RotatingFileHandler),
+    )
+
+
+def _iter_all_handlers() -> list[logging.Handler]:
+    """Handlers on root, named loggers, and the multiprocessing QueueListener if any."""
+    seen: set[int] = set()
+    out: list[logging.Handler] = []
+
+    def add(h: logging.Handler) -> None:
+        hid = id(h)
+        if hid not in seen:
+            seen.add(hid)
+            out.append(h)
+
+    for h in logging.root.handlers:
+        add(h)
+    for name in logging.root.manager.loggerDict:
+        obj = logging.root.manager.loggerDict[name]
+        if isinstance(obj, logging.Logger):
+            for h in obj.handlers:
+                add(h)
+    lst = _LISTENER
+    if lst is not None:
+        try:
+            for h in lst.handlers:
+                add(h)
+        except Exception:
+            pass
+    return out
+
+
+def _retarget_console_stream_handlers(stream_map: dict) -> None:
+    """
+    Point StreamHandler.stream from old file-like objects to new ones.
+
+    Used when ``sys.stdout`` / ``sys.stderr`` are wrapped for session mirroring:
+    handlers installed earlier still reference the original streams and would
+    otherwise bypass the tee.
+    """
+    if not stream_map:
+        return
+    for h in _iter_all_handlers():
+        if not _is_console_stream_handler(h):
+            continue
+        st = getattr(h, "stream", None)
+        if st is None:
+            continue
+        new_st = stream_map.get(st)
+        if new_st is None:
+            continue
+        h.acquire()
+        try:
+            h.stream = new_st
+        finally:
+            h.release()
+
+
+def _restore_session_stream_mirrors() -> None:
+    """Restore ``sys.stdout`` / ``sys.stderr`` and close the shared session append handle."""
+    global _SESSION_STREAM_MIRROR_STATE
+    st = _SESSION_STREAM_MIRROR_STATE
+    if st is None:
+        return
+    # Repoint logging handlers that target the tee wrappers back to the raw
+    # streams before closing the session append handle.
+    restore_map: dict = {}
+    if st.get("stdout_tee") is not None:
+        restore_map[st["stdout_tee"]] = st["orig_stdout"]
+    if st.get("stderr_tee") is not None:
+        restore_map[st["stderr_tee"]] = st["orig_stderr"]
+    if restore_map:
+        _retarget_console_stream_handlers(restore_map)
+    try:
+        if st.get("stdout_wrapped"):
+            sys.stdout = st["orig_stdout"]  # type: ignore[assignment]
+    except Exception:
+        pass
+    try:
+        if st.get("stderr_wrapped"):
+            sys.stderr = st["orig_stderr"]  # type: ignore[assignment]
+    except Exception:
+        pass
+    try:
+        st["copy_fh"].flush()
+        st["copy_fh"].close()
+    except Exception:
+        pass
+    _SESSION_STREAM_MIRROR_STATE = None
+
+
+def _restore_session_stdout_tee() -> None:
+    """Backward-compatible alias for :func:`_restore_session_stream_mirrors`."""
+    _restore_session_stream_mirrors()
+
+
+def _install_session_log_stream_mirrors(log_path: str) -> None:
+    """
+    Append ``sys.stdout`` and/or ``sys.stderr`` writes to *log_path* (session log).
+
+    Uses one shared append file object and lock so interleaved output stays coherent.
+    """
+    global _SESSION_STREAM_MIRROR_STATE, _SESSION_STREAM_MIRROR_ATEXIT_REGISTERED
+    if _SESSION_STREAM_MIRROR_STATE is not None:
+        return
+    want_out = os.environ.get("HST123_SESSION_LOG_STDOUT", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+    want_err = os.environ.get("HST123_SESSION_LOG_STDERR", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+    if not want_out and not want_err:
+        return
+    try:
+        copy_fh = open(log_path, "a", encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    lock = threading.Lock()
+    orig_out = sys.stdout
+    orig_err = sys.stderr
+    state: dict = {
+        "copy_fh": copy_fh,
+        "orig_stdout": orig_out,
+        "orig_stderr": orig_err,
+    }
+    if want_out:
+        tee_out = _StreamTee(orig_out, copy_fh, shared_lock=lock)
+        sys.stdout = tee_out  # type: ignore[assignment]
+        state["stdout_wrapped"] = True
+        state["stdout_tee"] = tee_out
+    if want_err:
+        tee_err = _StreamTee(orig_err, copy_fh, shared_lock=lock)
+        sys.stderr = tee_err  # type: ignore[assignment]
+        state["stderr_wrapped"] = True
+        state["stderr_tee"] = tee_err
+    # CLI StreamHandlers still reference the pre-wrap stdout/stderr objects.
+    retarget: dict = {}
+    if want_out:
+        retarget[orig_out] = sys.stdout
+    if want_err:
+        retarget[orig_err] = sys.stderr
+    if retarget:
+        _retarget_console_stream_handlers(retarget)
+    _SESSION_STREAM_MIRROR_STATE = state
+    if not _SESSION_STREAM_MIRROR_ATEXIT_REGISTERED:
+        atexit.register(_restore_session_stream_mirrors)
+        _SESSION_STREAM_MIRROR_ATEXIT_REGISTERED = True
+
+
+def _flush_work_dir_session_log() -> None:
+    """Best-effort flush so NFS/editors see complete session logs after exit or interrupt."""
+    h = _WORK_DIR_LOG_HANDLER
+    if h is None:
+        return
+    try:
+        h.flush()
+        stream = getattr(h, "stream", None)
+        if stream is not None and hasattr(stream, "flush"):
+            stream.flush()
+    except Exception:
+        pass
+
 
 RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S")
 ROOT_LOGGER = "hst123"
@@ -114,6 +336,26 @@ _STPIPE_ADDHANDLER_ORIG = None
 _LOGGER_ADDHANDLER_ORIG = None
 
 
+def _normalize_third_party_log_text(text: str) -> str | None:
+    """
+    Per-line strip; drop empty lines; return None if nothing remains.
+
+    Used when forwarding root-logger records into ``hst123.third_party`` so
+    DrizzlePac/stpipe noise (blank lines, padding whitespace) does not clutter
+    the session log.
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    kept: list[str] = []
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s:
+            kept.append(s)
+    if not kept:
+        return None
+    return "\n".join(kept)
+
+
 class _ForwardRootRecordsToHst123(logging.Handler):
     """
     Root logger handler that forwards third-party records into ``hst123`` logs.
@@ -138,7 +380,10 @@ class _ForwardRootRecordsToHst123(logging.Handler):
             if str(getattr(record, "name", "")).startswith(ROOT_LOGGER):
                 return
             name = str(getattr(record, "name", ""))
-            msg = record.getMessage()
+            raw_msg = record.getMessage()
+            msg = _normalize_third_party_log_text(raw_msg)
+            if msg is None:
+                return
 
             # De-duplicate: if stpipe logs the exact same message/level that was
             # just logged by a non-stpipe third-party logger, drop the stpipe copy.
@@ -821,7 +1066,7 @@ def attach_work_dir_log_file(
     str or None
         Path to the log file, or None if *work_dir* is missing/invalid.
     """
-    global _WORK_DIR_LOG_HANDLER
+    global _WORK_DIR_LOG_HANDLER, _WORK_DIR_LOG_ATEXIT_REGISTERED
     if not work_dir:
         return None
     wd = os.path.abspath(os.path.expanduser(os.fspath(work_dir)))
@@ -853,7 +1098,12 @@ def attach_work_dir_log_file(
     root.addHandler(fh)
     fh._hst123_log_path = path  # type: ignore[attr-defined]
     _WORK_DIR_LOG_HANDLER = fh
+    if not _WORK_DIR_LOG_ATEXIT_REGISTERED:
+        atexit.register(_flush_work_dir_session_log)
+        _WORK_DIR_LOG_ATEXIT_REGISTERED = True
     root.info("Session log: %s", os.path.basename(path))
+    fh.flush()
+    _install_session_log_stream_mirrors(path)
     return path
 
 

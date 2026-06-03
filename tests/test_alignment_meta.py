@@ -235,3 +235,75 @@ def test_check_images_forced_realign_with_clobber(tmp_path):
         force_realign=True,
     )
     assert out is not None
+
+
+def test_tweakreg_measured_shifts_complete_anchor_needs_no_row(tmp_path):
+    """Reference in batch has no shift row; moving must have finite x/y."""
+    from astropy.table import Table
+
+    ref = tmp_path / "anchor.fits"
+    mov = tmp_path / "moving.fits"
+    for p in (ref, mov):
+        fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32)).writeto(p)
+    mock = SimpleNamespace(options={"args": SimpleNamespace()})
+    astrom = AstrometryPrimitive(mock)
+    shifts = Table(
+        [[str(mov)], [0.5], [-0.25]],
+        names=("file", "xoffset", "yoffset"),
+    )
+    assert astrom._tweakreg_batch_measured_shifts_complete(
+        [str(ref), str(mov)], str(ref), shifts
+    )
+
+
+def test_tweakreg_measured_shifts_incomplete_when_moving_nan(tmp_path):
+    from astropy.table import Table
+
+    ref = tmp_path / "anchor.fits"
+    mov = tmp_path / "moving.fits"
+    for p in (ref, mov):
+        fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32)).writeto(p)
+    mock = SimpleNamespace(options={"args": SimpleNamespace()})
+    astrom = AstrometryPrimitive(mock)
+    shifts = Table(
+        [[str(mov)], [float("nan")], [0.0]],
+        names=("file", "xoffset", "yoffset"),
+    )
+    assert not astrom._tweakreg_batch_measured_shifts_complete(
+        [str(ref), str(mov)], str(ref), shifts
+    )
+
+
+def test_tweakreg_measured_shifts_incomplete_when_moving_row_missing(tmp_path):
+    from astropy.table import Table
+
+    ref = tmp_path / "anchor.fits"
+    mov = tmp_path / "moving.fits"
+    for p in (ref, mov):
+        fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32)).writeto(p)
+    mock = SimpleNamespace(options={"args": SimpleNamespace()})
+    astrom = AstrometryPrimitive(mock)
+    shifts = Table(
+        [[str(ref)], [0.0], [0.0]],
+        names=("file", "xoffset", "yoffset"),
+    )
+    assert not astrom._tweakreg_batch_measured_shifts_complete(
+        [str(ref), str(mov)], str(ref), shifts
+    )
+
+
+def test_mark_tweakreg_reference_anchor_provenance(tmp_path):
+    ref = tmp_path / "anchor.fits"
+    mov = tmp_path / "moving.fits"
+    fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32)).writeto(ref)
+    fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32)).writeto(mov)
+    mock = SimpleNamespace(options={"args": SimpleNamespace()})
+    astrom = AstrometryPrimitive(mock)
+    astrom._mark_tweakreg_reference_anchor_provenance(
+        str(ref), [str(ref), str(mov)], method="tweakreg"
+    )
+    with fits.open(ref) as hdu:
+        prov = read_alignment_provenance(hdu[0].header)
+    assert prov is not None
+    assert prov["ok"] is True
+    assert prov["method"] == "tweakreg"
