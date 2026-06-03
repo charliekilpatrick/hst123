@@ -6,7 +6,16 @@ __pycache__
 # Editor / IDE (local)
 .vscode/
 
-# Local integration / regression data (large FITS, logs); not versioned
+# Example runners and local experiment scripts (not versioned)
+examples/
+
+# Pipeline run logs (written at runtime; not versioned)
+logs/
+
+# Pipeline scratch / alignment working files (under work-dir; not versioned)
+workspace/
+
+# Local integration / regression data (large FITS); not versioned
 test_data/
 *.egg-info/
 build/
