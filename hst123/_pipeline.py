@@ -2599,6 +2599,21 @@ class hst123(object):
   # MAST: query_region, product table, download_files
   # ---------------------------------------------------------------------------
 
+  # Instrument names from MAST ``query_region`` that this pipeline can reduce.
+  _MAST_OBSERVATION_INSTRUMENTS = (
+      'WFPC2',
+      'ACS/WFC',
+      'ACS/HRC',
+      'WFC3/UVIS',
+      'WFC3/IR',
+  )
+
+  @staticmethod
+  def _mast_observation_instrument_ok(instrument_name):
+    """True when *instrument_name* is a supported HST imaging configuration."""
+    inst = str(instrument_name).upper()
+    return any(marker in inst for marker in hst123._MAST_OBSERVATION_INSTRUMENTS)
+
   @staticmethod
   def _mast_science_product_filename(filename, instrument):
     """True when *filename* is a pipeline science FLT/FLC/C0M/C1M product."""
@@ -2656,6 +2671,26 @@ class hst123(object):
     return None
 
   @staticmethod
+  def _mast_resolve_product_observation(by_obsid, by_obs_id, product_row, key_column):
+    """Join a MAST product row to its cone-search observation row.
+
+    Exposure-level science files (e.g. WFC3/UVIS ``*_flc.fits``) often carry an
+    ``obsID`` that differs from the observation ``obsid`` returned by
+    ``query_region``. Fall back to ``parent_obsid`` when the direct key misses.
+    """
+    obs = hst123._mast_lookup_observation(
+        by_obsid, by_obs_id, product_row[key_column], key_column,
+    )
+    if obs is not None:
+        return obs
+    if 'parent_obsid' not in product_row.colnames:
+        return None
+    parent = product_row['parent_obsid']
+    if parent is None or parent == '':
+        return None
+    return by_obsid.get(str(parent))
+
+  @staticmethod
   def _mast_product_obs_key_column(productTable):
     """Column linking product rows to observations (MAST uses ``obsID``, not ``obsid``)."""
     for name in ('obsID', 'obsid', 'obs_id'):
@@ -2707,9 +2742,9 @@ class hst123(object):
         instruments = []
         ras = []
         decs = []
-        for product_key in productList[key_col]:
-            obs = self._mast_lookup_observation(
-                by_obsid, by_obs_id, product_key, key_col,
+        for product_row in productList:
+            obs = self._mast_resolve_product_observation(
+                by_obsid, by_obs_id, product_row, key_col,
             )
             if obs is None:
                 instruments.append('')
@@ -2788,9 +2823,10 @@ class hst123(object):
     masks = []
     masks.append([t.upper()=='HST' for t in obsTable['obs_collection']])
     masks.append([p.upper()=='IMAGE' for p in obsTable['dataproduct_type']])
-    masks.append([any(l) for l in list(map(list,zip(*[[det in inst.upper()
-                for inst in obsTable['instrument_name']]
-                for det in ['ACS','WFC','WFPC2']])))])
+    masks.append([
+        self._mast_observation_instrument_ok(inst)
+        for inst in obsTable['instrument_name']
+    ])
     # Added mask to remove calibration data from search
     masks.append([f.upper()!='DETECTION' for f in obsTable['filters']])
     masks.append([i.upper()!='CALIBRATION' for i in obsTable['intentType']])
@@ -2809,7 +2845,8 @@ class hst123(object):
     mask = [all(l) for l in list(map(list, zip(*masks)))]
     obsTable = obsTable[mask]
     log.info(
-        "After HST / IMAGE / ACS·WFC·WFPC2 / non-calibration / exposure-time filters: "
+        "After HST / IMAGE / pipeline instruments (WFPC2, ACS/WFC, ACS/HRC, "
+        "WFC3/UVIS, WFC3/IR) / non-calibration / exposure-time filters: "
         "%i observation(s).",
         len(obsTable),
     )

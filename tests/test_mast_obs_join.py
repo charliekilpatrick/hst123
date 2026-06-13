@@ -43,3 +43,46 @@ def test_mast_lookup_observation_by_obs_id():
 def test_mast_product_obs_key_column_missing_raises():
     with pytest.raises(KeyError, match="obsID"):
         hst123._mast_product_obs_key_column(Table({"productFilename": ["a.fits"]}))
+
+
+def test_mast_resolve_product_observation_uses_parent_obsid():
+    """WFC3 FLC rows use exposure-level obsID; parent_obsid matches cone search."""
+    obs = Table(
+        {
+            "obsid": [207202736],
+            "obs_id": ["iey902020"],
+            "instrument_name": ["WFC3/UVIS"],
+            "s_ra": [177.65],
+            "s_dec": [55.35],
+        }
+    )
+    products = Table(
+        {
+            "obsID": [207202771],
+            "parent_obsid": [207202736],
+            "productFilename": ["iey902shq_flc.fits"],
+        }
+    )
+    by_obsid, by_obs_id = hst123._mast_observation_lookup_maps(obs)
+    key_col = hst123._mast_product_obs_key_column(products)
+    row = hst123._mast_resolve_product_observation(
+        by_obsid, by_obs_id, products[0], key_col,
+    )
+    assert row["instrument_name"] == "WFC3/UVIS"
+
+
+@pytest.mark.parametrize(
+    "instrument,expected",
+    [
+        ("WFPC2/PC", True),
+        ("WFPC2/WFC", True),
+        ("ACS/WFC", True),
+        ("ACS/HRC", True),
+        ("WFC3/UVIS", True),
+        ("WFC3/IR", True),
+        ("ACS/SBC", False),
+        ("STIS/CCD", False),
+    ],
+)
+def test_mast_observation_instrument_ok(instrument, expected):
+    assert hst123._mast_observation_instrument_ok(instrument) is expected
