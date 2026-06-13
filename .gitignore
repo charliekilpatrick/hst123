@@ -11,6 +11,8 @@ examples/
 
 # Pipeline run logs (written at runtime; not versioned)
 logs/
+photeq.log
+astrodrizzle.log
 
 # Pipeline scratch / alignment working files (under work-dir; not versioned)
 workspace/
