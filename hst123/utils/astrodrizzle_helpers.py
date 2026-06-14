@@ -12,6 +12,9 @@ import os
 from collections.abc import Iterator, Sequence
 from typing import Any
 
+import numpy as np
+from astropy.io import fits
+
 
 def combine_type_and_nhigh(n_frames: int, combine_type_override: str | None) -> tuple[str, int]:
     """
@@ -269,6 +272,112 @@ def header_has_tweak_wcsname(header) -> bool:
     return False
 
 
+def _flc_extver(hdu: fits.ImageHDU, default: int) -> int:
+    try:
+        return int(hdu.header["EXTVER"])
+    except (KeyError, TypeError, ValueError):
+        return default
+
+
+def flc_sci_extensions_missing_dq_err(hdul: fits.HDUList) -> bool:
+    """
+    True when a multi-extension FLC has SCI chip(s) but no matching ``DQ`` HDU.
+
+    Some MAST association members (``IMAGETYP=EXT``) ship SCI-only FITS; DrizzlePac
+    sky subtraction still opens ``DQ,<chip>`` via :meth:`imageObject.buildMask`.
+    """
+    sci_extvers: list[int] = []
+    dq_extvers: set[int] = set()
+    for hdu in hdul:
+        name = str(getattr(hdu, "name", "")).strip().upper()
+        if name == "SCI" and getattr(hdu, "data", None) is not None:
+            sci_extvers.append(_flc_extver(hdu, len(sci_extvers) + 1))
+        elif name == "DQ":
+            dq_extvers.add(_flc_extver(hdu, len(dq_extvers) + 1))
+    if not sci_extvers:
+        return False
+    return any(ev not in dq_extvers for ev in sci_extvers)
+
+
+def ensure_flc_dq_err_extensions_inplace(
+    image_path: str | os.PathLike[str],
+    logger: logging.Logger | None = None,
+) -> bool:
+    """
+    Add zero-filled ``ERR`` and ``DQ`` extensions for each ``SCI`` chip when absent.
+
+    Rebuilds the file in canonical WFC3/ACS order (SCI, ERR, DQ per chip) on scratch
+    copies only. Returns True when the file was modified.
+    """
+    log = logger or logging.getLogger(__name__)
+    path = os.fspath(image_path)
+    with fits.open(path, mode="readonly") as hdul:
+        if not flc_sci_extensions_missing_dq_err(hdul):
+            return False
+        primary = hdul[0].header.copy()
+        sci_blocks: list[tuple[np.ndarray, fits.Header]] = []
+        for hdu in hdul:
+            if str(getattr(hdu, "name", "")).strip().upper() != "SCI":
+                continue
+            if getattr(hdu, "data", None) is None:
+                continue
+            sci_blocks.append((np.array(hdu.data, copy=True), hdu.header.copy()))
+        if not sci_blocks:
+            return False
+        trailing = [
+            hdu
+            for hdu in hdul[1:]
+            if str(getattr(hdu, "name", "")).strip().upper() not in ("SCI", "ERR", "DQ")
+        ]
+        trailing_copy = [
+            (np.array(h.data, copy=True) if getattr(h, "data", None) is not None else None, h.header.copy(), h.name)
+            for h in trailing
+        ]
+
+    out = fits.HDUList()
+    out.append(fits.PrimaryHDU(header=primary))
+    n_added = 0
+    for chip_i, (sci_data, sci_hdr) in enumerate(sci_blocks, start=1):
+        extver = int(sci_hdr.get("EXTVER", chip_i))
+        out.append(fits.ImageHDU(data=sci_data.astype(np.float32, copy=False), header=sci_hdr))
+        shape = sci_data.shape
+        err_hdr = fits.Header()
+        err_hdr["EXTNAME"] = "ERR"
+        err_hdr["EXTVER"] = extver
+        err_hdr["BITPIX"] = -32
+        err_hdr["NAXIS"] = 2
+        err_hdr["NAXIS1"] = shape[1]
+        err_hdr["NAXIS2"] = shape[0]
+        err_hdr["BUNIT"] = "COUNTS"
+        out.append(fits.ImageHDU(data=np.zeros(shape, dtype=np.float32), header=err_hdr))
+        n_added += 1
+        dq_hdr = fits.Header()
+        dq_hdr["EXTNAME"] = "DQ"
+        dq_hdr["EXTVER"] = extver
+        dq_hdr["BITPIX"] = 16
+        dq_hdr["NAXIS"] = 2
+        dq_hdr["NAXIS1"] = shape[1]
+        dq_hdr["NAXIS2"] = shape[0]
+        dq_hdr["BUNIT"] = "UNITLESS"
+        out.append(fits.ImageHDU(data=np.zeros(shape, dtype=np.int16), header=dq_hdr))
+        n_added += 1
+    for data, hdr, name in trailing_copy:
+        if data is None:
+            out.append(fits.BinTableHDU(header=hdr, name=name))
+        else:
+            out.append(fits.ImageHDU(data=data, header=hdr, name=name))
+    out[0].header["NEXTEND"] = len(out) - 1
+    out[0].header["FILENAME"] = os.path.abspath(path)
+    out.writeto(path, overwrite=True, output_verify="silentfix")
+    log.debug(
+        "Added %d ERR/DQ extension(s) for %d SCI chip(s) on %s",
+        n_added,
+        len(sci_blocks),
+        os.path.basename(path),
+    )
+    return True
+
+
 def astrodrizzle_exc_is_restore_wcs_distortion_failure(exc: BaseException) -> bool:
     """
     True when stwcs/astropy failed building a WCS (incomplete SIP / lookup
@@ -279,11 +388,21 @@ def astrodrizzle_exc_is_restore_wcs_distortion_failure(exc: BaseException) -> bo
     message rather than a distinct exception type.
     """
     msg = str(exc).lower()
-    if "naxes" not in msg or "distortion" not in msg:
-        return False
-    if "lookup" in msg:
+    if "lookup" in msg and "naxes" in msg and "distortion" in msg:
         return True
-    return isinstance(exc, MemoryError)
+    if isinstance(exc, MemoryError) and "naxes" in msg and "distortion" in msg:
+        return True
+    if "d2im" in msg and "axis" in msg and "not found" in msg:
+        return True
+    if "cpdis" in msg and "not found" in msg:
+        return True
+    return False
+
+
+def astrodrizzle_exc_is_missing_dq_extension(exc: BaseException) -> bool:
+    """True when DrizzlePac could not resolve ``DQ,<chip>`` during sky subtraction."""
+    msg = str(exc).lower()
+    return "no extension number found" in msg and "dq" not in msg
 
 
 def ensure_wcsname_tweak_on_image(image_path: str, logger: logging.Logger) -> None:

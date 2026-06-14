@@ -844,6 +844,17 @@ class DolphotPrimitive(BasePrimitive):
                     )
                 time.sleep(10)
                 log.info("dolphot is finished (whew)!")
+                catalog_base = os.path.join(wd, base_name) if wd else base_name
+                try:
+                    from hst123.utils.dolphot_image_summary import log_dolphot_image_summary
+
+                    log_dolphot_image_summary(
+                        catalog_base,
+                        log,
+                        snr_limit=p.snr_limit,
+                    )
+                except Exception as exc:
+                    log.warning("DOLPHOT image summary not written: %s", exc)
                 out_cat = os.path.join(wd, base_name + ".phot") if wd else base_name + ".phot"
                 if os.path.isfile(out_cat):
                     filesize = os.stat(out_cat).st_size / 1024 / 1024

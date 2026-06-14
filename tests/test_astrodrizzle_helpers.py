@@ -7,14 +7,17 @@ import pytest
 from astropy.io import fits
 
 from hst123.utils.astrodrizzle_helpers import (
+    astrodrizzle_exc_is_missing_dq_extension,
     astrodrizzle_exc_is_restore_wcs_distortion_failure,
     canonical_drizzle_input_stem,
     canonicalize_wfpc2_astrodrizzle_input_path,
-    is_hst123_wfpc2_astrodrizzle_scratch,
     combine_type_and_nhigh,
     drizzle_canonical_weight_mask_paths,
     drizzle_reference_inputs_match,
     drizzle_sidecar_paths,
+    ensure_flc_dq_err_extensions_inplace,
+    flc_sci_extensions_missing_dq_err,
+    is_hst123_wfpc2_astrodrizzle_scratch,
     resolve_drizzle_clean_flag,
     rename_astrodrizzle_sidecars,
     suppress_drizzlepac_interactive_dgeo_prompt,
@@ -40,8 +43,38 @@ def test_astrodrizzle_exc_is_restore_wcs_distortion_failure():
         "NAXES was not set (or bad) for Lookup   distortion on axis 2"
     )
     assert astrodrizzle_exc_is_restore_wcs_distortion_failure(e)
+    assert astrodrizzle_exc_is_restore_wcs_distortion_failure(
+        KeyError("Keyword 'D2IM1.AXIS.1' not found.")
+    )
     assert not astrodrizzle_exc_is_restore_wcs_distortion_failure(ValueError("other"))
     assert not astrodrizzle_exc_is_restore_wcs_distortion_failure(MemoryError("out of memory"))
+
+
+def test_astrodrizzle_exc_is_missing_dq_extension():
+    assert astrodrizzle_exc_is_missing_dq_extension(ValueError("no extension number found"))
+    assert not astrodrizzle_exc_is_missing_dq_extension(ValueError("other"))
+
+
+def test_ensure_flc_dq_err_extensions_inplace(tmp_path):
+    sci = np.ones((4, 5), dtype=np.float32)
+    phdu = fits.PrimaryHDU()
+    phdu.header["NEXTEND"] = 2
+    hdul = fits.HDUList([phdu])
+    for ev in (1, 2):
+        h = fits.ImageHDU(data=sci.copy())
+        h.header["EXTNAME"] = "SCI"
+        h.header["EXTVER"] = ev
+        hdul.append(h)
+    path = tmp_path / "trunc_flc.fits"
+    hdul.writeto(path)
+    with fits.open(path) as ro:
+        assert flc_sci_extensions_missing_dq_err(ro)
+    assert ensure_flc_dq_err_extensions_inplace(path)
+    with fits.open(path) as out:
+        assert not flc_sci_extensions_missing_dq_err(out)
+        assert len(out) == 7  # PRIMARY + 2×(SCI,ERR,DQ)
+        names = [out[i].name for i in range(1, len(out))]
+        assert names == ["SCI", "ERR", "DQ", "SCI", "ERR", "DQ"]
 
 
 def test_canonical_drizzle_input_stem_wfpc2_scratch():

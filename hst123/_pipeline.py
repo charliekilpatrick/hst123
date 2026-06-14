@@ -87,8 +87,10 @@ from hst123.utils.alignment_validation import write_gaia_alignment_crderr_to_ref
 from hst123.utils.astrodrizzle_helpers import (
     is_hst123_wfpc2_astrodrizzle_scratch,
     astrodrizzle_chdir_bundle_for_drizzlepac,
+    astrodrizzle_exc_is_missing_dq_extension,
     astrodrizzle_exc_is_restore_wcs_distortion_failure,
     build_astrodrizzle_keyword_args,
+    ensure_flc_dq_err_extensions_inplace,
     build_wfpc2_skymask_catalog,
     combine_type_and_nhigh,
     suppress_drizzlepac_interactive_dgeo_prompt,
@@ -136,6 +138,9 @@ from hst123.utils.mast_client import (
 )
 from hst123.primitives import FitsHelper, PhotometryHelper
 from hst123.primitives.astrometry import AstrometryPrimitive, parse_coord
+from hst123.primitives.astrometry.astrometry_primitive import (
+    sanitize_flc_distortion_headers_inplace,
+)
 from hst123.primitives.astrometry.alignment_meta import alignment_done_on_primary_header
 from hst123.primitives.run_dolphot import DolphotPrimitive
 from hst123.primitives.scrape_dolphot import ScrapeDolphotPrimitive
@@ -2200,6 +2205,17 @@ class hst123(object):
                 imhdu.flush()
 
     for image in tmp_input:
+        if "wfpc2" not in self._fits.get_instrument(image).lower():
+            # MAST FLC/FLT products sometimes ship incomplete lookup-distortion
+            # metadata (CPDIS/D2IM without DP*.NAXES). DrizzlePac HSTWCS then
+            # fails before drizzle; strip tabular keys on scratch copies only.
+            sanitize_flc_distortion_headers_inplace(image)
+            if ensure_flc_dq_err_extensions_inplace(image, log):
+                log.info(
+                    "AstroDrizzle scratch: added ERR/DQ extensions to %s "
+                    "(MAST SCI-only FLC)",
+                    os.path.basename(image),
+                )
         ensure_wcsname_tweak_on_image(image, log)
 
     start_drizzle = time.time()
@@ -2267,6 +2283,8 @@ class hst123(object):
     ad_kwargs_run = dict(ad_kwargs)
     ad_kwargs_run["output"] = ad_out_base
     wcs_restore_fallback_used = False
+    wcs_sanitize_fallback_used = False
+    dq_ext_fallback_used = False
     wcs_updatewcs_fallback_used = False
     try:
         while tries < 3:
@@ -2316,12 +2334,30 @@ class hst123(object):
                     e is not None and astrodrizzle_exc_is_restore_wcs_distortion_failure(e)
                     for e in chain
                 )
+                dq_missing = any(
+                    e is not None and astrodrizzle_exc_is_missing_dq_extension(e)
+                    for e in chain
+                )
                 wk = ad_kwargs_run.get("wcskey")
                 wk_norm = (
                     ""
                     if wk is None
                     else str(wk).strip().upper().replace("INDEF", "").replace("NONE", "")
                 )
+                if dq_missing and not dq_ext_fallback_used:
+                    log.warning(
+                        "AstroDrizzle failed during sky subtraction (missing DQ): %s. "
+                        "Retrying after adding ERR/DQ extensions to scratch copies.",
+                        exc,
+                    )
+                    for image in tmp_input:
+                        if "wfpc2" in self._fits.get_instrument(image).lower():
+                            continue
+                        ensure_flc_dq_err_extensions_inplace(image, log)
+                    ad_kwargs_run = dict(ad_kwargs_run)
+                    ad_kwargs_run["output"] = ad_out_base
+                    dq_ext_fallback_used = True
+                    continue
                 if wcs_bad:
                     # (1) DrizzlePac restoreWCS / alternate key — skip restore if it fails.
                     if not wcs_restore_fallback_used and wk_norm:
@@ -2336,7 +2372,24 @@ class hst123(object):
                         ad_kwargs_run["wcskey"] = " "
                         wcs_restore_fallback_used = True
                         continue
-                    # (2) Primary SCI WCS still invalid for HSTWCS — optionally let
+                    # (2) Strip incomplete lookup-distortion keys on scratch inputs.
+                    if not wcs_sanitize_fallback_used:
+                        log.warning(
+                            "AstroDrizzle still failed loading WCS (e.g. HSTWCS on SCI): %s. "
+                            "Retrying after stripping incomplete CPDIS/D2IM lookup metadata "
+                            "from AstroDrizzle scratch copies.",
+                            exc,
+                        )
+                        for image in tmp_input:
+                            if "wfpc2" in self._fits.get_instrument(image).lower():
+                                continue
+                            sanitize_flc_distortion_headers_inplace(image)
+                        ad_kwargs_run = dict(ad_kwargs_run)
+                        ad_kwargs_run["output"] = ad_out_base
+                        ad_kwargs_run["wcskey"] = " "
+                        wcs_sanitize_fallback_used = True
+                        continue
+                    # (3) Primary SCI WCS still invalid for HSTWCS — optionally let
                     # stwcs.updatewcs repair headers (gated; default off).
                     if (
                         settings.pipeline_updatewcs_enabled()
