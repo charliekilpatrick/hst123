@@ -15,6 +15,7 @@ from hst123.primitives.base import BasePrimitive
 from hst123.utils.dolphot_sky import (
     calcsky_max_pixels_external,
     primary_array_pixel_count,
+    sanitize_dolphot_param_file,
     sky_fits_path,
     summarize_primary_for_calcsky,
     write_calcsky_sanitized_input,
@@ -821,6 +822,11 @@ class DolphotPrimitive(BasePrimitive):
                         rel_base = base_name
                         rel_param = param_path
 
+                sanitize_dolphot_param_file(
+                    param_path,
+                    work_dir=wd,
+                    logger=log,
+                )
                 dolphot_argv = ["dolphot", rel_base, f"-p{rel_param}"]
                 banner_cmd = "dolphot {base} -p{par} (log -> {log})".format(
                     base=rel_base,

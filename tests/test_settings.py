@@ -79,6 +79,15 @@ class TestTweakregDefaults:
         assert "wfc3_ir" in t["detector_overrides"]
         assert "wfpc2" in t["detector_overrides"]
 
+    def test_fitgeometry_default_is_rscale(self):
+        assert settings.tweakreg_defaults["fitgeometry"] == "rscale"
+        assert settings.tweakreg_defaults["fitgeometry"] in (
+            settings.tweakreg_fitgeometry_choices
+        )
+
+    def test_fitgeometry_choices(self):
+        assert settings.tweakreg_fitgeometry_choices == ("shift", "rscale", "general")
+
 
 class TestCatalogPars:
     def test_has_tweakreg_relevant_keys(self):

@@ -998,11 +998,111 @@ def apply_calcsky_source_patches(make_root: Path) -> bool:
     return True
 
 
+def apply_dolphot_nan_eval_patch(make_root: Path) -> bool:
+    """
+    Make DOLPHOT's ``eval`` figure-of-merit degrade gracefully on NaN.
+
+    Upstream ``dolphot.c`` ends the photometry figure-of-merit routine ``eval``
+    with an **unguarded** ``assert(!isnan(M));``. With certain HST data sets
+    (notably multi-instrument stacks where one image yields a negative effective
+    noise, so the per-pixel chi accumulates ``sqrt(negative) -> NaN``) the
+    combined ``M`` becomes NaN and DOLPHOT aborts with **SIGABRT**::
+
+        Uncaught m=nan
+        Assertion failed: (!isnan(M)), function eval, file dolphot.c, line 1712.
+
+    The sibling helper ``eval1`` already handles this case in non-debug builds by
+    zeroing its outputs and returning 0 (treated downstream as a non-detection).
+    This patch mirrors that behaviour in ``eval``: when ``M`` is NaN, zero the
+    aggregate outputs and return 0 instead of asserting, so the offending star is
+    skipped and the run continues.
+
+    The patch is **idempotent** (safe to run on every install).
+
+    Parameters
+    ----------
+    make_root : pathlib.Path
+        Directory containing ``dolphot.c`` (see :func:`dolphot_make_root`).
+
+    Returns
+    -------
+    bool
+        True if ``dolphot.c`` was modified, False if already patched or the
+        expected ``assert(!isnan(M));`` was not found.
+    """
+    make_root = Path(make_root).resolve()
+    path = make_root / "dolphot.c"
+    if not path.is_file():
+        log.debug("apply_dolphot_nan_eval_patch: no %s", path)
+        return False
+    text = path.read_text(encoding="utf-8", errors="replace")
+    marker = "hst123_dolphot_eval_nan_guard"
+    if marker in text:
+        log.debug("apply_dolphot_nan_eval_patch: already applied (%s)", path)
+        return False
+    # Unguarded assert in eval(); uppercase M distinguishes it from the guarded
+    # eval1() asserts (lowercase m, wrapped in #ifdef NAN_CRASH).
+    needle = "   assert(!isnan(M));\n"
+    if needle not in text:
+        log.warning(
+            "Could not apply hst123 dolphot.c NaN-eval patch (expected "
+            "`assert(!isnan(M));` in eval()). DOLPHOT may still SIGABRT on "
+            "data sets that produce a NaN figure of merit."
+        )
+        return False
+    replacement = (
+        "   /* " + marker + ": degrade gracefully instead of SIGABRT when the\n"
+        "      combined figure of merit M is NaN (e.g. a negative effective noise\n"
+        "      in one image -> sqrt(negative) chi). Mirrors eval1()'s non-NAN_CRASH\n"
+        "      handling so the offending star is skipped and the run continues. */\n"
+        "   if (isnan(M)) {\n"
+        "      *S=*SS=*C=*SH=*SSKY=0;\n"
+        "      if (S0) *S0=0;\n"
+        "      M=0;\n"
+        "   }\n"
+    )
+    new_text = text.replace(needle, replacement, 1)
+    path.write_text(new_text, encoding="utf-8")
+    log.info(
+        "Applied hst123 patch: %s eval() NaN figure-of-merit guard "
+        "(no SIGABRT on assert(!isnan(M)))",
+        path.name,
+    )
+    _progress(
+        "  Source patch: dolphot.c — eval() NaN guard (skip bad star instead of abort)."
+    )
+    return True
+
+
+def disable_nan_print_in_makefile_text(text: str) -> tuple[str, bool]:
+    """
+    Comment out ``export CFLAGS+= -DNAN_PRINT`` in DOLPHOT ``Makefile`` text.
+
+    Upstream enables ``-DNAN_PRINT``, which makes DOLPHOT print ``Uncaught
+    m=nan`` for **every** NaN figure-of-merit it encounters. On heterogeneous /
+    poorly-aligned stacks this can emit tens of thousands of lines, flooding the
+    pipeline log and slowing the run (each line is streamed through the
+    subprocess reader). The graceful NaN handling (``eval1`` plus
+    :func:`apply_dolphot_nan_eval_patch`) does not depend on this flag, so the
+    measurements are still skipped safely — just silently.
+
+    Returns ``(new_text, changed)``. Idempotent: a line already commented (or a
+    Makefile without the flag) yields ``changed=False``.
+    """
+    new_text, n = re.subn(
+        r"(?m)^export CFLAGS\+= -DNAN_PRINT[ \t]*$",
+        "#export CFLAGS+= -DNAN_PRINT",
+        text,
+    )
+    return new_text, bool(n)
+
+
 def configure_dolphot_makefile(
     make_root: Path,
     *,
     threaded: bool = True,
     enable_extended_modules: bool = True,
+    disable_nan_print: bool = True,
 ) -> None:
     """
     Uncomment DOLPHOT ``Makefile`` ``export`` lines for multithreaded OpenMP
@@ -1011,6 +1111,11 @@ def configure_dolphot_makefile(
     On macOS, uses ``-Xclang -fopenmp`` in ``THREAD_CFLAGS`` as recommended
     for Apple clang. Requires libomp (e.g. ``brew install libomp``) for
     ``-lomp``.
+
+    When ``disable_nan_print`` is True (default), the upstream
+    ``-DNAN_PRINT`` flag is commented out so production builds do not print a
+    per-measurement ``Uncaught m=nan`` diagnostic (see
+    :func:`disable_nan_print_in_makefile_text`).
     """
     make_root = Path(make_root).resolve()
     makefile = make_root / "Makefile"
@@ -1085,6 +1190,14 @@ def configure_dolphot_makefile(
             bare = "export THREAD_LIBS= -lomp"
             if bare in text and tl != bare:
                 text = text.replace(bare, tl)
+
+    if disable_nan_print:
+        text, nan_changed = disable_nan_print_in_makefile_text(text)
+        if nan_changed:
+            _progress(
+                "  Makefile: disabled -DNAN_PRINT (no per-measurement "
+                "'Uncaught m=nan' flood; NaNs still skipped safely)."
+            )
 
     makefile.write_text(text, encoding="utf-8")
     log.info("Configured DOLPHOT Makefile at %s", makefile)
@@ -2238,6 +2351,7 @@ def main():
     if not args.no_source_patches:
         try:
             apply_dolphot_source_patches(make_root)
+            apply_dolphot_nan_eval_patch(make_root)
             apply_calcsky_source_patches(make_root)
         except OSError as exc:
             log.warning("Could not apply DOLPHOT source patches: %s", exc)

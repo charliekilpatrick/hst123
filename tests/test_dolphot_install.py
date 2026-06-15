@@ -10,6 +10,7 @@ from hst123.dolphot_install import (
     ACS_WFC_PAM_FILENAMES,
     _calcsky_make_target,
     apply_calcsky_source_patches,
+    apply_dolphot_nan_eval_patch,
     apply_dolphot_source_patches,
     CONDA_DOLPHOT_RELATIVE,
     DOLPHOT_BASE_URL,
@@ -22,6 +23,7 @@ from hst123.dolphot_install import (
     SOURCES_MODULES,
     SOURCES_MODULES_HST,
     configure_dolphot_makefile,
+    disable_nan_print_in_makefile_text,
     dolphot_acs_data_dir,
     dolphot_make_root,
     dolphot_path_for_shell,
@@ -229,6 +231,88 @@ def test_apply_dolphot_source_patches_idempotent_when_already_4096(tmp_path):
         encoding="utf-8",
     )
     assert apply_dolphot_source_patches(tmp_path) is False
+
+
+def test_apply_dolphot_nan_eval_patch_guards_assert(tmp_path):
+    """Installer replaces the unguarded eval() assert(!isnan(M)) with a graceful guard."""
+    dc = tmp_path / "dolphot.c"
+    dc.write_text(
+        "float eval(int IMG,double x,double y,float*S,float*S0,float*SS,\n"
+        "           float*C,float*SH,float*SSKY) {\n"
+        "   float M=0;\n"
+        "   /* ... */\n"
+        "   assert(!isnan(M));\n"
+        "   return M;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    assert apply_dolphot_nan_eval_patch(tmp_path) is True
+    t = dc.read_text(encoding="utf-8")
+    assert "hst123_dolphot_eval_nan_guard" in t
+    assert "if (isnan(M)) {" in t
+    assert "*S=*SS=*C=*SH=*SSKY=0;" in t
+    assert "assert(!isnan(M));" not in t
+    # idempotent
+    assert apply_dolphot_nan_eval_patch(tmp_path) is False
+
+
+def test_apply_dolphot_nan_eval_patch_missing_pattern(tmp_path):
+    dc = tmp_path / "dolphot.c"
+    dc.write_text("float eval(void) { return 0; }\n", encoding="utf-8")
+    assert apply_dolphot_nan_eval_patch(tmp_path) is False
+
+
+def test_apply_dolphot_nan_eval_patch_leaves_eval1_guarded_asserts(tmp_path):
+    """Only the uppercase-M eval() assert is touched; eval1's lowercase m asserts stay."""
+    dc = tmp_path / "dolphot.c"
+    dc.write_text(
+        "float eval1(...) {\n"
+        "#ifdef NAN_CRASH\n"
+        "   assert(!isnan(m));\n"
+        "#endif\n"
+        "   return m;\n"
+        "}\n"
+        "float eval(...) {\n"
+        "   assert(!isnan(M));\n"
+        "   return M;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    assert apply_dolphot_nan_eval_patch(tmp_path) is True
+    t = dc.read_text(encoding="utf-8")
+    assert "assert(!isnan(m));" in t  # eval1 untouched
+    assert "assert(!isnan(M));" not in t  # eval guarded
+
+
+def test_disable_nan_print_comments_uncommented_flag():
+    text = "export CFLAGS+= -DMAXNIMG=100\nexport CFLAGS+= -DNAN_PRINT\n#export CFLAGS+= -DNAN_CRASH\n"
+    out, changed = disable_nan_print_in_makefile_text(text)
+    assert changed is True
+    assert "#export CFLAGS+= -DNAN_PRINT" in out
+    assert "\nexport CFLAGS+= -DNAN_PRINT" not in out
+    # NAN_CRASH line untouched
+    assert "#export CFLAGS+= -DNAN_CRASH" in out
+
+
+def test_disable_nan_print_idempotent_when_already_commented():
+    text = "#export CFLAGS+= -DNAN_PRINT\n"
+    out, changed = disable_nan_print_in_makefile_text(text)
+    assert changed is False
+    assert out == text
+
+
+def test_configure_dolphot_makefile_disables_nan_print(tmp_path):
+    mf = tmp_path / "Makefile"
+    mf.write_text(
+        "#export USEACS=1\n"
+        "#export THREADED=1\n"
+        "export CFLAGS+= -DNAN_PRINT\n",
+        encoding="utf-8",
+    )
+    configure_dolphot_makefile(tmp_path, threaded=False, enable_extended_modules=False)
+    t = mf.read_text(encoding="utf-8")
+    assert "#export CFLAGS+= -DNAN_PRINT" in t
+    assert "\nexport CFLAGS+= -DNAN_PRINT" not in t
 
 
 def test_calcsky_make_target_prefers_bin_prefix(tmp_path):

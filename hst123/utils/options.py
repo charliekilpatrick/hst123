@@ -145,6 +145,15 @@ def add_options(parser=None, usage=None, version=None):
         help='Floor for TweakReg search radius in arcseconds after grid pre-align '
         '(default: settings tweakreg_flc_grid_search_min_arcsec).',
     )
+    parser.add_argument(
+        '--tweakreg-fitgeometry',
+        default=None,
+        type=str,
+        choices=['shift', 'rscale', 'general'],
+        help='TweakReg fit geometry: shift (translation only), rscale '
+        '(shift+rotation+scale; default, best for multi-epoch/instrument '
+        'frame-to-frame alignment), or general (adds skew). Default from '
+        'settings.tweakreg_defaults["fitgeometry"].')
     parser.add_argument('--skip-tweakreg', default=False, action='store_true',
         help='Skip running alignment (tweakreg or jhat).')
     parser.add_argument('--align-with', default='tweakreg', type=str,

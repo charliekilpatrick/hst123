@@ -12,8 +12,12 @@ from hst123.utils.dolphot_sky import (
     _calcsky_list_capacity,
     _dolphot_stage2_box_mean,
     calcsky_max_pixels_external,
+    dolphot_sanitized_image_root,
     noise_fits_path,
     primary_array_pixel_count,
+    resolve_dolphot_image_fits,
+    sanitize_dolphot_param_file,
+    science_array_nonfinite_fraction,
     sky_fits_path,
     write_calcsky_sanitized_input,
     write_sky_fits_fallback,
@@ -299,3 +303,60 @@ def test_write_sky_fits_fallback_rejects_non_2d(tmp_path):
             sigma_low=2.25,
             sigma_high=2.0,
         )
+
+
+def test_resolve_dolphot_image_fits_prefers_fits_suffix(tmp_path):
+    root = tmp_path / "chip1"
+    fits.PrimaryHDU(np.zeros((8, 8), dtype=np.float32)).writeto(
+        str(root) + ".fits", overwrite=True
+    )
+    assert resolve_dolphot_image_fits("chip1", str(tmp_path)).endswith("chip1.fits")
+
+
+def test_science_array_nonfinite_fraction_counts_nan(tmp_path):
+    src = tmp_path / "in.fits"
+    d = np.ones((10, 10), dtype=np.float32)
+    d[0, 0] = np.nan
+    d[1, 1] = np.inf
+    fits.PrimaryHDU(d).writeto(str(src), overwrite=True)
+    n_bad, n_total, frac = science_array_nonfinite_fraction(str(src))
+    assert n_bad == 2
+    assert n_total == 100
+    assert frac == pytest.approx(0.02)
+
+
+def test_sanitize_dolphot_param_file_rewrites_nan_inputs(tmp_path):
+    wd = tmp_path / "work"
+    wd.mkdir()
+    ref = wd / "ref.drc.fits"
+    clean = wd / "chip1.fits"
+    d = np.ones((12, 10), dtype=np.float32) * 5.0
+    d[2:5, 2:5] = np.nan
+    fits.PrimaryHDU(d).writeto(str(ref), overwrite=True)
+    fits.PrimaryHDU(np.ones((8, 8), dtype=np.float32)).writeto(
+        str(clean), overwrite=True
+    )
+    param = wd / "dp.param"
+    param.write_text(
+        "Nimg = 2\n"
+        "img0000_file = ref.drc\n"
+        "img0001_file = chip1\n",
+        encoding="utf-8",
+    )
+    sanitized = sanitize_dolphot_param_file(str(param), work_dir=str(wd))
+    assert sanitized == [dolphot_sanitized_image_root("ref.drc")]
+    text = param.read_text(encoding="utf-8")
+    assert "img0000_file = ref.drc.hst123dpsan" in text
+    assert "img0001_file = chip1" in text
+    san_fits = wd / f"{dolphot_sanitized_image_root('ref.drc')}.fits"
+    assert san_fits.is_file()
+    with fits.open(san_fits) as hdul:
+        assert np.all(np.isfinite(hdul[0].data))
+
+
+def test_sanitize_dolphot_param_file_skips_already_sanitized(tmp_path):
+    wd = tmp_path / "work"
+    wd.mkdir()
+    param = wd / "dp.param"
+    param.write_text("img0000_file = ref.drc.hst123dpsan\n", encoding="utf-8")
+    assert sanitize_dolphot_param_file(str(param), work_dir=str(wd)) == []

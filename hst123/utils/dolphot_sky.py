@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 
 import numpy as np
@@ -649,6 +650,131 @@ def write_calcsky_sanitized_input(src_fits: str, dst_fits: str) -> None:
         hdr["EXTEND"] = False
         hdu_out = fits.PrimaryHDU(data=out, header=hdr)
         hdu_out.writeto(dst_fits, overwrite=True, output_verify="silentfix")
+
+
+_DOLPHOT_IMG_FILE_RE = re.compile(r"^img(\d{4})_file\s*=\s*(.+)$")
+_DOLPHOT_SAN_SUFFIX = ".hst123dpsan"
+
+
+def dolphot_sanitized_image_root(image_root: str) -> str:
+    """DOLPHOT param ``imgNNNN_file`` root for a NaN-safe sidecar copy."""
+    return f"{image_root}{_DOLPHOT_SAN_SUFFIX}"
+
+
+def resolve_dolphot_image_fits(image_root: str, work_dir: str | None = None) -> str:
+    """
+    Resolve a DOLPHOT ``imgNNNN_file`` stem to an on-disk FITS path.
+
+    DOLPHOT param files omit the ``.fits`` suffix; either ``<root>.fits`` or
+    ``<root>`` may exist.
+    """
+    candidates: list[str] = []
+    if work_dir and not os.path.isabs(image_root):
+        candidates.append(os.path.join(work_dir, image_root))
+        candidates.append(os.path.join(work_dir, f"{image_root}.fits"))
+    candidates.append(image_root)
+    candidates.append(f"{image_root}.fits")
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    raise FileNotFoundError(
+        f"No FITS file for DOLPHOT image root {image_root!r} (work_dir={work_dir!r})"
+    )
+
+
+def science_array_nonfinite_fraction(fits_path: str) -> tuple[int, int, float]:
+    """Return (n_nonfinite, n_pixels, fraction) for the science array."""
+    with fits.open(fits_path, memmap=True) as hdul:
+        idx = _science_hdu_index_for_calcsky(hdul)
+        data = hdul[idx].data
+        if data is None:
+            return 0, 0, 0.0
+        arr = np.asarray(data)
+        if arr.ndim != 2:
+            return 0, 0, 0.0
+        finite = np.isfinite(arr)
+        n_total = int(arr.size)
+        n_bad = int(n_total - int(np.count_nonzero(finite)))
+        frac = float(n_bad / n_total) if n_total else 0.0
+        return n_bad, n_total, frac
+
+
+def sanitize_dolphot_param_file(
+    param_path: str,
+    *,
+    work_dir: str | None = None,
+    logger: logging.Logger | None = None,
+) -> list[str]:
+    """
+    Replace DOLPHOT inputs that contain NaN/Inf with sanitized sidecar copies.
+
+    Drizzled reference images often have large NaN borders.  DOLPHOT's aperture
+    correction and magnitude evaluation are not NaN-safe and can abort with
+    ``Uncaught m=nan`` / ``!isnan(M)`` (``dolphot.c``).  For each
+    ``imgNNNN_file`` whose FITS has non-finite science pixels, write a
+    single-HDU float copy (same treatment as :func:`write_calcsky_sanitized_input`)
+    and rewrite the param line to point at the sidecar stem.
+    """
+    log_obj = logger or log
+    if not os.path.isfile(param_path):
+        raise FileNotFoundError(param_path)
+
+    with open(param_path, encoding="utf-8") as fh:
+        lines = fh.readlines()
+
+    out_lines: list[str] = []
+    sanitized_roots: list[str] = []
+    for line in lines:
+        stripped = line.rstrip("\n")
+        m = _DOLPHOT_IMG_FILE_RE.match(stripped.strip())
+        if not m:
+            out_lines.append(line)
+            continue
+
+        image_root = m.group(2).strip()
+        if image_root.endswith(_DOLPHOT_SAN_SUFFIX):
+            out_lines.append(line)
+            continue
+
+        try:
+            fits_path = resolve_dolphot_image_fits(image_root, work_dir)
+        except FileNotFoundError:
+            log_obj.warning(
+                "DOLPHOT param %s: cannot resolve image %s; leaving unchanged",
+                param_path,
+                image_root,
+            )
+            out_lines.append(line)
+            continue
+
+        n_bad, n_total, frac = science_array_nonfinite_fraction(fits_path)
+        if n_bad == 0:
+            out_lines.append(line)
+            continue
+
+        san_root = dolphot_sanitized_image_root(image_root)
+        if work_dir and not os.path.isabs(san_root):
+            san_fits = os.path.join(work_dir, f"{san_root}.fits")
+        else:
+            san_fits = f"{san_root}.fits"
+        write_calcsky_sanitized_input(fits_path, san_fits)
+        sanitized_roots.append(san_root)
+        log_obj.warning(
+            "DOLPHOT input %s: replaced %d / %d non-finite pixels (%.1f%%) "
+            "with median for %s",
+            os.path.basename(fits_path),
+            n_bad,
+            n_total,
+            100.0 * frac,
+            os.path.basename(san_fits),
+        )
+        out_lines.append(f"img{m.group(1)}_file = {san_root}\n")
+
+    if sanitized_roots:
+        with open(param_path, "w", encoding="utf-8") as fh:
+            fh.writelines(out_lines)
+
+    return sanitized_roots
 
 
 def write_sky_fits_fallback(

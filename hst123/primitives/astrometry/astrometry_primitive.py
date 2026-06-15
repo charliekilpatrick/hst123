@@ -1940,6 +1940,41 @@ class AstrometryPrimitive(BasePrimitive):
                     exc,
                 )
 
+    def _resolve_tweakreg_fitgeometry(self) -> str:
+        """
+        Return the TweakReg ``fitgeometry`` for this run.
+
+        Resolution order: ``--tweakreg-fitgeometry`` CLI override, then
+        ``settings.tweakreg_defaults["fitgeometry"]`` (``"rscale"``). Unknown
+        values fall back to the settings default with a warning.
+
+        ``"rscale"`` (shift + rotation + scale) is preferred over ``"shift"``
+        for frame-to-frame alignment because multi-epoch / multi-instrument
+        stacks differ in roll and guide-star solution; a translation-only fit
+        cannot remove that relative rotation and leaves large residuals.
+        """
+        valid = set(settings.tweakreg_fitgeometry_choices)
+        default = settings.tweakreg_defaults.get("fitgeometry", "rscale")
+        if default not in valid:
+            default = "rscale"
+        try:
+            override = getattr(self._p.options["args"], "tweakreg_fitgeometry", None)
+        except (AttributeError, KeyError, TypeError):
+            override = None
+        chosen = override or default
+        if chosen not in valid:
+            log.warning(
+                "Unknown tweakreg fitgeometry %r; using %r",
+                chosen,
+                default,
+            )
+            chosen = default
+        if override:
+            log.info("TweakReg fitgeometry: %s (from --tweakreg-fitgeometry)", chosen)
+        else:
+            log.debug("TweakReg fitgeometry: %s (settings default)", chosen)
+        return chosen
+
     @log_calls
     @_quiet_headerlet_loggers
     def run_tweakreg(
@@ -2247,6 +2282,7 @@ class AstrometryPrimitive(BasePrimitive):
                 rconv = trd["conv_width"]
                 iconv = trd["conv_width"]
                 tol = trd["tolerance"]
+                fitgeometry = self._resolve_tweakreg_fitgeometry()
                 for detkey, overrides in trd["detector_overrides"].items():
                     if detkey in p._fits.get_instrument(ref_use):
                         rconv = overrides["conv_width"]
@@ -2318,7 +2354,6 @@ class AstrometryPrimitive(BasePrimitive):
                                 separation=trd["separation"],
                                 residplot="No plot",
                                 see2dplot=False,
-                                fitgeometry="shift",
                                 imagefindcfg={
                                     "threshold": ithresh,
                                     "conv_width": iconv,
@@ -2329,6 +2364,7 @@ class AstrometryPrimitive(BasePrimitive):
                                     "conv_width": rconv,
                                     "use_sharp_round": True,
                                 },
+                                fitgeometry=fitgeometry,
                                 shiftfile=True,
                                 outshifts=out_this,
                             )

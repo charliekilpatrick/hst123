@@ -132,6 +132,16 @@ drizzle_defaults = {
 
 # TweakReg alignment
 
+# ``fitgeometry`` controls how many degrees of freedom TweakReg solves for when
+# matching each image to the reference catalog:
+#   "shift"   – translation only (2 dof). Cannot remove relative rotation/scale,
+#               so multi-epoch / multi-instrument stacks keep large residuals.
+#   "rscale"  – shift + rotation + a single scale (4 dof). DrizzlePac's
+#               recommended default for HST relative alignment; corrects the
+#               roll/guide-star differences between visits and epochs.
+#   "general" – shift + rotation + scale + skew (6 dof). Most flexible but needs
+#               more matched sources; can over-fit sparse frames.
+# Use "rscale" by default; override per run with ``--tweakreg-fitgeometry``.
 tweakreg_defaults = {
     "threshold_min": 3.0,
     "threshold_max": 1000.0,
@@ -139,11 +149,15 @@ tweakreg_defaults = {
     "minobj_fallback": 7,
     "conv_width": 3.5,
     "tolerance": 0.25,
+    "fitgeometry": "rscale",
     "detector_overrides": {
         "wfc3_ir": {"conv_width": 2.5, "tolerance": 0.6},
         "wfpc2": {"conv_width": 2.5, "tolerance": 0.5},
     },
 }
+
+# Valid drizzlepac TweakReg ``fitgeometry`` values (CLI + resolver validation).
+tweakreg_fitgeometry_choices = ("shift", "rscale", "general")
 
 # Catalog / source detection (tweakreg)
 

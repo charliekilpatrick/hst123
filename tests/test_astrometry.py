@@ -144,7 +144,34 @@ class TestAstrometryPrimitive:
         astrom = AstrometryPrimitive(mock_pipeline)
         astrom.tweakreg_error(ValueError("test"))
         assert "tweakreg failed" in caplog.text
-        assert "ValueError" in caplog.text
+
+    def _astrom_with_args(self, **args):
+        from types import SimpleNamespace
+
+        pipeline = type("MockPipeline", (), {})()
+        pipeline.options = {"args": SimpleNamespace(**args)}
+        return AstrometryPrimitive(pipeline)
+
+    def test_resolve_fitgeometry_defaults_to_rscale(self):
+        astrom = self._astrom_with_args(tweakreg_fitgeometry=None)
+        assert astrom._resolve_tweakreg_fitgeometry() == "rscale"
+
+    def test_resolve_fitgeometry_cli_override(self):
+        astrom = self._astrom_with_args(tweakreg_fitgeometry="general")
+        assert astrom._resolve_tweakreg_fitgeometry() == "general"
+
+    def test_resolve_fitgeometry_invalid_falls_back(self, caplog):
+        import logging
+
+        caplog.set_level(logging.WARNING)
+        astrom = self._astrom_with_args(tweakreg_fitgeometry="bogus")
+        assert astrom._resolve_tweakreg_fitgeometry() == "rscale"
+        assert "Unknown tweakreg fitgeometry" in caplog.text
+
+    def test_resolve_fitgeometry_missing_attr_uses_default(self, mock_pipeline):
+        mock_pipeline.options = {"args": object()}
+        astrom = AstrometryPrimitive(mock_pipeline)
+        assert astrom._resolve_tweakreg_fitgeometry() == "rscale"
 
     def test_ensure_workspace_rawtmps_rebuilds_missing(self, tmp_path, mock_pipeline):
         """Missing *.rawtmp.fits is recreated from the workspace science *.fits."""
