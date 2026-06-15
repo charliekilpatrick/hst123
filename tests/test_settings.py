@@ -36,6 +36,15 @@ class TestGlobalDefaults:
         assert "AlignOnly" in d
         assert "SigFind" in d
 
+    def test_dolphot_trusts_gaia_wcs_by_default(self):
+        # hst123 aligns every exposure to Gaia before DOLPHOT, so the default is
+        # to adopt that WCS as the full alignment solution (UseWCS=2) and skip
+        # star-based frame refinement (Align=0). This keeps astrometry correct
+        # on sparse/heterogeneous multi-epoch stacks processed in one run.
+        d = settings.global_defaults["dolphot"]
+        assert d["UseWCS"] == 2
+        assert d["Align"] == 0
+
 
 class TestDrizzleDefaults:
     def test_has_required_keys(self):

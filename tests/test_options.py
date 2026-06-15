@@ -58,6 +58,17 @@ class TestAddOptions:
         args = parser.parse_args(["0", "0", "--max-cores", "8"])
         assert args.max_cores == 8
 
+    def test_dolphot_alignment_overrides(self):
+        parser = options.add_options()
+        args = parser.parse_args(["0", "0"])
+        assert args.dolphot_use_wcs is None
+        assert args.dolphot_align is None
+        args = parser.parse_args(
+            ["0", "0", "--dolphot-use-wcs", "1", "--dolphot-align", "2"]
+        )
+        assert args.dolphot_use_wcs == 1
+        assert args.dolphot_align == 2
+
     def test_write_dolphot_hdf5_defaults(self):
         parser = options.add_options()
         args = parser.parse_args(["0", "0"])
@@ -133,6 +144,42 @@ def test_handle_args_redo_sets_both_redo_flags(monkeypatch):
     assert opt.redo is True
     assert opt.redo_astrometry is True
     assert opt.redo_astrodrizzle is True
+
+
+def test_handle_args_dolphot_alignment_defaults_trust_wcs(monkeypatch):
+    """Defaults adopt the Gaia WCS as the alignment solution (UseWCS=2/Align=0)."""
+    import hst123 as _hst
+
+    monkeypatch.setattr(sys, "argv", ["hst123", "0", "0"])
+    hst = _hst.hst123()
+    monkeypatch.setattr(hst._dolphot, "check_for_dolphot", lambda: True)
+    hst.handle_args(hst.add_options())
+    dp = hst.options["global_defaults"]["dolphot"]
+    assert dp["UseWCS"] == 2
+    assert dp["Align"] == 0
+
+
+def test_handle_args_dolphot_alignment_overrides(monkeypatch):
+    """--dolphot-use-wcs / --dolphot-align override the defaults."""
+    import hst123 as _hst
+    from hst123 import settings
+
+    # ``handle_args`` mutates the shared ``settings.global_defaults`` dict, so
+    # snapshot/restore the two keys we touch to avoid leaking into other tests.
+    saved = {k: settings.global_defaults["dolphot"][k] for k in ("UseWCS", "Align")}
+    try:
+        monkeypatch.setattr(
+            sys, "argv",
+            ["hst123", "0", "0", "--dolphot-use-wcs", "1", "--dolphot-align", "2"],
+        )
+        hst = _hst.hst123()
+        monkeypatch.setattr(hst._dolphot, "check_for_dolphot", lambda: True)
+        hst.handle_args(hst.add_options())
+        dp = hst.options["global_defaults"]["dolphot"]
+        assert dp["UseWCS"] == 1
+        assert dp["Align"] == 2
+    finally:
+        settings.global_defaults["dolphot"].update(saved)
 
 
 def test_handle_args_max_cores_sets_drizzle_num_cores(monkeypatch):

@@ -244,6 +244,16 @@ def add_options(parser=None, usage=None, version=None):
         help='Detection threshold for sources detected by dolphot.')
     parser.add_argument('--fit-sky', default=None, type=int,
         help='Change the dolphot FitSky parameter to something other than 2.')
+    parser.add_argument('--dolphot-use-wcs', default=None, type=int,
+        choices=[0, 1, 2],
+        help='Override the dolphot UseWCS parameter (default 2: trust the '
+             'Gaia/TweakReg WCS as the full alignment solution). Use 1 to fall '
+             'back to WCS-seeded star-matching refinement, 0 to ignore the WCS.')
+    parser.add_argument('--dolphot-align', default=None, type=int,
+        choices=[0, 1, 2, 3, 4],
+        help='Override the dolphot Align parameter (default 0: no star-based '
+             'frame refinement, since UseWCS=2 supplies the transform). Use 2 '
+             'to re-enable shift+scale+rotation star-matching alignment.')
     parser.add_argument('--do-fake','--df', default=False,
         action='store_true', help='Run fake star injection into dolphot. '+\
         'Requires that dolphot has been run, and so files are taken from the '+\

@@ -3737,6 +3737,11 @@ class hst123(object):
         else:
             log.warning('--fit-sky %s not allowed.', opt.fit_sky)
 
+    if opt.dolphot_use_wcs is not None:
+        self.options['global_defaults']['dolphot']['UseWCS']=opt.dolphot_use_wcs
+    if opt.dolphot_align is not None:
+        self.options['global_defaults']['dolphot']['Align']=opt.dolphot_align
+
     if opt.tweak_search:
         self.options['global_defaults']['search_rad']=opt.tweak_search
     if opt.tweak_min_obj:

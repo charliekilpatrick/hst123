@@ -85,7 +85,16 @@ global_defaults = {
         "dPosMax": 2.5,
         "SigPSF": 5.0,
         "PSFres": 1,
-        "Align": 2,
+        # Frame alignment: hst123 already ties every exposure's WCS to Gaia via
+        # TweakReg before DOLPHOT runs, so we trust that WCS as the full
+        # alignment solution (``UseWCS=2``) instead of re-deriving the
+        # frame-to-reference transform from matched stars (``Align``). The
+        # star-matching path (``UseWCS=1``/``Align=2``) diverges on sparse or
+        # heterogeneous stacks (few common stars per frame), scrambling source
+        # positions and dropping real detections; trusting the Gaia WCS yields
+        # sub-pixel residuals and correct astrometry across all epochs at once.
+        # Override per run with ``--dolphot-use-wcs`` / ``--dolphot-align``.
+        "Align": 0,
         "Rotate": 1,
         "ACSuseCTE": 0,
         "WFC3useCTE": 0,
@@ -93,7 +102,7 @@ global_defaults = {
         "FlagMask": 7,
         "SigFind": 2.5,
         "SigFinal": 3.5,
-        "UseWCS": 1,
+        "UseWCS": 2,
         "AlignOnly": 0,
         "AlignIter": 5,
         "AlignTol": 0.5,
