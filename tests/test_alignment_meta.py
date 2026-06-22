@@ -5,6 +5,7 @@ from astropy.io import fits
 from types import SimpleNamespace
 
 from hst123.primitives.astrometry.alignment_meta import (
+    _MAX_REF_LEN,
     alignment_is_redundant,
     normalize_alignment_ref_id,
     read_alignment_provenance,
@@ -36,6 +37,24 @@ def test_write_read_roundtrip_primary_header():
     assert prov["ok"] is True
     assert prov["method"] == "tweakreg"
     assert prov["ref"] == normalize_alignment_ref_id("/tmp/ref.fits")
+    hdr.tostring()
+
+
+def test_long_reference_path_hashes_to_fits_safe_alignrf():
+    """Paths that fit _MAX_REF_LEN but exceed HIERARCH value space must hash."""
+    ref = "/data/ckilpatrick/test/drizzle/wfc3.f814w.ut210223_0001.drc.fits"
+    assert len(ref) > _MAX_REF_LEN
+    rid = normalize_alignment_ref_id(ref)
+    assert rid.startswith("sha256:")
+    assert len(rid) <= 48
+    hdr = fits.Header()
+    write_alignment_provenance(hdr, method="tweakreg", ref_id=ref, success=True)
+    assert hdr.tostring()
+    prov = read_alignment_provenance(hdr)
+    assert prov["ref"] == rid
+    assert alignment_is_redundant(
+        hdr, method="tweakreg", ref_id=ref, require_success=True
+    )
 
 
 def test_alignment_is_redundant_requires_all_three():

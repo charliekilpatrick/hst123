@@ -10,8 +10,9 @@ H_ALIGNOK = "HIERARCH HST123 ALIGNOK"
 H_ALIGNMT = "HIERARCH HST123 ALIGNMT"
 H_ALIGNRF = "HIERARCH HST123 ALIGNRF"
 
-# Maximum single-string value without relying on CONTINUE cards
-_MAX_REF_LEN = 64
+# HIERARCH HST123 ALIGNRF: Astropy must fit keyword + quoted value in one 80-char
+# card (~53 chars max for the value string; use 48 for margin across versions).
+_MAX_REF_LEN = 48
 
 
 def normalize_alignment_ref_id(ref: str | None) -> str:
