@@ -89,6 +89,7 @@ from hst123.utils.astrodrizzle_helpers import (
     astrodrizzle_chdir_bundle_for_drizzlepac,
     astrodrizzle_exc_is_missing_dq_extension,
     astrodrizzle_exc_is_restore_wcs_distortion_failure,
+    astrodrizzle_wcskey_for_run,
     build_astrodrizzle_keyword_args,
     ensure_flc_dq_err_extensions_inplace,
     build_wfpc2_skymask_catalog,
@@ -2038,7 +2039,12 @@ class hst123(object):
         n, self.options["args"].combine_type or None
     )
 
-    wcskey = "TWEAK"
+    # With --skip-tweakreg there is no real TWEAK alternate WCS; forcing
+    # wcskey=TWEAK makes DrizzlePac restoreWCS fail on incomplete LOOKUP
+    # distortion metadata (see GitHub issue #20).
+    wcskey = astrodrizzle_wcskey_for_run(
+        skip_tweakreg=bool(self.options["args"].skip_tweakreg)
+    )
 
     det = "_".join(self._fits.get_instrument(obstable[0]["image"]).split("_")[:2])
     options = self.options['detector_defaults'][det]
@@ -2216,7 +2222,9 @@ class hst123(object):
                     "(MAST SCI-only FLC)",
                     os.path.basename(image),
                 )
-        ensure_wcsname_tweak_on_image(image, log)
+        # Only stamp WCSNAME=TWEAK when we will ask AstroDrizzle for that key.
+        if str(wcskey).strip().upper() == "TWEAK":
+            ensure_wcsname_tweak_on_image(image, log)
 
     start_drizzle = time.time()
 

@@ -378,6 +378,19 @@ def ensure_flc_dq_err_extensions_inplace(
     return True
 
 
+def astrodrizzle_wcskey_for_run(*, skip_tweakreg: bool) -> str:
+    """
+    AstroDrizzle ``wcskey`` for this pipeline invocation.
+
+    When TweakReg was skipped there is no real alternate ``TWEAK`` solution.
+    Passing ``wcskey="TWEAK"`` still makes DrizzlePac call ``restoreWCS``, which
+    fails hard on FLCs with incomplete LOOKUP distortion metadata
+    (``MemoryError: NAXES was not set (or bad) for LOOKUP distortion…``).
+    Use the primary WCS (``" "``) in that case; otherwise prefer ``TWEAK``.
+    """
+    return " " if skip_tweakreg else "TWEAK"
+
+
 def astrodrizzle_exc_is_restore_wcs_distortion_failure(exc: BaseException) -> bool:
     """
     True when stwcs/astropy failed building a WCS (incomplete SIP / lookup
@@ -385,7 +398,9 @@ def astrodrizzle_exc_is_restore_wcs_distortion_failure(exc: BaseException) -> bo
     opening inputs via ``HSTWCS`` / ``get_hstwcs``.
 
     WCSLIB sometimes surfaces this as :class:`MemoryError` with a descriptive
-    message rather than a distinct exception type.
+    message rather than a distinct exception type. Failed ``restoreWCS`` can
+    also raise :class:`KeyError` for missing ``D2IMARR`` / ``CD*`` cards after
+    a partial alternate-WCS restore.
     """
     msg = str(exc).lower()
     if "lookup" in msg and "naxes" in msg and "distortion" in msg:
@@ -395,6 +410,14 @@ def astrodrizzle_exc_is_restore_wcs_distortion_failure(exc: BaseException) -> bo
     if "d2im" in msg and "axis" in msg and "not found" in msg:
         return True
     if "cpdis" in msg and "not found" in msg:
+        return True
+    if "d2imarr" in msg and "not found" in msg:
+        return True
+    if "wcsdvar" in msg and "not found" in msg:
+        return True
+    # Partial restoreWCS after a failed WCS read leaves an empty header; the
+    # next line in stwcs then raises KeyError for CD1_2 / CD2_2.
+    if isinstance(exc, KeyError) and ("cd1_2" in msg or "cd2_2" in msg):
         return True
     return False
 

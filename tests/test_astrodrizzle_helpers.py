@@ -9,6 +9,7 @@ from astropy.io import fits
 from hst123.utils.astrodrizzle_helpers import (
     astrodrizzle_exc_is_missing_dq_extension,
     astrodrizzle_exc_is_restore_wcs_distortion_failure,
+    astrodrizzle_wcskey_for_run,
     canonical_drizzle_input_stem,
     canonicalize_wfpc2_astrodrizzle_input_path,
     combine_type_and_nhigh,
@@ -38,6 +39,11 @@ def test_suppress_drizzlepac_interactive_dgeo_prompt_restores_userstop():
     assert pi.userStop is orig
 
 
+def test_astrodrizzle_wcskey_for_run():
+    assert astrodrizzle_wcskey_for_run(skip_tweakreg=True) == " "
+    assert astrodrizzle_wcskey_for_run(skip_tweakreg=False) == "TWEAK"
+
+
 def test_astrodrizzle_exc_is_restore_wcs_distortion_failure():
     e = MemoryError(
         "NAXES was not set (or bad) for Lookup   distortion on axis 2"
@@ -45,6 +51,12 @@ def test_astrodrizzle_exc_is_restore_wcs_distortion_failure():
     assert astrodrizzle_exc_is_restore_wcs_distortion_failure(e)
     assert astrodrizzle_exc_is_restore_wcs_distortion_failure(
         KeyError("Keyword 'D2IM1.AXIS.1' not found.")
+    )
+    assert astrodrizzle_exc_is_restore_wcs_distortion_failure(
+        KeyError("Extension ('D2IMARR', 1.0) not found.")
+    )
+    assert astrodrizzle_exc_is_restore_wcs_distortion_failure(
+        KeyError("Keyword 'CD1_2' not found.")
     )
     assert not astrodrizzle_exc_is_restore_wcs_distortion_failure(ValueError("other"))
     assert not astrodrizzle_exc_is_restore_wcs_distortion_failure(MemoryError("out of memory"))
