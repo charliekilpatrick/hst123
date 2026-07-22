@@ -71,6 +71,11 @@ def icrs_field_center_from_fits(fits_path: str | os.PathLike[str]) -> SkyCoord:
     raise RuntimeError(msg)
 
 
+# Prefetch file schema version. Bump when columns required by gaia_simple change
+# (PM/parallax epoch correction and RUWE / excess-noise quality cuts).
+GAIA_PREFETCH_CACHE_VERSION = "v2"
+
+
 def gaia_prefetch_cache_path(
     outdir: str | os.PathLike[str],
     center: SkyCoord,
@@ -85,7 +90,11 @@ def gaia_prefetch_cache_path(
     ra = round(float(center.icrs.ra.deg), 4)
     dec = round(float(center.icrs.dec.deg), 4)
     rd = round(float(radius.to(u.deg).value), 5)
-    return os.path.join(od, f"hst123_gaia_dr3_prefetch_ra{ra}_dec{dec}_r{rd}deg.txt")
+    return os.path.join(
+        od,
+        f"hst123_gaia_dr3_prefetch_{GAIA_PREFETCH_CACHE_VERSION}"
+        f"_ra{ra}_dec{dec}_r{rd}deg.txt",
+    )
 
 
 def _write_jhat_refcat(path: str, *, tab: Table) -> None:
@@ -98,6 +107,9 @@ def _write_jhat_refcat(path: str, *, tab: Table) -> None:
     Optional:
     - ID (source_id)
     - pmra, pmdec (mas/yr)
+    - parallax (mas)
+    - ruwe
+    - astrometric_excess_noise (mas)
     """
     out = Table()
     cols = {c.lower(): c for c in tab.colnames}
@@ -137,6 +149,18 @@ def _write_jhat_refcat(path: str, *, tab: Table) -> None:
         out["pmra"] = np.asarray(tab[pmra_c], dtype=float)
         out["pmdec"] = np.asarray(tab[pmdec_c], dtype=float)
 
+    plx_c = _col("parallax", "plx", "parallax_mas")
+    if plx_c is not None:
+        out["parallax"] = np.asarray(tab[plx_c], dtype=float)
+
+    ruwe_c = _col("ruwe")
+    if ruwe_c is not None:
+        out["ruwe"] = np.asarray(tab[ruwe_c], dtype=float)
+
+    aen_c = _col("astrometric_excess_noise", "aen", "excess_noise")
+    if aen_c is not None:
+        out["astrometric_excess_noise"] = np.asarray(tab[aen_c], dtype=float)
+
     out.write(path, format="ascii.basic", overwrite=True)
 
 
@@ -170,12 +194,15 @@ def prefetch_gaia_catalog(
         dec = float(center.icrs.dec.deg)
         rad_deg = float(radius.to(u.deg).value)
 
-        # Minimal columns for our wrapper; include PM if available.
+        # Columns for JHAT + gaia_simple epoch correction / quality cuts.
         query = f"""
         SELECT
           source_id,
           ra, dec,
           pmra, pmdec,
+          parallax,
+          ruwe,
+          astrometric_excess_noise,
           phot_g_mean_mag,
           phot_g_mean_mag_error
         FROM gaiadr3.gaia_source
@@ -214,6 +241,9 @@ def prefetch_gaia_catalog(
             "Source",
             "pmRA",
             "pmDE",
+            "Plx",
+            "RUWE",
+            "epsi",
             "Gmag",
             "e_Gmag",
         ]
@@ -232,6 +262,13 @@ def prefetch_gaia_catalog(
     if "pmRA" in tab.colnames and "pmDE" in tab.colnames:
         norm["pmra"] = np.asarray(tab["pmRA"], dtype=float)
         norm["pmdec"] = np.asarray(tab["pmDE"], dtype=float)
+    if "Plx" in tab.colnames:
+        norm["parallax"] = np.asarray(tab["Plx"], dtype=float)
+    if "RUWE" in tab.colnames:
+        norm["ruwe"] = np.asarray(tab["RUWE"], dtype=float)
+    # Vizier "epsi" is Gaia astrometric excess noise (mas).
+    if "epsi" in tab.colnames:
+        norm["astrometric_excess_noise"] = np.asarray(tab["epsi"], dtype=float)
     norm["phot_g_mean_mag"] = np.asarray(tab["Gmag"], dtype=float)
     if "e_Gmag" in tab.colnames:
         norm["phot_g_mean_mag_error"] = np.asarray(tab["e_Gmag"], dtype=float)
