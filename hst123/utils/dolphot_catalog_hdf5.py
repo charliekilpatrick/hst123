@@ -8,6 +8,7 @@ one descriptive line per column in ``dpXXXX.columns``, and sidecar metadata file
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -115,6 +116,22 @@ def unique_hdf5_column_names(columns: list[DolphotColumn]) -> list[str]:
     return names
 
 
+def _dolphot_columns_image_token(image: str) -> str:
+    """
+    Stem used to match an image against DOLPHOT ``*.columns`` descriptions.
+
+    Descriptions contain basenames such as ``ieec73ioq_flc.chip2``, never a
+    directory path. Callers often pass absolute chip paths from obstable, so
+    strip directories and a trailing ``.fits`` before matching.
+    """
+    if not image:
+        return ""
+    base = os.path.basename(str(image).strip())
+    if base.lower().endswith(".fits"):
+        base = base[: -len(".fits")]
+    return base
+
+
 def find_column_index_0based(
     columns: list[DolphotColumn],
     key: str,
@@ -124,12 +141,13 @@ def find_column_index_0based(
     Match DOLPHOT ``*.columns`` semantics used by
     :meth:`hst123.primitives.scrape_dolphot.ScrapeDolphotPrimitive.get_dolphot_column`.
 
-    *key* must appear in the column description. If *image* is non-empty, it must
-    appear in the description (after stripping a ``.fits`` suffix). If *image* is
-    empty, any column whose description contains *key* may match—the first such
-    column is returned (same as substring ``"" in line`` being true for every line).
+    *key* must appear in the column description. If *image* is non-empty, its
+    basename (after stripping a ``.fits`` suffix) must appear in the
+    description. If *image* is empty, any column whose description contains
+    *key* may match—the first such column is returned (same as substring
+    ``"" in line`` being true for every line).
     """
-    img = image.replace(".fits", "")
+    img = _dolphot_columns_image_token(image)
     for col in columns:
         if key not in col.description:
             continue

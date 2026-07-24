@@ -47,6 +47,28 @@ def test_find_column_index_matches_scrape_semantics(tmp_path):
     assert find_column_index_0based(cols, "Object Y", "") == 3
 
 
+def test_find_column_index_matches_absolute_chip_paths(tmp_path):
+    """Obstable image paths are absolute; column descriptions use basenames only."""
+    col = tmp_path / "x.columns"
+    col.write_text(
+        "1. Extension (zero for base image)\n"
+        "26. Measured counts, ieec73ioq_flc.chip2 (WFC3_F814W, 390.0 sec)\n"
+        "32. Magnitude uncertainty, ieec73ioq_flc.chip2 (WFC3_F814W, 390.0 sec)\n"
+        "39. Measured counts, ieec73irq_flc.chip2 (WFC3_F814W, 390.0 sec)\n"
+        "45. Magnitude uncertainty, ieec73irq_flc.chip2 (WFC3_F814W, 390.0 sec)\n",
+        encoding="utf-8",
+    )
+    cols = parse_dolphot_columns_file(col)
+    abs_ioq = "/Users/me/work/ieec73ioq_flc.chip2.fits"
+    abs_irq = "/data/ieec73irq_flc.chip2.fits"
+    assert find_column_index_0based(cols, "Measured counts", abs_ioq) == 25
+    assert find_column_index_0based(cols, "Magnitude uncertainty", abs_ioq) == 31
+    assert find_column_index_0based(cols, "Measured counts", abs_irq) == 38
+    assert find_column_index_0based(cols, "Magnitude uncertainty", abs_irq) == 44
+    # Basename-only still works
+    assert find_column_index_0based(cols, "Measured counts", "ieec73ioq_flc.chip2.fits") == 25
+
+
 def test_write_dolphot_catalog_hdf5_roundtrip(tmp_path):
     h5py = pytest.importorskip("h5py")
     base = tmp_path / "dp0000"

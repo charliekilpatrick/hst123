@@ -57,6 +57,20 @@ class TestGetDolphotColumn:
             str(colfile), "VEGAMAG", "j12345678_flc.fits"
         ) is None
 
+    def test_returns_column_index_for_absolute_image_path(self, primitive, tmp_path):
+        colfile = tmp_path / "columns"
+        colfile.write_text(
+            "26. Measured counts, ieec73ioq_flc.chip2 (WFC3_F814W, 390.0 sec)\n"
+            "32. Magnitude uncertainty, ieec73ioq_flc.chip2 (WFC3_F814W, 390.0 sec)\n"
+        )
+        abs_path = "/Users/me/Downloads/2020mjm/ieec73ioq_flc.chip2.fits"
+        assert primitive.get_dolphot_column(
+            str(colfile), "Measured counts", abs_path
+        ) == 25
+        assert primitive.get_dolphot_column(
+            str(colfile), "Magnitude uncertainty", abs_path
+        ) == 31
+
     def test_offset_added_to_column_index(self, primitive, tmp_path):
         colfile = tmp_path / "columns"
         colfile.write_text("5. SomeKey (any.fits)\n")

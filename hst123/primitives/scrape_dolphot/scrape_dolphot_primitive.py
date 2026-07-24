@@ -18,6 +18,7 @@ from astropy.coordinates import SkyCoord
 from hst123.primitives.base import BasePrimitive
 from hst123.utils.display import show_photometry as display_show_photometry
 from hst123.utils.dolphot_catalog_hdf5 import (
+    _dolphot_columns_image_token,
     find_column_index_0based,
     load_dolphot_catalog_array,
     parse_column_index_and_description,
@@ -152,9 +153,10 @@ class ScrapeDolphotPrimitive(BasePrimitive):
                 return idx + offset
             return None
         coldata = ""
+        img_tok = _dolphot_columns_image_token(image)
         with open(colfile) as colfile_data:
             for line in colfile_data:
-                if image.replace(".fits", "") in line and key in line:
+                if img_tok in line and key in line:
                     coldata = line.strip().strip("\n")
                     break
         if not coldata:
